@@ -24,8 +24,8 @@
 - [PRD](./docs/world-cup-prediction/PRD.md)
 - [Architecture](./docs/world-cup-prediction/ARCHITECTURE.md)
 - [Design](./docs/world-cup-prediction/DESIGN.md)
+- [Technical Execution Plan](./docs/world-cup-prediction/TECHNICAL_EXECUTION_PLAN.md)
 
 ## Status
 
 当前阶段：产品和设计方案 v0.1。
-

@@ -24,6 +24,7 @@
 | [PRD.md](./PRD.md) | 产品需求文档，包含用户场景、功能范围、页面设计、数据需求、AI 能力和 MVP 规划 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构设计，包含数据流、服务模块、模型服务、小程序访问架构和部署建议 |
 | [DESIGN.md](./DESIGN.md) | 选定的 AI 赛前报告型设计方向，包含视觉系统、页面结构、组件和交互规范 |
+| [TECHNICAL_EXECUTION_PLAN.md](./TECHNICAL_EXECUTION_PLAN.md) | 可正式执行的技术方案，包含服务器、域名、部署、模块拆解、接口、任务、模型、AI 和上线里程碑 |
 
 ## MVP 范围
 
