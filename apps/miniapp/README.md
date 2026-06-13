@@ -35,7 +35,7 @@ http://127.0.0.1:4173
 微信开发者工具导入路径：
 
 ```text
-apps/miniapp/dist
+apps/miniapp/dist-weapp
 ```
 
 ## QA

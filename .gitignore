@@ -8,6 +8,7 @@ dist/
 # Miniapp local artifacts
 apps/miniapp/node_modules/
 apps/miniapp/dist/
+apps/miniapp/dist-weapp/
 apps/miniapp/.swc/
 apps/miniapp/screenshots/
 

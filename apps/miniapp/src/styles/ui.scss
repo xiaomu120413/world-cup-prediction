@@ -3,8 +3,12 @@
   max-width: 100%;
   min-height: 100vh;
   padding: 32rpx 28rpx 136rpx;
-  background: #f7f8fa;
+  background: #f3f5f0;
   overflow-x: hidden;
+}
+
+.page--matchday {
+  padding-top: 20rpx;
 }
 
 .page-head {
@@ -33,9 +37,10 @@
   max-width: 100%;
   margin-bottom: 24rpx;
   padding: 26rpx;
-  border: 1rpx solid #e5e7eb;
-  border-radius: 24rpx;
+  border: 1rpx solid #dfe5db;
+  border-radius: 16rpx;
   background: #ffffff;
+  box-shadow: 0 8rpx 28rpx rgba(29, 43, 36, 0.06);
 }
 
 .section {
@@ -48,27 +53,29 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14rpx;
+  margin-bottom: 16rpx;
 }
 
 .section__title {
-  color: #111827;
-  font-size: 30rpx;
+  color: #18231f;
+  font-size: 28rpx;
   font-weight: 700;
 }
 
 .section__action {
-  color: #2563eb;
-  font-size: 24rpx;
+  color: #176b52;
+  font-size: 23rpx;
+  font-weight: 700;
 }
 
 .section__body {
   box-sizing: border-box;
   max-width: 100%;
   overflow: hidden;
-  border: 1rpx solid #e5e7eb;
-  border-radius: 24rpx;
-  background: #ffffff;
+  border: 1rpx solid #dfe5db;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8rpx 26rpx rgba(29, 43, 36, 0.05);
 }
 
 .chip {
@@ -101,14 +108,220 @@
   font-size: 24rpx;
 }
 
+.matchday-hero {
+  box-sizing: border-box;
+  margin-bottom: 24rpx;
+  padding: 28rpx;
+  overflow: hidden;
+  border: 1rpx solid #20352d;
+  border-radius: 18rpx;
+  background: #17221d;
+  box-shadow: 0 20rpx 48rpx rgba(23, 34, 29, 0.22);
+}
+
+.matchday-hero__top,
+.matchday-hero__fixture,
+.prediction-strip,
+.quick-grid {
+  display: flex;
+  align-items: center;
+}
+
+.matchday-hero__top {
+  justify-content: space-between;
+  margin-bottom: 30rpx;
+}
+
+.matchday-hero__eyebrow {
+  display: block;
+  color: #8ad8a7;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+.matchday-hero__title {
+  display: block;
+  margin-top: 5rpx;
+  color: #ffffff;
+  font-size: 46rpx;
+  font-weight: 800;
+  line-height: 1.08;
+}
+
+.matchday-hero__status {
+  padding: 8rpx 14rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.16);
+  border-radius: 999rpx;
+  color: #d7f5df;
+  font-size: 21rpx;
+  font-weight: 700;
+}
+
+.matchday-hero__fixture {
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.team-badge {
+  width: 136rpx;
+}
+
+.team-badge--away {
+  text-align: right;
+}
+
+.team-badge__abbr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 92rpx;
+  height: 92rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.18);
+  border-radius: 16rpx;
+  background: #f4f7ef;
+  color: #18231f;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.team-badge--away .team-badge__abbr {
+  margin-left: auto;
+}
+
+.team-badge__name {
+  display: block;
+  margin-top: 12rpx;
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.matchday-hero__center {
+  flex: 1;
+  text-align: center;
+}
+
+.matchday-hero__time,
+.matchday-hero__venue {
+  display: block;
+  color: #aebdb4;
+  font-size: 22rpx;
+  font-weight: 650;
+}
+
+.matchday-hero__versus {
+  display: block;
+  margin: 8rpx 0;
+  color: #8ad8a7;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.prediction-strip {
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 28rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.prediction-strip__label,
+.prediction-strip__confidence {
+  color: #aebdb4;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.prediction-strip__value {
+  flex: 1;
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 900;
+  text-align: center;
+}
+
+.matchday-hero .probability-summary__item {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.matchday-hero .probability-summary__item--primary {
+  border-color: #8ad8a7;
+  background: #dff8e9;
+}
+
+.matchday-hero .probability-summary__value {
+  color: #ffffff;
+}
+
+.matchday-hero .probability-summary__item--primary .probability-summary__value,
+.matchday-hero .probability-summary__item--primary .probability-summary__label {
+  color: #17221d;
+}
+
+.matchday-hero .probability-summary__label {
+  color: #d6ded8;
+}
+
+.hero-insight {
+  margin-top: 22rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.12);
+}
+
+.hero-insight__label {
+  display: block;
+  color: #8ad8a7;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.hero-insight__text {
+  display: block;
+  margin-top: 8rpx;
+  color: #eef4ed;
+  font-size: 26rpx;
+  line-height: 1.52;
+}
+
+.quick-grid {
+  gap: 14rpx;
+  margin-bottom: 28rpx;
+}
+
+.quick-card {
+  flex: 1;
+  padding: 20rpx 18rpx;
+  border: 1rpx solid #dfe5db;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-shadow: 0 8rpx 24rpx rgba(29, 43, 36, 0.05);
+}
+
+.quick-card__value {
+  display: block;
+  color: #18231f;
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.quick-card__label {
+  display: block;
+  margin-top: 6rpx;
+  color: #647067;
+  font-size: 22rpx;
+  font-weight: 650;
+}
+
 .primary-link {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 76rpx;
   margin-top: 22rpx;
-  border-radius: 18rpx;
-  background: #2563eb;
+  border-radius: 14rpx;
+  background: #1a7f64;
   color: #ffffff;
   font-size: 27rpx;
   font-weight: 700;
@@ -126,14 +339,16 @@
 .probability-summary__item {
   box-sizing: border-box;
   min-width: 0;
-  padding: 18rpx 12rpx;
-  border-radius: 18rpx;
-  background: #f8fafc;
+  padding: 18rpx 10rpx;
+  border: 1rpx solid rgba(29, 43, 36, 0.08);
+  border-radius: 14rpx;
+  background: #f8faf4;
   text-align: center;
 }
 
 .probability-summary__item--primary {
-  background: #eff6ff;
+  border-color: #9ce0bc;
+  background: #e7f8ef;
 }
 
 .probability-summary__value {
@@ -146,7 +361,7 @@
 .probability-summary__label {
   display: block;
   margin-top: 5rpx;
-  color: #64748b;
+  color: #647067;
   font-size: 22rpx;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -154,9 +369,9 @@
 }
 
 .ai-report {
-  padding: 24rpx;
-  border-left: 6rpx solid #2563eb;
-  background: #ffffff;
+  padding: 26rpx;
+  border-left: 6rpx solid #1a7f64;
+  background: #fbfcf8;
 }
 
 .ai-report__head {
@@ -166,14 +381,14 @@
 }
 
 .ai-report__title {
-  color: #111827;
+  color: #18231f;
   font-size: 30rpx;
   font-weight: 700;
 }
 
 .ai-report__status,
 .ai-report__confidence {
-  color: #2563eb;
+  color: #176b52;
   font-size: 23rpx;
   font-weight: 600;
 }
@@ -187,7 +402,7 @@
 .ai-report__text {
   display: block;
   margin-top: 14rpx;
-  color: #374151;
+  color: #35423b;
   font-size: 27rpx;
   line-height: 1.55;
 }
@@ -198,7 +413,7 @@
   justify-content: space-between;
   min-height: 94rpx;
   padding: 0 24rpx;
-  border-bottom: 1rpx solid #eef2f7;
+  border-bottom: 1rpx solid #edf1e9;
 }
 
 .list-row:last-child {
@@ -219,7 +434,7 @@
 }
 
 .list-row__right {
-  color: #2563eb;
+  color: #176b52;
   font-size: 24rpx;
   font-weight: 700;
   text-align: right;
@@ -232,7 +447,7 @@
   align-items: center;
   gap: 18rpx;
   padding: 22rpx 24rpx;
-  border-bottom: 1rpx solid #eef2f7;
+  border-bottom: 1rpx solid #edf1e9;
 }
 
 .evidence-row:last-child,
@@ -289,7 +504,7 @@
   height: 12rpx;
   overflow: hidden;
   border-radius: 999rpx;
-  background: #e5e7eb;
+  background: #dfe6dc;
 }
 
 .scoreline-row__bar,
@@ -297,7 +512,7 @@
 .rating-row__bar {
   height: 100%;
   border-radius: 999rpx;
-  background: #2563eb;
+  background: #1a7f64;
 }
 
 .scoreline-row__value,
@@ -311,7 +526,7 @@
 
 .progress-row {
   padding: 22rpx 24rpx;
-  border-bottom: 1rpx solid #eef2f7;
+  border-bottom: 1rpx solid #edf1e9;
 }
 
 .progress-row:last-child {
@@ -333,7 +548,7 @@
 }
 
 .progress-row__bar {
-  background: #16a34a;
+  background: #18a06f;
 }
 
 .progress-row__meta {
@@ -349,7 +564,7 @@
   gap: 12rpx;
   align-items: center;
   padding: 22rpx 24rpx;
-  border-bottom: 1rpx solid #eef2f7;
+  border-bottom: 1rpx solid #edf1e9;
 }
 
 .table-row:last-child {
@@ -357,7 +572,7 @@
 }
 
 .table-row__rank {
-  color: #2563eb;
+  color: #176b52;
   font-size: 25rpx;
   font-weight: 800;
 }
@@ -382,7 +597,7 @@
 
 .ranking-row {
   padding: 22rpx 24rpx;
-  border-bottom: 1rpx solid #eef2f7;
+  border-bottom: 1rpx solid #edf1e9;
 }
 
 .ranking-row:last-child {
@@ -397,7 +612,7 @@
 
 .ranking-row__rank {
   width: 42rpx;
-  color: #2563eb;
+  color: #176b52;
   font-size: 26rpx;
   font-weight: 800;
 }
@@ -425,8 +640,8 @@
 .reason-chip {
   padding: 6rpx 12rpx;
   border-radius: 999rpx;
-  background: #f1f5f9;
-  color: #64748b;
+  background: #edf5ee;
+  color: #647067;
   font-size: 21rpx;
 }
 
@@ -436,8 +651,8 @@
   gap: 8rpx;
   margin-bottom: 20rpx;
   padding: 8rpx;
-  border-radius: 20rpx;
-  background: #e5e7eb;
+  border-radius: 16rpx;
+  background: #dfe6dc;
 }
 
 .segmented__item {
@@ -451,7 +666,7 @@
 
 .segmented__item--active {
   background: #ffffff;
-  color: #2563eb;
+  color: #176b52;
 }
 
 .bottom-nav {
@@ -465,8 +680,8 @@
   max-width: 100%;
   grid-template-columns: repeat(4, 1fr);
   padding: 14rpx 24rpx 22rpx;
-  border-top: 1rpx solid #e5e7eb;
-  background: rgba(255, 255, 255, 0.98);
+  border-top: 1rpx solid #dfe5db;
+  background: rgba(250, 252, 247, 0.98);
 }
 
 .bottom-nav__item {
@@ -474,15 +689,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 18rpx;
-  color: #64748b;
+  border-radius: 14rpx;
+  color: #647067;
   font-size: 25rpx;
   font-weight: 700;
 }
 
 .bottom-nav__item--active {
-  background: #eff6ff;
-  color: #2563eb;
+  background: #dff4e8;
+  color: #176b52;
 }
 
 .status-view {

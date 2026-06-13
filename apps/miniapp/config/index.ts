@@ -15,7 +15,7 @@ export default defineConfig<'webpack5'>(async (merge) => {
       828: 1.81 / 2
     },
     sourceRoot: 'src',
-    outputRoot: 'dist',
+    outputRoot: process.env.TARO_ENV === 'weapp' ? 'dist-weapp' : 'dist',
     plugins: ['@tarojs/plugin-generator'],
     defineConstants: {},
     copy: {
@@ -81,4 +81,3 @@ export default defineConfig<'webpack5'>(async (merge) => {
   }
   return merge({}, baseConfig, prodConfig)
 })
-
