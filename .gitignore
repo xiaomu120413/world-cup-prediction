@@ -4,6 +4,12 @@ dist/
 .DS_Store
 .env
 .env.*
+!.env.example
+!**/.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
 
 # Miniapp local artifacts
 apps/miniapp/node_modules/
@@ -11,6 +17,11 @@ apps/miniapp/dist/
 apps/miniapp/dist-weapp/
 apps/miniapp/.swc/
 apps/miniapp/screenshots/
+
+# Backend local artifacts
+services/api/.venv/
+services/api/.pytest_cache/
+services/api/**/__pycache__/
 
 # Logs
 npm-debug.log*

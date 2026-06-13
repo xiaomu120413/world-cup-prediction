@@ -1,0 +1,24 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "World Cup Prediction API"
+    app_version: str = "0.1.0"
+    api_version: str = "v1"
+    environment: str = "local"
+    admin_token: str = "change-me"
+    allowed_origins: str = "http://127.0.0.1:4173,http://localhost:4173"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    @property
+    def allowed_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+

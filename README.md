@@ -34,11 +34,16 @@
 
 - [Miniapp](./apps/miniapp): Taro React 小程序前端骨架，当前使用 mock 数据。
 
+## Services
+
+- [API](./services/api): FastAPI 后端骨架，当前使用 mock 数据实现接口合约。
+
 ## Status
 
 当前阶段：M1 前端原型骨架已完成。
 
 - 5 个核心页面已接入 mock 数据：首页、比赛详情、小组、预测榜、球队页。
 - 数据模型、API 合约和功能闭环设计已补齐。
+- M2 FastAPI 接口骨架已开始，先用 mock 数据跑通 API 合约。
 - H5 构建、微信小程序构建和 TypeScript 检查已通过。
 - 下一阶段进入 M2 后端 API 与数据模型实现。

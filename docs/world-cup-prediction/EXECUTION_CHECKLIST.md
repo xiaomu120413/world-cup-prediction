@@ -83,7 +83,8 @@ AI 解读任务
 | M1 验证 | 已通过 | `npm run typecheck`、`npm run build:h5`、`npm run build:weapp` 已通过。 |
 | M1 视觉 QA | 已通过 | 390 x 844 视口下检查首页、比赛详情、小组、预测榜、球队页，无横向溢出。 |
 | M2 设计 | 已完成 | `DATA_MODEL.md`、`API_CONTRACT.md`、`FUNCTIONAL_DESIGN.md` 已定义数据表、接口合约和功能闭环。 |
-| M2 | 待开始 | 下一步实现后端 API、数据库 schema 和小程序 service 层切换。 |
+| M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、mock 数据接口、OpenAPI 文档和契约测试。 |
+| M2 数据库 | 待开始 | 下一步实现 PostgreSQL schema、Alembic 迁移和 seed 数据入库。 |
 
 ## 4. M0 基础设施
 
