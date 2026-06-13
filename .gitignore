@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.swc/
+.DS_Store
+.env
+.env.*
+
+# Miniapp local artifacts
+apps/miniapp/node_modules/
+apps/miniapp/dist/
+apps/miniapp/.swc/
+apps/miniapp/screenshots/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

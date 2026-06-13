@@ -27,6 +27,14 @@
 - [Technical Execution Plan](./docs/world-cup-prediction/TECHNICAL_EXECUTION_PLAN.md)
 - [Execution Checklist](./docs/world-cup-prediction/EXECUTION_CHECKLIST.md)
 
+## Apps
+
+- [Miniapp](./apps/miniapp): Taro React 小程序前端骨架，当前使用 mock 数据。
+
 ## Status
 
-当前阶段：产品和设计方案 v0.1。
+当前阶段：M1 前端原型骨架已完成。
+
+- 5 个核心页面已接入 mock 数据：首页、比赛详情、小组、预测榜、球队页。
+- H5 构建、微信小程序构建和 TypeScript 检查已通过。
+- 下一阶段进入 M2 后端 API 与数据模型实现。

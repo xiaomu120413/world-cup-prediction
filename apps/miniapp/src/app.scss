@@ -1,0 +1,27 @@
+@use "./styles/ui.scss";
+
+page,
+body {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  background: #f7f8fa;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+view,
+text,
+taro-view-core,
+taro-text-core,
+* {
+  box-sizing: border-box;
+}
+
+#app,
+taro-app,
+taro-page,
+taro-view-core {
+  max-width: 100%;
+}
