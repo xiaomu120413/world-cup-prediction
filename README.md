@@ -25,6 +25,7 @@
 - [Architecture](./docs/world-cup-prediction/ARCHITECTURE.md)
 - [Design](./docs/world-cup-prediction/DESIGN.md)
 - [Technical Execution Plan](./docs/world-cup-prediction/TECHNICAL_EXECUTION_PLAN.md)
+- [Execution Checklist](./docs/world-cup-prediction/EXECUTION_CHECKLIST.md)
 
 ## Status
 
