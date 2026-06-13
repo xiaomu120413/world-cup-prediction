@@ -24,6 +24,9 @@
 - [PRD](./docs/world-cup-prediction/PRD.md)
 - [Architecture](./docs/world-cup-prediction/ARCHITECTURE.md)
 - [Design](./docs/world-cup-prediction/DESIGN.md)
+- [Data Model](./docs/world-cup-prediction/DATA_MODEL.md)
+- [API Contract](./docs/world-cup-prediction/API_CONTRACT.md)
+- [Functional Design](./docs/world-cup-prediction/FUNCTIONAL_DESIGN.md)
 - [Technical Execution Plan](./docs/world-cup-prediction/TECHNICAL_EXECUTION_PLAN.md)
 - [Execution Checklist](./docs/world-cup-prediction/EXECUTION_CHECKLIST.md)
 
@@ -36,5 +39,6 @@
 当前阶段：M1 前端原型骨架已完成。
 
 - 5 个核心页面已接入 mock 数据：首页、比赛详情、小组、预测榜、球队页。
+- 数据模型、API 合约和功能闭环设计已补齐。
 - H5 构建、微信小程序构建和 TypeScript 检查已通过。
 - 下一阶段进入 M2 后端 API 与数据模型实现。

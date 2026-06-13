@@ -24,6 +24,9 @@
 | [PRD.md](./PRD.md) | 产品需求文档，包含用户场景、功能范围、页面设计、数据需求、AI 能力和 MVP 规划 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构设计，包含数据流、服务模块、模型服务、小程序访问架构和部署建议 |
 | [DESIGN.md](./DESIGN.md) | 选定的 AI 赛前报告型设计方向，包含视觉系统、页面结构、组件和交互规范 |
+| [DATA_MODEL.md](./DATA_MODEL.md) | 数据模型设计，包含核心表、字段、约束、数据质量和 MVP 建表范围 |
+| [API_CONTRACT.md](./API_CONTRACT.md) | API 合约设计，包含公共接口、管理接口、响应格式、错误码和 curl 示例 |
+| [FUNCTIONAL_DESIGN.md](./FUNCTIONAL_DESIGN.md) | 功能设计，包含首页、比赛详情、小组、预测榜、球队页、采集、预测、AI 情报和验收点 |
 | [TECHNICAL_EXECUTION_PLAN.md](./TECHNICAL_EXECUTION_PLAN.md) | 可正式执行的技术方案，包含服务器、域名、部署、模块拆解、接口、任务、模型、AI 和上线里程碑 |
 | [EXECUTION_CHECKLIST.md](./EXECUTION_CHECKLIST.md) | 执行清单，包含阶段任务、交付物、验收标准、测试点、上线检查和 Done 定义 |
 
