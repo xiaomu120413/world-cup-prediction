@@ -41,6 +41,18 @@ python -m pytest
 
 Create a local `.env` from `.env.example`, then set `DATABASE_URL`.
 
+Start local PostgreSQL and Redis:
+
+```bash
+docker compose up -d postgres redis
+```
+
+For the bundled compose file, use this local database URL:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+```
+
 Run migrations:
 
 ```bash
@@ -54,6 +66,14 @@ python scripts/init_db.py
 ```
 
 The first migration reuses `db/migrations/001_initial_schema.sql`, and mock data lives in `db/seeds/001_mock_data.sql`.
+
+Run PostgreSQL-backed integration tests:
+
+```powershell
+$env:RUN_DATABASE_TESTS="1"
+$env:DATA_BACKEND="database"
+python -m pytest tests/test_database_backend.py
+```
 
 ## Notes
 

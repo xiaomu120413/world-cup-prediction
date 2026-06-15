@@ -11,10 +11,26 @@ from app.db.schema import (
     venues,
 )
 
+TEAM_PUBLIC_IDS = {
+    "USA": "usa",
+    "PAR": "paraguay",
+    "FRA": "france",
+    "BRA": "brazil",
+    "ENG": "england",
+}
+
+
+def team_public_id(code: str, name_en: str | None = None) -> str:
+    if code in TEAM_PUBLIC_IDS:
+        return TEAM_PUBLIC_IDS[code]
+    if name_en:
+        return name_en.lower().replace(" ", "-")
+    return code.lower()
+
 
 def team_payload(row) -> dict:
     return {
-        "id": row.code.lower(),
+        "id": team_public_id(row.code, row.name_en),
         "code": row.code,
         "abbr": row.code,
         "name": row.name_zh,
@@ -123,7 +139,7 @@ class PublicDataRepository:
             "neutral_site": row.neutral_site,
             "source_confidence": float(row.source_confidence),
             "home_team": {
-                "id": row.home_code.lower(),
+                "id": team_public_id(row.home_code, row.home_name_en),
                 "abbr": row.home_code,
                 "name": row.home_name,
                 "name_en": row.home_name_en,
@@ -131,7 +147,7 @@ class PublicDataRepository:
                 "elo_rating": float(row.home_elo_rating) if row.home_elo_rating is not None else None,
             },
             "away_team": {
-                "id": row.away_code.lower(),
+                "id": team_public_id(row.away_code, row.away_name_en),
                 "abbr": row.away_code,
                 "name": row.away_name,
                 "name_en": row.away_name_en,

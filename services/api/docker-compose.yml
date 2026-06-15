@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: worldcup-prediction-postgres
+    environment:
+      POSTGRES_DB: worldcup_prediction
+      POSTGRES_USER: worldcup
+      POSTGRES_PASSWORD: worldcup
+    ports:
+      - "54321:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U worldcup -d worldcup_prediction"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - worldcup_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: worldcup-prediction-redis
+    ports:
+      - "63791:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  worldcup_postgres_data:

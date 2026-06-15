@@ -17,21 +17,10 @@ from app.data.mock_store import (
     UPCOMING_MATCHES,
     UPDATED_AT,
 )
+from app.repositories.repository_provider import use_database, with_public_repository
 
 router = APIRouter()
 admin_router = APIRouter()
-
-
-def use_database(settings: Settings) -> bool:
-    return settings.data_backend.lower() == "database"
-
-
-def with_database_repository(callback):
-    from app.db.session import SessionLocal
-    from app.repositories import PublicDataRepository
-
-    with SessionLocal() as db:
-        return callback(PublicDataRepository(db))
 
 
 def require_admin(
@@ -110,7 +99,7 @@ def matches_today(date: str | None = None, include_prediction: bool = True):
 @router.get("/matches/{match_id}")
 def match_detail(match_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
-        match = with_database_repository(lambda repo: repo.get_match(match_id))
+        match = with_public_repository(lambda repo: repo.get_match(match_id))
         if not match:
             raise not_found("MATCH_NOT_FOUND", "比赛不存在")
         return envelope(match, updated_at=now_iso())
@@ -124,7 +113,7 @@ def match_detail(match_id: str, settings: Settings = Depends(get_settings)):
 @router.get("/matches/{match_id}/prediction")
 def match_prediction(match_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
-        prediction = with_database_repository(lambda repo: repo.get_match_prediction(match_id))
+        prediction = with_public_repository(lambda repo: repo.get_match_prediction(match_id))
         if not prediction:
             raise not_found("PREDICTION_NOT_FOUND", "预测未生成")
         return envelope(prediction, updated_at=prediction["generated_at"])
@@ -174,7 +163,7 @@ def prediction_rankings(type: str = Query(default="champion"), limit: int = Quer
 
 @router.get("/teams")
 def teams(q: str | None = None, group_id: str | None = None, settings: Settings = Depends(get_settings)):
-    values = with_database_repository(lambda repo: repo.list_teams()) if use_database(settings) else list(TEAMS.values())
+    values = with_public_repository(lambda repo: repo.list_teams()) if use_database(settings) else list(TEAMS.values())
     if q:
         q_lower = q.lower()
         values = [

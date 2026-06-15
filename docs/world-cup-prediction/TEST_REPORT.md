@@ -90,11 +90,34 @@ H5 预览地址：`http://127.0.0.1:4173`
 
 - H5 构建存在 Taro entrypoint size warning，当前约 290 KiB。MVP 阶段可接受，上线前需要做包体优化。
 - 后端测试在 Python 3.14 下有 FastAPI / Starlette 的弃用警告。建议生产环境使用 Python 3.12。
-- PostgreSQL 实例尚未在本机执行迁移，本轮只验证了 schema 元数据、Alembic history 和 repository 查询构造。
+- Redis 已启动但业务缓存尚未接入，当前只作为 M0/M2 基础设施预留。
 
-## 7. 下一轮测试重点
+## 7. 数据库验证补充
 
-- 启动真实 PostgreSQL，执行 `alembic upgrade head` 和 seed。
-- 设置 `DATA_BACKEND=database`，验证比赛详情、预测、球队列表读库。
+测试日期：2026-06-15
+
+本轮新增验证：
+
+| 测试项 | 结果 |
+| --- | --- |
+| `docker compose up -d postgres redis` | 通过，PostgreSQL 和 Redis 均 healthy |
+| `alembic upgrade head` | 通过，迁移到 `202606130001` |
+| `python scripts/init_db.py` | 通过，schema 幂等执行并插入 mock seed |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | 通过，30 passed |
+| 临时 `DATA_BACKEND=database` API HTTP smoke | 通过 |
+
+数据库模式 HTTP smoke：
+
+| 接口 | 结果 |
+| --- | --- |
+| `GET /health` | 200 |
+| `GET /api/v1/matches/usa-paraguay-2026-06-13` | 200 |
+| `GET /api/v1/matches/usa-paraguay-2026-06-13/prediction` | 200 |
+| `GET /api/v1/teams` | 200 |
+
+## 8. 下一轮测试重点
+
 - 前端 service 层从 mock 切 API 后，补接口失败、空状态、超时状态测试。
+- 将首页、小组、预测榜更多接口逐步切到 repository 读库。
+- 接入 Redis 缓存降级测试。
 - 微信开发者工具真机预览。
