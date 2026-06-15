@@ -799,6 +799,6 @@ Update date: 2026-06-15
 Update date: 2026-06-15
 
 - Added first real low-frequency `dongqiudi` collector adapter for `https://pc.dongqiudi.com/`.
-- Adapter stores raw homepage snapshots and extracts candidate match/news items for later normalization.
+- Adapter stores raw homepage snapshots, extracts candidate match/news items, and upserts candidate links into `news_items`.
 - Canonical match/team/player tables are not updated by this adapter yet; this keeps source parsing isolated from product data.
-- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 43 tests.
+- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 45 tests.

@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
@@ -105,3 +106,28 @@ def test_database_collector_writes_idempotent_raw_snapshot():
     assert second["status"] == "completed"
     assert second["records_written"] == 0
     assert first["snapshot_ids"] == second["snapshot_ids"]
+
+
+def test_database_collector_normalizes_news_items_idempotently():
+    snapshot = RawSnapshot(
+        source="dongqiudi",
+        source_type="homepage",
+        source_url="https://pc.dongqiudi.com/",
+        payload={
+            "items": [
+                {
+                    "type": "link",
+                    "title": "足球 世界杯 测试新闻",
+                    "href": "https://pc.dongqiudi.com/articles/test-news",
+                }
+            ]
+        },
+    )
+    with SessionLocal() as db:
+        runner = CollectorRunner(db)
+        first = runner.write_normalized_records(snapshot)
+        second = runner.write_normalized_records(snapshot)
+        db.commit()
+
+    assert first in (0, 1)
+    assert second == 0

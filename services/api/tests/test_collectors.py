@@ -1,4 +1,5 @@
-from app.collectors.adapters import DongqiudiHomepageAdapter, LocalSampleAdapter, build_adapter
+from app.collectors.adapters import DongqiudiHomepageAdapter, LocalSampleAdapter, RawSnapshot, build_adapter
+from app.collectors.normalizers import news_items_from_snapshot
 from app.collectors.runner import snapshot_checksum
 
 
@@ -40,3 +41,27 @@ def test_build_adapter_supports_dongqiudi_source():
     adapter = build_adapter("dongqiudi", "homepage")
 
     assert adapter.source == "dongqiudi"
+
+
+def test_news_items_from_dongqiudi_snapshot():
+    snapshot = RawSnapshot(
+        source="dongqiudi",
+        source_type="homepage",
+        source_url="https://pc.dongqiudi.com/",
+        payload={
+            "items": [
+                {
+                    "type": "link",
+                    "title": "足球 世界杯 德国7-1大胜库拉索",
+                    "href": "https://pc.dongqiudi.com/articles/1",
+                },
+                {"type": "match_block", "competition": "世界杯"},
+            ]
+        },
+    )
+
+    values = news_items_from_snapshot(snapshot)
+
+    assert len(values) == 1
+    assert values[0]["source"] == "dongqiudi"
+    assert values[0]["language"] == "zh"

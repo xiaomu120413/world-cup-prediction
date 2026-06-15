@@ -196,7 +196,8 @@ Test date: 2026-06-15
 
 | Test item | Result |
 | --- | --- |
-| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 43 tests |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 45 tests |
 | `python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run` | Passed, 39 candidate items |
 | `python scripts/run_collector.py --source dongqiudi --source-type homepage` | Passed, raw snapshot written |
+| `news_items` normalization | Passed, latest smoke wrote 24 candidate news items |
 | Source URL | `https://pc.dongqiudi.com/` |

@@ -10,7 +10,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.collectors.adapters import RawSnapshot, build_adapter
-from app.db.schema import collector_runs, raw_snapshots
+from app.collectors.normalizers import news_items_from_snapshot
+from app.db.schema import collector_runs, news_items, raw_snapshots
 
 API_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -30,6 +31,7 @@ class CollectorRunner:
             snapshot = build_adapter(source, source_type).fetch()
             checksum = snapshot_checksum(snapshot)
             if dry_run:
+                normalized_records = news_items_from_snapshot(snapshot)
                 return {
                     "status": "completed",
                     "source": source,
@@ -37,17 +39,19 @@ class CollectorRunner:
                     "dry_run": True,
                     "records_read": self.count_records(snapshot),
                     "records_written": 0,
+                    "normalized_records": len(normalized_records),
                     "checksum": checksum,
                 }
 
             snapshot_id, inserted = self.write_snapshot(snapshot, checksum)
+            normalized_written = self.write_normalized_records(snapshot)
             self.write_run(
                 source=source,
                 source_type=source_type,
                 status="success",
                 started_at=started_at,
                 records_read=self.count_records(snapshot),
-                records_written=1 if inserted else 0,
+                records_written=(1 if inserted else 0) + normalized_written,
                 snapshot_ids=[snapshot_id],
             )
             self.db.commit()
@@ -57,7 +61,9 @@ class CollectorRunner:
                 "source_type": source_type,
                 "dry_run": False,
                 "records_read": self.count_records(snapshot),
-                "records_written": 1 if inserted else 0,
+                "records_written": (1 if inserted else 0) + normalized_written,
+                "raw_snapshot_written": inserted,
+                "normalized_records_written": normalized_written,
                 "snapshot_ids": [str(snapshot_id)],
                 "checksum": checksum,
             }
@@ -109,6 +115,19 @@ class CollectorRunner:
             )
         ).scalar_one()
         return existing_id, False
+
+    def write_normalized_records(self, snapshot: RawSnapshot) -> int:
+        values = news_items_from_snapshot(snapshot)
+        if not values:
+            return 0
+
+        statement = (
+            pg_insert(news_items)
+            .values(values)
+            .on_conflict_do_nothing(index_elements=["source_url"])
+            .returning(news_items.c.id)
+        )
+        return len(self.db.execute(statement).all())
 
     def write_run(
         self,
