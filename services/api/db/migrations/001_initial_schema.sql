@@ -117,6 +117,25 @@ create table if not exists raw_snapshots (
     unique (source, source_type, checksum)
 );
 
+create table if not exists data_source_links (
+    id uuid primary key default gen_random_uuid(),
+    entity_type varchar(64) not null,
+    entity_key varchar(256) not null,
+    source varchar(64) not null,
+    source_type varchar(64) not null,
+    source_url text,
+    raw_snapshot_id uuid references raw_snapshots(id) on delete set null,
+    source_record_id varchar(128),
+    confidence numeric(4,3) not null default 1.0,
+    fetched_at timestamptz not null default now(),
+    metadata jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    unique (entity_type, entity_key, source, source_type)
+);
+
+create index if not exists idx_data_source_links_entity on data_source_links(entity_type, entity_key);
+create index if not exists idx_data_source_links_raw_snapshot on data_source_links(raw_snapshot_id);
+
 create table if not exists collector_runs (
     id uuid primary key default gen_random_uuid(),
     source varchar(64) not null,
@@ -304,4 +323,3 @@ create table if not exists ai_explanations (
     evidence_refs jsonb not null default '[]'::jsonb,
     generated_at timestamptz not null default now()
 );
-

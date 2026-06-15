@@ -162,6 +162,26 @@ raw_snapshots = Table(
     UniqueConstraint("source", "source_type", "checksum", name="uq_raw_snapshots_source_type_checksum"),
 )
 
+data_source_links = Table(
+    "data_source_links",
+    metadata,
+    uuid_pk(),
+    Column("entity_type", VARCHAR(64), nullable=False),
+    Column("entity_key", VARCHAR(256), nullable=False),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_type", VARCHAR(64), nullable=False),
+    Column("source_url", Text),
+    Column("raw_snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id", ondelete="SET NULL")),
+    Column("source_record_id", VARCHAR(128)),
+    Column("confidence", Numeric(4, 3), nullable=False, server_default=text("1.0")),
+    Column("fetched_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("entity_type", "entity_key", "source", "source_type", name="uq_data_source_links_entity_source"),
+)
+Index("idx_data_source_links_entity", data_source_links.c.entity_type, data_source_links.c.entity_key)
+Index("idx_data_source_links_raw_snapshot", data_source_links.c.raw_snapshot_id)
+
 collector_runs = Table(
     "collector_runs",
     metadata,

@@ -405,3 +405,22 @@ select source, count(*) from news_items group by 1;
 7. 补 `coaches`、`weather_snapshots`、`injuries` schema。
 8. 接 AI 新闻抽取，生成 `ai_insights`。
 9. 每次数据域变成真实后，更新 `collection_catalog` 状态和测试。
+## 2026-06-15 Provenance Gate
+
+从 2026-06-15 开始，所有写入 canonical tables 的外部数据都必须同步写入 `data_source_links`。
+
+硬性验收：
+
+- `matches`、`venues`、`players`、`player_form_snapshots`、`team_form_snapshots`、`group_standings`、`news_items` 不允许存在没有来源链接的记录。
+- 每条来源链接必须包含 `entity_type`、`entity_key`、`source`、`source_type`、`source_url`、`raw_snapshot_id`、`confidence`。
+- 测试样例源 `local_sample` 只能用于自动化测试，不能保留在本地真实数据验收库。
+- 采集或历史导入后必须运行 `services/api/scripts/backfill_data_source_links.py`，确认所有 `*_without_source` 检查为 `0`。
+
+当前本地真实库快照：
+
+- `matches=107`：TheStatsAPI fixtures 105 条，懂球帝首页 2 条。
+- `venues=17`：TheStatsAPI fixtures。
+- `players=227`、`player_form_snapshots=227`：懂球帝 World Cup player rankings。
+- `group_standings=48`、`team_form_snapshots=24`：懂球帝 World Cup standings 派生。
+- `news_items=62`：懂球帝首页新闻链接。
+- `data_source_links=1300`，`local_sample_source_links=0`。

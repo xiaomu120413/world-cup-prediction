@@ -5,6 +5,7 @@ from app.collectors.catalog import collection_catalog_summary
 from app.db.schema import (
     competition_stages,
     collector_runs,
+    data_source_links,
     group_simulations,
     group_standings,
     match_predictions,
@@ -293,6 +294,7 @@ class PublicDataRepository:
             "team_form_snapshots": self.count_rows(team_form_snapshots),
             "group_standings": self.count_rows(group_standings),
             "raw_snapshots": self.count_rows(raw_snapshots),
+            "data_source_links": self.count_rows(data_source_links),
             "dongqiudi_standings_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_standings"),
             "dongqiudi_player_ranking_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_player_rankings"),
             "collector_runs": self.count_rows(collector_runs),

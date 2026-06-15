@@ -10,6 +10,7 @@ def test_metadata_contains_core_tables():
         "venues",
         "matches",
         "raw_snapshots",
+        "data_source_links",
         "collector_runs",
         "team_form_snapshots",
         "player_form_snapshots",

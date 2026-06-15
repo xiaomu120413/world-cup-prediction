@@ -15,6 +15,7 @@ from app.db.schema import (
     collector_runs,
     competition_stages,
     competitions,
+    data_source_links,
     group_standings,
     matches,
     news_items,
@@ -147,19 +148,28 @@ class CollectorRunner:
 
     def write_normalized_records(self, snapshot: RawSnapshot, snapshot_id=None) -> int:
         written = self.write_news_items(snapshot)
+        self.write_news_source_links(snapshot, snapshot_id)
         canonical = canonical_records_from_snapshot(snapshot)
         if not any(canonical.values()):
             return written
 
         team_ids = self.upsert_teams(canonical["teams"])
+        self.write_source_links(snapshot, snapshot_id, self.team_source_links(canonical["teams"]))
         written += self.upsert_team_aliases(canonical["team_aliases"], team_ids)
+        self.write_source_links(snapshot, snapshot_id, self.team_alias_source_links(canonical["team_aliases"]))
         venue_ids = self.upsert_venues(canonical.get("venues", []))
+        self.write_source_links(snapshot, snapshot_id, self.venue_source_links(canonical.get("venues", [])))
         stage_ids = self.ensure_stages(canonical["matches"], canonical["standings"])
         written += self.upsert_matches(canonical["matches"], team_ids, stage_ids, venue_ids)
+        self.write_source_links(snapshot, snapshot_id, self.match_source_links(canonical["matches"]))
         written += self.replace_standings(canonical["standings"], team_ids, stage_ids, snapshot_id)
+        self.write_source_links(snapshot, snapshot_id, self.standing_source_links(canonical["standings"]))
         written += self.replace_team_forms(canonical.get("team_forms", []), team_ids)
+        self.write_source_links(snapshot, snapshot_id, self.team_form_source_links(canonical.get("team_forms", [])))
         player_ids = self.upsert_players(canonical["players"], team_ids)
+        self.write_source_links(snapshot, snapshot_id, self.player_source_links(canonical["players"]))
         written += self.replace_player_forms(canonical["player_forms"], player_ids, team_ids)
+        self.write_source_links(snapshot, snapshot_id, self.player_form_source_links(canonical["player_forms"]))
         return written
 
     def write_news_items(self, snapshot: RawSnapshot) -> int:
@@ -174,6 +184,181 @@ class CollectorRunner:
             .returning(news_items.c.id)
         )
         return len(self.db.execute(statement).all())
+
+    def write_news_source_links(self, snapshot: RawSnapshot, snapshot_id=None) -> int:
+        news_values = news_items_from_snapshot(snapshot)
+        source_links = [
+            {
+                "entity_type": "news_item",
+                "entity_key": value["source_url"],
+                "source_record_id": value["source_url"],
+                "confidence": 1.0,
+                "metadata": {"title": value["title"]},
+            }
+            for value in news_values
+        ]
+        return self.write_source_links(snapshot, snapshot_id, source_links)
+
+    def write_source_links(self, snapshot: RawSnapshot, snapshot_id, values: list[dict]) -> int:
+        if not values:
+            return 0
+
+        rows = []
+        seen = set()
+        for value in values:
+            key = (value["entity_type"], value["entity_key"], snapshot.source, snapshot.source_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "entity_type": value["entity_type"],
+                    "entity_key": str(value["entity_key"]),
+                    "source": snapshot.source,
+                    "source_type": snapshot.source_type,
+                    "source_url": snapshot.source_url,
+                    "raw_snapshot_id": snapshot_id,
+                    "source_record_id": value.get("source_record_id"),
+                    "confidence": value.get("confidence", 1.0),
+                    "metadata": value.get("metadata", {}),
+                }
+            )
+        if not rows:
+            return 0
+
+        statement = (
+            pg_insert(data_source_links)
+            .values(rows)
+            .on_conflict_do_update(
+                index_elements=["entity_type", "entity_key", "source", "source_type"],
+                set_={
+                    "source_url": pg_insert(data_source_links).excluded.source_url,
+                    "raw_snapshot_id": pg_insert(data_source_links).excluded.raw_snapshot_id,
+                    "source_record_id": pg_insert(data_source_links).excluded.source_record_id,
+                    "confidence": pg_insert(data_source_links).excluded.confidence,
+                    "fetched_at": text("now()"),
+                    "metadata": pg_insert(data_source_links).excluded["metadata"],
+                },
+            )
+            .returning(data_source_links.c.id)
+        )
+        return len(self.db.execute(statement).all())
+
+    @staticmethod
+    def team_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "team",
+                "entity_key": value["code"],
+                "source_record_id": value["code"],
+                "confidence": 1.0,
+                "metadata": {"name": value["name_zh"]},
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def team_alias_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "team_alias",
+                "entity_key": f"{value['source']}:{value['alias']}",
+                "source_record_id": value.get("source_team_id"),
+                "confidence": value.get("confidence", 1.0),
+                "metadata": {"team_code": value["team_code"], "alias": value["alias"]},
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def venue_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "venue",
+                "entity_key": value["code"],
+                "source_record_id": value["code"],
+                "confidence": 1.0,
+                "metadata": {"name": value["name"], "city": value["city"], "country": value["country"]},
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def match_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "match",
+                "entity_key": value["public_id"],
+                "source_record_id": value["public_id"],
+                "confidence": value.get("source_confidence", 1.0),
+                "metadata": {
+                    "home_team_code": value["home_team_code"],
+                    "away_team_code": value["away_team_code"],
+                    "stage_code": value["stage_code"],
+                    "kickoff_at": value["kickoff_at"].isoformat(),
+                },
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def standing_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "group_standing",
+                "entity_key": f"{value['stage_code']}:{value['team_code']}",
+                "source_record_id": f"{value['stage_code']}:{value['team_code']}",
+                "confidence": 1.0,
+                "metadata": {"rank": value["rank"], "points": value["points"]},
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def team_form_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "team_form",
+                "entity_key": f"{value['team_code']}:{value['as_of_at'].isoformat()}",
+                "source_record_id": value["team_code"],
+                "confidence": 1.0,
+                "metadata": {
+                    "recent_matches": value["recent_matches"],
+                    "data_quality": value["data_quality"],
+                },
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def player_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "player",
+                "entity_key": value["code"],
+                "source_record_id": value["code"],
+                "confidence": 1.0,
+                "metadata": {"team_code": value["team_code"], "name": value["name_zh"]},
+            }
+            for value in values
+        ]
+
+    @staticmethod
+    def player_form_source_links(values: list[dict]) -> list[dict]:
+        return [
+            {
+                "entity_type": "player_form",
+                "entity_key": f"{value['player_code']}:{value['as_of_at'].isoformat()}",
+                "source_record_id": value["player_code"],
+                "confidence": 1.0,
+                "metadata": {
+                    "team_code": value["team_code"],
+                    "recent_matches": value["recent_matches"],
+                    "source_count": value["source_count"],
+                },
+            }
+            for value in values
+        ]
 
     def upsert_venues(self, values: list[dict]) -> dict[str, object]:
         if not values:

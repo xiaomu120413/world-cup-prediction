@@ -9,7 +9,7 @@ from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
-from app.db.schema import group_standings, matches, player_form_snapshots, players, team_aliases, teams, venues
+from app.db.schema import data_source_links, group_standings, matches, player_form_snapshots, players, team_aliases, teams, venues
 from app.main import app
 from app.predictions.service import BaselinePredictionService
 
@@ -37,7 +37,18 @@ def fixture_database_client():
         app.dependency_overrides.clear()
 
 
+def ensure_sample_match_with_prediction() -> None:
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "schedule")
+        BaselinePredictionService(db).recompute(
+            scope="test",
+            match_ids=["usa-paraguay-2026-06-13"],
+            seed=20260615,
+        )
+
+
 def test_database_match_detail_contract(database_client):
+    ensure_sample_match_with_prediction()
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13")
     assert response.status_code == 200
     body = response.json()["data"]
@@ -46,6 +57,7 @@ def test_database_match_detail_contract(database_client):
 
 
 def test_database_prediction_contract(database_client):
+    ensure_sample_match_with_prediction()
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13/prediction")
     assert response.status_code == 200
     body = response.json()["data"]
@@ -81,6 +93,7 @@ def test_database_data_status_contract(database_client):
     assert body["player_form_ready"] is True
     assert body["table_counts"]["matches"] >= 1
     assert body["table_counts"]["player_form_snapshots"] >= 2
+    assert body["table_counts"]["data_source_links"] >= 1
     assert len(body["latest_collector_runs"]) >= 1
 
 
@@ -155,6 +168,33 @@ def test_database_collector_normalizes_schedule_to_canonical_tables():
     assert alias_exists >= 1
 
 
+def test_database_collector_records_schedule_source_links():
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "schedule")
+        match_source = db.execute(
+            select(data_source_links).where(
+                data_source_links.c.entity_type == "match",
+                data_source_links.c.entity_key == "usa-paraguay-2026-06-13",
+                data_source_links.c.source == "local_sample",
+                data_source_links.c.source_type == "schedule",
+            )
+        ).mappings().first()
+        team_source_count = db.execute(
+            select(func.count())
+            .select_from(data_source_links)
+            .where(
+                data_source_links.c.entity_type == "team",
+                data_source_links.c.source == "local_sample",
+                data_source_links.c.source_type == "schedule",
+            )
+        ).scalar_one()
+
+    assert match_source is not None
+    assert match_source.raw_snapshot_id is not None
+    assert match_source.source_url is not None
+    assert team_source_count >= 2
+
+
 def test_database_collector_normalizes_standings_idempotently():
     with SessionLocal() as db:
         CollectorRunner(db).run("local_sample", "standings")
@@ -179,6 +219,32 @@ def test_database_collector_normalizes_player_rankings_idempotently():
     assert first_forms >= 2
     assert second_players == first_players
     assert second_forms == first_forms
+
+
+def test_database_collector_records_player_source_links():
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "player_ranking")
+        player_source_count = db.execute(
+            select(func.count())
+            .select_from(data_source_links)
+            .where(
+                data_source_links.c.entity_type == "player",
+                data_source_links.c.source == "local_sample",
+                data_source_links.c.source_type == "player_ranking",
+            )
+        ).scalar_one()
+        form_source_count = db.execute(
+            select(func.count())
+            .select_from(data_source_links)
+            .where(
+                data_source_links.c.entity_type == "player_form",
+                data_source_links.c.source == "local_sample",
+                data_source_links.c.source_type == "player_ranking",
+            )
+        ).scalar_one()
+
+    assert player_source_count >= 2
+    assert form_source_count >= 2
 
 
 def test_database_collector_serializes_concurrent_same_job():

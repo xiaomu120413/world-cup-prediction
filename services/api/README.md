@@ -194,6 +194,17 @@ TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, coun
 
 Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values; minutes, ratings, injuries and availability still need a dedicated source.
 
+All normalized data must have a provenance row in `data_source_links`. The collector runner writes these rows for canonical entities such as `match`, `venue`, `team`, `team_alias`, `group_standing`, `team_form`, `player`, `player_form` and `news_item`.
+
+Backfill and audit source links after migrations or historical imports:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/backfill_data_source_links.py
+```
+
+The audit should print `0` for every `*_without_source` check before data is used by the prediction pipeline.
+
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
 
 Admin API trigger:

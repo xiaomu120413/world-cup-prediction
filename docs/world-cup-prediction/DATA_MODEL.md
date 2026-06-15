@@ -544,4 +544,25 @@ ai_explanations
 ```
 
 `coaches` 和 `post_match_reviews` 可以在 M4/M5 之后补。
+## 2026-06-15 Addition: data_source_links
+
+`data_source_links` 是 canonical 数据的统一来源血缘表。`raw_snapshots` 保存原始响应，`data_source_links` 负责把标准业务记录反查到来源。
+
+核心字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `entity_type` | varchar(64) | 业务实体类型，例如 `match`、`venue`、`player`、`player_form`、`team_form`、`group_standing`、`news_item` |
+| `entity_key` | varchar(256) | 业务稳定 key，例如 `matches.public_id`、`venues.code`、`players.code`、`stage_code:team_code` |
+| `source` | varchar(64) | 来源，例如 `dongqiudi`、`thestatsapi` |
+| `source_type` | varchar(64) | 采集类型，例如 `homepage`、`fixtures`、`world_cup_standings`、`world_cup_player_rankings` |
+| `source_url` | text | 请求 URL 或页面 URL |
+| `raw_snapshot_id` | uuid | 对应 `raw_snapshots.id` |
+| `source_record_id` | varchar(128) | 外部源记录 ID 或稳定业务 key |
+| `confidence` | numeric(4,3) | 来源置信度 |
+| `metadata` | jsonb | 少量反查辅助信息，不替代 canonical 表 |
+
+唯一约束：`entity_type + entity_key + source + source_type`。
+
+验收口径：所有进入页面和预测链路的 canonical 外部数据必须能在 `data_source_links` 查到来源；`scripts/backfill_data_source_links.py` 的 `*_without_source` 输出必须全部为 `0`。
 
