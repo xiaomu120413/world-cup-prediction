@@ -137,7 +137,42 @@ python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-
 python scripts/run_collector.py --source dongqiudi --source-type homepage
 ```
 
-The Dongqiudi adapter stores a raw homepage snapshot, extracts candidate football news and match blocks into the snapshot payload, and upserts candidate news links into `news_items`. It does not directly update canonical match/team/player tables yet.
+The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
+
+- `raw_snapshots`: immutable source payload and checksum.
+- `collector_runs`: run status, record counts and linked snapshot ids.
+- `news_items`: candidate news links from the homepage.
+- `teams` / `team_aliases`: teams found in homepage match blocks.
+- `matches`: World Cup homepage matches with score/status/kickoff fields.
+
+Each adapter should emit the same canonical payload shape before normalization:
+
+```python
+{
+    "matches": [
+        {
+            "public_id": "dongqiudi-home-away-2026-06-15",
+            "competition_code": "world_cup_2026",
+            "stage_code": "world-cup-homepage",
+            "stage_name": "世界杯",
+            "stage_type": "group",
+            "home": "瑞典",
+            "away": "突尼斯",
+            "kickoff_at": "2026-06-15T00:00:00+08:00",
+            "status": "live",
+            "home_score": 3,
+            "away_score": 1,
+            "neutral_site": True,
+            "source_confidence": 0.7,
+        }
+    ],
+    "groups": [],
+    "players": [],
+    "items": [],
+}
+```
+
+Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, market value, lineup stability and coach records still need dedicated adapters or an authorized data source before they should be treated as production-grade.
 
 Admin API trigger:
 
