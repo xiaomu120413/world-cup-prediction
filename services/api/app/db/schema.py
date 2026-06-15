@@ -234,6 +234,54 @@ player_form_snapshots = Table(
 )
 Index("idx_player_form_player_time", player_form_snapshots.c.player_id, player_form_snapshots.c.as_of_at.desc())
 
+lineup_snapshots = Table(
+    "lineup_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("player_id", UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL")),
+    Column("source_player_id", VARCHAR(128)),
+    Column("player_name", VARCHAR(128), nullable=False),
+    Column("shirt_number", Integer),
+    Column("position", VARCHAR(32)),
+    Column("is_starting", Boolean, nullable=False, server_default=text("false")),
+    Column("minutes", Integer),
+    Column("rating", Numeric(4, 2)),
+    Column("status", VARCHAR(32), nullable=False, server_default=text("'unknown'")),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("0.8")),
+    Column("snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id", ondelete="SET NULL")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("status in ('starter', 'substitute', 'bench', 'unknown')", name="status_valid"),
+    UniqueConstraint("match_id", "team_id", "source_player_id", "player_name", name="uq_lineup_snapshots_match_team_player"),
+)
+Index("idx_lineup_snapshots_match_team", lineup_snapshots.c.match_id, lineup_snapshots.c.team_id)
+Index("idx_lineup_snapshots_team_player", lineup_snapshots.c.team_id, lineup_snapshots.c.player_id)
+
+team_match_results = Table(
+    "team_match_results",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("opponent_team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL")),
+    Column("played_at", DateTime(timezone=True), nullable=False),
+    Column("competition_name", VARCHAR(128), nullable=False),
+    Column("source_match_id", VARCHAR(128), nullable=False),
+    Column("is_neutral", Boolean, nullable=False, server_default=text("true")),
+    Column("goals_for", Integer),
+    Column("goals_against", Integer),
+    Column("result", VARCHAR(16), nullable=False),
+    Column("opponent_rank", Integer),
+    Column("opponent_rank_bucket", VARCHAR(16), nullable=False, server_default=text("'unknown'")),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("0.8")),
+    Column("snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id", ondelete="SET NULL")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("result in ('win', 'draw', 'loss', 'scheduled')", name="result_valid"),
+    CheckConstraint("opponent_rank_bucket in ('top10', 'top30', 'top50', 'other', 'unknown')", name="rank_bucket_valid"),
+    UniqueConstraint("team_id", "source_match_id", name="uq_team_match_results_team_match"),
+)
+Index("idx_team_match_results_team_time", team_match_results.c.team_id, team_match_results.c.played_at.desc())
+
 coaches = Table(
     "coaches",
     metadata,

@@ -122,6 +122,69 @@ on conflict (entity_type, entity_key, source, source_type) do update set
     confidence = excluded.confidence,
     fetched_at = now(),
     metadata = excluded.metadata;
+
+insert into data_source_links (
+    entity_type,
+    entity_key,
+    source,
+    source_type,
+    source_url,
+    raw_snapshot_id,
+    source_record_id,
+    confidence,
+    metadata
+)
+select
+    'team',
+    t.code,
+    src.source,
+    src.source_type,
+    r.source_url,
+    r.id,
+    t.code,
+    src.confidence,
+    jsonb_build_object('name_zh', t.name_zh, 'name_en', t.name_en, 'backfilled', true)
+from teams t
+join lateral (
+    select
+        case
+            when exists (
+                select 1 from matches m
+                where (m.home_team_id = t.id or m.away_team_id = t.id)
+                  and m.public_id like 'dongqiudi-%'
+            )
+            then 'dongqiudi'
+            else 'thestatsapi'
+        end as source,
+        case
+            when exists (
+                select 1 from matches m
+                where (m.home_team_id = t.id or m.away_team_id = t.id)
+                  and m.public_id like 'dongqiudi-%'
+            )
+            then 'world_cup_schedule'
+            else 'fixtures'
+        end as source_type,
+        0.95::numeric as confidence
+) src on true
+join lateral (
+    select id, source_url
+    from raw_snapshots r
+    where r.source = src.source and r.source_type = src.source_type
+    order by fetched_at desc
+    limit 1
+) r on true
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'team' and l.entity_key = t.code
+)
+on conflict (entity_type, entity_key, source, source_type) do update set
+    source_url = excluded.source_url,
+    raw_snapshot_id = excluded.raw_snapshot_id,
+    source_record_id = excluded.source_record_id,
+    confidence = excluded.confidence,
+    fetched_at = now(),
+    metadata = excluded.metadata;
 """
 
 AUDIT_SQL = """
@@ -135,6 +198,12 @@ select 'venues_without_source', count(*)
 from venues v
 where not exists (
     select 1 from data_source_links l where l.entity_type = 'venue' and l.entity_key = v.code
+)
+union all
+select 'teams_without_source', count(*)
+from teams t
+where not exists (
+    select 1 from data_source_links l where l.entity_type = 'team' and l.entity_key = t.code
 )
 union all
 select 'players_without_source', count(*)

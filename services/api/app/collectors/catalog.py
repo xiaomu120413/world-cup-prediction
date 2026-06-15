@@ -52,6 +52,16 @@ COLLECTOR_CATALOG = [
         "notes": "Current tournament team form derived from Dongqiudi World Cup standings. Lineup stability and injury impact still need dedicated sources.",
     },
     {
+        "job_id": "world_cup_schedule_lineups",
+        "source": "dongqiudi",
+        "source_type": "world_cup_schedule_and_match_lineup",
+        "domains": ["team_match_results", "lineups", "lineup_stability"],
+        "target_tables": ["raw_snapshots", "data_source_links", "matches", "team_match_results", "lineup_snapshots", "team_form_snapshots"],
+        "status": "implemented_partial_real",
+        "frequency": "manual_now_post_match_later",
+        "notes": "Full World Cup schedule plus match lineups for played matches. Lineup stability grows as played-match sample increases.",
+    },
+    {
         "job_id": "team_market_value",
         "source": "authorized_market_value_source",
         "source_type": "market_value",
@@ -119,6 +129,8 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     venue_enriched = counts.get("venue_enriched", 0)
     coaches = counts.get("coaches", 0)
     injuries = counts.get("injury_reports", 0)
+    lineups = counts.get("lineup_snapshots", 0)
+    team_match_results = counts.get("team_match_results", 0)
     news = counts.get("news_items", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
@@ -181,6 +193,18 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 "status": "partial_real" if team_forms > 0 and dongqiudi_standings > 0 else "missing_real_source",
                 "current_source": "dongqiudi/world_cup_standings" if team_forms > 0 and dongqiudi_standings > 0 else None,
                 "target_tables": ["team_form_snapshots"],
+            },
+            {
+                "domain": "team_match_results",
+                "status": "partial_real" if team_match_results > 0 else "missing_real_source",
+                "current_source": "dongqiudi/world_cup_schedule" if team_match_results > 0 else None,
+                "target_tables": ["team_match_results"],
+            },
+            {
+                "domain": "lineups",
+                "status": "partial_real" if lineups > 0 else "schema_ready_missing_source",
+                "current_source": "dongqiudi/match_lineup" if lineups > 0 else None,
+                "target_tables": ["lineup_snapshots", "team_form_snapshots.lineup_stability_score"],
             },
             {
                 "domain": "venues_weather",

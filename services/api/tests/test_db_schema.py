@@ -14,6 +14,8 @@ def test_metadata_contains_core_tables():
         "collector_runs",
         "team_form_snapshots",
         "player_form_snapshots",
+        "lineup_snapshots",
+        "team_match_results",
         "coaches",
         "weather_snapshots",
         "injury_reports",

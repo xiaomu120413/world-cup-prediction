@@ -10,6 +10,7 @@ from app.db.schema import (
     group_simulations,
     group_standings,
     injury_reports,
+    lineup_snapshots,
     match_predictions,
     matches,
     news_items,
@@ -20,6 +21,7 @@ from app.db.schema import (
     raw_snapshots,
     scoreline_predictions,
     team_form_snapshots,
+    team_match_results,
     teams,
     venues,
     weather_snapshots,
@@ -336,6 +338,8 @@ class PublicDataRepository:
             "weather_snapshots": self.count_rows(weather_snapshots),
             "coaches": self.count_rows(coaches),
             "injury_reports": self.count_rows(injury_reports),
+            "lineup_snapshots": self.count_rows(lineup_snapshots),
+            "team_match_results": self.count_rows(team_match_results),
             "group_standings": self.count_rows(group_standings),
             "raw_snapshots": self.count_rows(raw_snapshots),
             "data_source_links": self.count_rows(data_source_links),
@@ -468,6 +472,12 @@ class PublicDataRepository:
                     select 1 from data_source_links l where l.entity_type = 'venue' and l.entity_key = v.code
                 )
                 union all
+                select 'teams_without_source', count(*)
+                from teams t
+                where not exists (
+                    select 1 from data_source_links l where l.entity_type = 'team' and l.entity_key = t.code
+                )
+                union all
                 select 'players_without_source', count(*)
                 from players p
                 where not exists (
@@ -537,6 +547,23 @@ class PublicDataRepository:
                 where not exists (
                     select 1 from data_source_links l
                     where l.entity_type = 'injury_report' and l.entity_key = ir.id::text
+                )
+                union all
+                select 'lineup_snapshots_without_source', count(*)
+                from lineup_snapshots ls
+                join matches m on m.id = ls.match_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'lineup_snapshot'
+                      and l.entity_key = m.public_id || ':' || ls.team_id::text || ':' || coalesce(ls.source_player_id, ls.player_name)
+                )
+                union all
+                select 'team_match_results_without_source', count(*)
+                from team_match_results tmr
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'team_match_result'
+                      and l.entity_key = tmr.team_id::text || ':' || tmr.source_match_id
                 )
                 order by check_name
                 """

@@ -184,6 +184,49 @@ create table if not exists player_form_snapshots (
 
 create index if not exists idx_player_form_player_time on player_form_snapshots(player_id, as_of_at desc);
 
+create table if not exists lineup_snapshots (
+    id uuid primary key default gen_random_uuid(),
+    match_id uuid not null references matches(id) on delete cascade,
+    team_id uuid not null references teams(id) on delete cascade,
+    player_id uuid references players(id) on delete set null,
+    source_player_id varchar(128),
+    player_name varchar(128) not null,
+    shirt_number int,
+    position varchar(32),
+    is_starting boolean not null default false,
+    minutes int,
+    rating numeric(4,2),
+    status varchar(32) not null default 'unknown' check (status in ('starter', 'substitute', 'bench', 'unknown')),
+    source_confidence numeric(4,3) not null default 0.8,
+    snapshot_id uuid references raw_snapshots(id) on delete set null,
+    updated_at timestamptz not null default now(),
+    unique (match_id, team_id, source_player_id, player_name)
+);
+
+create index if not exists idx_lineup_snapshots_match_team on lineup_snapshots(match_id, team_id);
+create index if not exists idx_lineup_snapshots_team_player on lineup_snapshots(team_id, player_id);
+
+create table if not exists team_match_results (
+    id uuid primary key default gen_random_uuid(),
+    team_id uuid not null references teams(id) on delete cascade,
+    opponent_team_id uuid references teams(id) on delete set null,
+    played_at timestamptz not null,
+    competition_name varchar(128) not null,
+    source_match_id varchar(128) not null,
+    is_neutral boolean not null default true,
+    goals_for int,
+    goals_against int,
+    result varchar(16) not null check (result in ('win', 'draw', 'loss', 'scheduled')),
+    opponent_rank int,
+    opponent_rank_bucket varchar(16) not null default 'unknown' check (opponent_rank_bucket in ('top10', 'top30', 'top50', 'other', 'unknown')),
+    source_confidence numeric(4,3) not null default 0.8,
+    snapshot_id uuid references raw_snapshots(id) on delete set null,
+    updated_at timestamptz not null default now(),
+    unique (team_id, source_match_id)
+);
+
+create index if not exists idx_team_match_results_team_time on team_match_results(team_id, played_at desc);
+
 create table if not exists coaches (
     id uuid primary key default gen_random_uuid(),
     team_id uuid not null references teams(id) on delete cascade,

@@ -265,6 +265,11 @@ class DongqiudiWorldCupDataAdapter:
         "shots": "shots",
         "shots_on_target": "shots_on_target",
         "key_passes": "key_passes",
+        "appearances": "appearances",
+        "minutes": "time_played",
+        "starts": "starts",
+        "yellow_cards": "yellow_cards",
+        "red_cards": "red_cards",
     }
 
     def __init__(self, source_type: str, timeout_seconds: float = 20.0):
@@ -395,7 +400,30 @@ class DongqiudiWorldCupDataAdapter:
                 )
                 if person_id in market_values:
                     player["market_value_eur"] = market_values[person_id]
-                player[stat_name] = cls.to_int(row.get("count") or row.get("row_2"))
+                count = cls.to_int(row.get("count") or row.get("row_2"))
+                if stat_name == "appearances":
+                    player["recent_matches"] = count
+                elif stat_name == "minutes":
+                    player["minutes"] = count
+                else:
+                    player[stat_name] = count
+                player["source_count"] = len(
+                    [
+                        key
+                        for key in (
+                            "goals",
+                            "assists",
+                            "shots",
+                            "shots_on_target",
+                            "key_passes",
+                            "minutes",
+                            "starts",
+                            "yellow_cards",
+                            "red_cards",
+                        )
+                        if player.get(key) is not None
+                    ]
+                )
         return list(players.values())
 
     @classmethod

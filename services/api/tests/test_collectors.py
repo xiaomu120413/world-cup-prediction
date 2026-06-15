@@ -167,6 +167,45 @@ def test_dongqiudi_world_cup_player_ranking_parser_merges_stats():
                 ]
             }
         },
+        "appearances": {
+            "content": {
+                "data": [
+                    {
+                        "person_id": "50259320",
+                        "person_name": "Havertz",
+                        "team_id": "50000868",
+                        "team_name": "Germany",
+                        "count": "1",
+                    }
+                ]
+            }
+        },
+        "minutes": {
+            "content": {
+                "data": [
+                    {
+                        "person_id": "50259320",
+                        "person_name": "Havertz",
+                        "team_id": "50000868",
+                        "team_name": "Germany",
+                        "count": "90",
+                    }
+                ]
+            }
+        },
+        "starts": {
+            "content": {
+                "data": [
+                    {
+                        "person_id": "50259320",
+                        "person_name": "Havertz",
+                        "team_id": "50000868",
+                        "team_name": "Germany",
+                        "count": "1",
+                    }
+                ]
+            }
+        },
     }
 
     players = DongqiudiWorldCupDataAdapter.extract_players(ranking_payloads, {"50259320": 75000000})
@@ -180,9 +219,11 @@ def test_dongqiudi_world_cup_player_ranking_parser_merges_stats():
             "source_team_id": "50000868",
             "market_value_eur": 75000000,
             "recent_matches": 1,
-            "source_count": 1,
+            "source_count": 4,
             "goals": 2,
             "assists": 1,
+            "minutes": 90,
+            "starts": 1,
         }
     ]
 
