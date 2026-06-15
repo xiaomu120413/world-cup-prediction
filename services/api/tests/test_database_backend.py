@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
 from app.main import app
@@ -92,3 +93,15 @@ def test_database_baseline_recompute_writes_outputs():
     assert result["matches_written"] == 1
     assert result["rankings_written"] >= 3
     assert result["group_simulations_written"] >= 4
+
+
+def test_database_collector_writes_idempotent_raw_snapshot():
+    with SessionLocal() as db:
+        first = CollectorRunner(db).run("local_sample", "schedule")
+        second = CollectorRunner(db).run("local_sample", "schedule")
+
+    assert first["status"] == "completed"
+    assert first["records_written"] in (0, 1)
+    assert second["status"] == "completed"
+    assert second["records_written"] == 0
+    assert first["snapshot_ids"] == second["snapshot_ids"]

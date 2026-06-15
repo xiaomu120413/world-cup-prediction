@@ -178,3 +178,14 @@ Test date: 2026-06-15
 | `python scripts/recompute_predictions.py --scope matchday --match-id usa-paraguay-2026-06-13 --seed 20260615` | Passed |
 | `POST /api/admin/predictions/recompute` in database mode | 200, `status=completed` |
 | Outputs written | Match prediction, scorelines, rankings, group simulations |
+
+## Collector Framework Smoke
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 41 tests |
+| `python scripts/run_collector.py --source local_sample --source-type schedule` | Passed |
+| `POST /api/admin/collectors/run` in database mode | 200, `status=completed` |
+| Idempotency check | Repeated schedule collector run did not duplicate `raw_snapshots` |

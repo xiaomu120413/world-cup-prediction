@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Header, Query
 
+from app.collectors.runner import CollectorRunner
 from app.core.cache import cached_json
 from app.core.config import Settings, get_settings
 from app.core.responses import envelope, list_envelope, not_found, now_iso
@@ -318,7 +319,16 @@ def player_detail(player_id: str):
 
 
 @admin_router.post("/collectors/run", dependencies=[Depends(require_admin)])
-def run_collector(payload: dict):
+def run_collector(payload: dict, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        with SessionLocal() as db:
+            result = CollectorRunner(db).run(
+                source=payload.get("source", "local_sample"),
+                source_type=payload.get("source_type") or payload.get("job_type", "schedule"),
+                dry_run=payload.get("dry_run", False),
+            )
+        return envelope(result)
+
     return envelope(
         {
             "status": "accepted",

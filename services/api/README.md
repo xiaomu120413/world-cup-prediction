@@ -113,6 +113,32 @@ curl -X POST http://127.0.0.1:8000/api/admin/predictions/recompute `
   -d '{"scope":"matchday","match_ids":["usa-paraguay-2026-06-13"],"seed":20260615}'
 ```
 
+## Collectors
+
+Run the local sample collector to verify the raw snapshot and collector run flow:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/run_collector.py --source local_sample --source-type schedule
+```
+
+Supported sample source types:
+
+```text
+schedule
+standings
+player_ranking
+```
+
+Admin API trigger:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/api/admin/collectors/run `
+  -H "Authorization: Bearer change-me" `
+  -H "Content-Type: application/json" `
+  -d '{"source":"local_sample","source_type":"schedule"}'
+```
+
 ## Notes
 
 Set `DATA_BACKEND=database` to read supported routes from PostgreSQL after schema and seed data are initialized.

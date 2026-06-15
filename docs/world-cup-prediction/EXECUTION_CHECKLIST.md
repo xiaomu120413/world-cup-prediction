@@ -784,3 +784,12 @@ Update date: 2026-06-15
 - `scripts/recompute_predictions.py` can write match predictions, scoreline predictions, ranking predictions, and group simulations.
 - `POST /api/admin/predictions/recompute` now executes the task when `DATA_BACKEND=database`.
 - Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 38 tests.
+
+## Collector Framework Update
+
+Update date: 2026-06-15
+
+- Added collector adapter interface, local sample adapter, raw snapshot checksum, and collector run writer.
+- `scripts/run_collector.py` can write idempotent `raw_snapshots` and `collector_runs`.
+- `POST /api/admin/collectors/run` now executes collectors when `DATA_BACKEND=database`.
+- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 41 tests.
