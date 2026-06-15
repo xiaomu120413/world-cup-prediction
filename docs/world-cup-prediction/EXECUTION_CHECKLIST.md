@@ -793,3 +793,12 @@ Update date: 2026-06-15
 - `scripts/run_collector.py` can write idempotent `raw_snapshots` and `collector_runs`.
 - `POST /api/admin/collectors/run` now executes collectors when `DATA_BACKEND=database`.
 - Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 41 tests.
+
+## Dongqiudi Collector Adapter Update
+
+Update date: 2026-06-15
+
+- Added first real low-frequency `dongqiudi` collector adapter for `https://pc.dongqiudi.com/`.
+- Adapter stores raw homepage snapshots and extracts candidate match/news items for later normalization.
+- Canonical match/team/player tables are not updated by this adapter yet; this keeps source parsing isolated from product data.
+- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 43 tests.

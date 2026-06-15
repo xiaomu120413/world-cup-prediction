@@ -189,3 +189,14 @@ Test date: 2026-06-15
 | `python scripts/run_collector.py --source local_sample --source-type schedule` | Passed |
 | `POST /api/admin/collectors/run` in database mode | 200, `status=completed` |
 | Idempotency check | Repeated schedule collector run did not duplicate `raw_snapshots` |
+
+## Dongqiudi Collector Smoke
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 43 tests |
+| `python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run` | Passed, 39 candidate items |
+| `python scripts/run_collector.py --source dongqiudi --source-type homepage` | Passed, raw snapshot written |
+| Source URL | `https://pc.dongqiudi.com/` |

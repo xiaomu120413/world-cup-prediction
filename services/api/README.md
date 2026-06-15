@@ -130,6 +130,15 @@ standings
 player_ranking
 ```
 
+The first real low-frequency source adapter is also available:
+
+```powershell
+python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run
+python scripts/run_collector.py --source dongqiudi --source-type homepage
+```
+
+The Dongqiudi adapter stores a raw homepage snapshot and extracts candidate football news and match blocks into the snapshot payload. It does not directly update canonical match/team tables yet.
+
 Admin API trigger:
 
 ```powershell
