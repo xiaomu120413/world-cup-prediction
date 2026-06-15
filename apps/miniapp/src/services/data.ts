@@ -5,7 +5,6 @@ import {
   championTop,
   darkHorseRankings,
   featuredMatch,
-  franceProfile,
   groupATeams,
   semiFinalRankings,
   upcomingMatches,
@@ -14,6 +13,7 @@ import {
   type RankingTeam,
   type TeamProfile
 } from '@/services/mock'
+import { getTeamProfileById } from '@/services/teamResources'
 
 type Envelope<T> = {
   data: T
@@ -298,7 +298,7 @@ export async function getRankingData(type: 'champion' | 'semifinal' | 'darkhorse
 
 export async function getTeamProfile(teamId = 'france'): Promise<TeamProfile> {
   if (!shouldUseApi()) {
-    return franceProfile
+    return getTeamProfileById(teamId)
   }
 
   const response = await requestData<ApiTeamProfile>(`/api/v1/teams/${teamId}/profile`)

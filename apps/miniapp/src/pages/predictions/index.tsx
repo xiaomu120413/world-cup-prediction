@@ -9,6 +9,7 @@ import { Section } from '@/components/Section'
 import { StatusView } from '@/components/StatusView'
 import { getRankingData, type LoadState } from '@/services/data'
 import { championRankings, darkHorseRankings, semiFinalRankings, type RankingTeam } from '@/services/mock'
+import { getTeamIdByName } from '@/services/teamResources'
 import { goTo, routes } from '@/utils/navigation'
 
 const rankingMap = {
@@ -82,7 +83,11 @@ export default function PredictionsPage() {
 
       <Section title='概率排名'>
         {rankings.map(team => (
-          <View className='ranking-row' key={team.name} onClick={() => goTo(routes.teamDetail)}>
+          <View
+            className='ranking-row'
+            key={team.name}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+          >
             <View className='ranking-row__top'>
               <Text className='ranking-row__rank'>{team.rank}</Text>
               <Flag team={team.name} size='sm' />

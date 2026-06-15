@@ -9,6 +9,7 @@ import { Section } from '@/components/Section'
 import { StatusView } from '@/components/StatusView'
 import { getGroupData, type GroupData, type LoadState } from '@/services/data'
 import { groupATeams } from '@/services/mock'
+import { getTeamIdByName } from '@/services/teamResources'
 import { goTo, routes } from '@/utils/navigation'
 
 const fallbackGroup: GroupData = {
@@ -76,7 +77,11 @@ export default function GroupsPage() {
           <Text>积分</Text>
         </View>
         {groupData.teams.map(team => (
-          <View className='table-row' key={team.name} onClick={() => goTo(routes.teamDetail)}>
+          <View
+            className='table-row'
+            key={team.name}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+          >
             <Text className='table-row__rank'>{team.rank}</Text>
             <View className='table-row__team-wrap'>
               <Flag team={team.name} size='sm' />

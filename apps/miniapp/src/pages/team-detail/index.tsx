@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
+import Taro from '@tarojs/taro'
 import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { Flag } from '@/components/Flag'
@@ -8,16 +9,24 @@ import { RatingRow } from '@/components/RatingRow'
 import { Section } from '@/components/Section'
 import { StatusView } from '@/components/StatusView'
 import { getTeamProfile, type LoadState } from '@/services/data'
-import { franceProfile, type TeamProfile } from '@/services/mock'
+import { getTeamProfileById } from '@/services/teamResources'
+import type { TeamProfile } from '@/services/mock'
+
+function getRouteTeamId() {
+  const params = Taro.getCurrentInstance().router?.params
+  const value = params?.teamId
+  return typeof value === 'string' && value ? value : 'france'
+}
 
 export default function TeamDetailPage() {
-  const [team, setTeam] = useState<TeamProfile>(franceProfile)
+  const [teamId] = useState(getRouteTeamId)
+  const [team, setTeam] = useState<TeamProfile>(() => getTeamProfileById(teamId))
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
     let mounted = true
     setLoadState('loading')
-    getTeamProfile()
+    getTeamProfile(teamId)
       .then(data => {
         if (mounted) {
           setTeam(data)
@@ -33,7 +42,7 @@ export default function TeamDetailPage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [teamId])
 
   return (
     <View className='page'>

@@ -10,6 +10,7 @@ import { Section } from '@/components/Section'
 import { StatusView } from '@/components/StatusView'
 import { getHomeData, type HomeData, type LoadState } from '@/services/data'
 import { championTop, featuredMatch, upcomingMatches } from '@/services/mock'
+import { getTeamIdByName } from '@/services/teamResources'
 import { goTo, routes } from '@/utils/navigation'
 
 const fallbackHome: HomeData = {
@@ -127,7 +128,11 @@ export default function MatchesPage() {
 
       <Section title='冠军概率' action='全部'>
         {homeData.championTop.map((team, index) => (
-          <View className='champion-row' key={team.name} onClick={() => goTo(routes.predictions)}>
+          <View
+            className='champion-row'
+            key={team.name}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+          >
             <View className='rank-medal'>
               <Icon name='medal' color={index === 0 ? '#f59e0b' : '#94a3b8'} size={30} />
               <Text>{index + 1}</Text>
