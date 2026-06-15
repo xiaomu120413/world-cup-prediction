@@ -290,6 +290,8 @@ class PublicDataRepository:
             "player_form_snapshots": self.count_rows(player_form_snapshots),
             "group_standings": self.count_rows(group_standings),
             "raw_snapshots": self.count_rows(raw_snapshots),
+            "dongqiudi_standings_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_standings"),
+            "dongqiudi_player_ranking_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_player_rankings"),
             "collector_runs": self.count_rows(collector_runs),
             "news_items": self.count_rows(news_items),
             "match_predictions": self.count_rows(match_predictions),
@@ -345,6 +347,15 @@ class PublicDataRepository:
         return int(
             self.db.execute(
                 select(func.count()).select_from(matches).where(matches.c.public_id.like("thestatsapi-%"))
+            ).scalar_one()
+        )
+
+    def count_raw_snapshots(self, source: str, source_type: str) -> int:
+        return int(
+            self.db.execute(
+                select(func.count())
+                .select_from(raw_snapshots)
+                .where(and_(raw_snapshots.c.source == source, raw_snapshots.c.source_type == source_type))
             ).scalar_one()
         )
 

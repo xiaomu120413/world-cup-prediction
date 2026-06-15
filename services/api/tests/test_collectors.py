@@ -1,5 +1,6 @@
 from app.collectors.adapters import (
     DongqiudiHomepageAdapter,
+    DongqiudiWorldCupDataAdapter,
     LocalSampleAdapter,
     RawSnapshot,
     TheStatsApiFixturesAdapter,
@@ -66,6 +67,13 @@ def test_build_adapter_supports_dongqiudi_source():
     assert adapter.source == "dongqiudi"
 
 
+def test_build_adapter_supports_dongqiudi_world_cup_data_source():
+    adapter = build_adapter("dongqiudi", "world_cup_player_rankings")
+
+    assert adapter.source == "dongqiudi"
+    assert adapter.source_type == "world_cup_player_rankings"
+
+
 def test_build_adapter_supports_thestatsapi_source():
     adapter = build_adapter("thestatsapi", "fixtures")
 
@@ -73,13 +81,107 @@ def test_build_adapter_supports_thestatsapi_source():
 
 
 def test_collection_catalog_tracks_required_data_domains():
-    summary = collection_catalog_summary({"dongqiudi_matches": 3, "thestatsapi_matches": 104, "news_items": 10})
+    summary = collection_catalog_summary(
+        {
+            "dongqiudi_matches": 3,
+            "thestatsapi_matches": 104,
+            "news_items": 10,
+            "dongqiudi_standings_snapshots": 1,
+            "dongqiudi_player_ranking_snapshots": 1,
+        }
+    )
 
     assert any(job["job_id"] == "dongqiudi_homepage" for job in COLLECTOR_CATALOG)
     assert summary["domains"][0]["domain"] == "matches"
     assert summary["domains"][0]["status"] == "partial_real"
     assert "thestatsapi/fixtures" in summary["domains"][0]["current_source"]
-    assert any(domain["domain"] == "player_form" for domain in summary["domains"])
+    assert next(domain for domain in summary["domains"] if domain["domain"] == "standings")["status"] == "partial_real"
+    assert next(domain for domain in summary["domains"] if domain["domain"] == "player_form")["status"] == "partial_real"
+
+
+def test_dongqiudi_world_cup_standings_parser():
+    data = {
+        "content": {
+            "rounds": [
+                {
+                    "content": {
+                        "data": [
+                            {
+                                "name": "A组",
+                                "data": [
+                                    {
+                                        "team_id": "50001278",
+                                        "team_name": "墨西哥",
+                                        "rank": "1",
+                                        "matches_total": "1",
+                                        "matches_won": "1",
+                                        "matches_draw": "0",
+                                        "matches_lost": "0",
+                                        "goals_pro": "2",
+                                        "goals_against": "0",
+                                        "points": "3",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+
+    groups = DongqiudiWorldCupDataAdapter.extract_groups(data)
+
+    assert groups[0]["code"] == "group-a"
+    assert groups[0]["teams"][0]["team"] == "墨西哥"
+    assert groups[0]["teams"][0]["goal_diff"] == 2
+
+
+def test_dongqiudi_world_cup_player_ranking_parser_merges_stats():
+    ranking_payloads = {
+        "goals": {
+            "content": {
+                "data": [
+                    {
+                        "person_id": "50259320",
+                        "person_name": "哈弗茨",
+                        "team_id": "50000868",
+                        "team_name": "德国",
+                        "count": "2",
+                    }
+                ]
+            }
+        },
+        "assists": {
+            "content": {
+                "data": [
+                    {
+                        "person_id": "50259320",
+                        "person_name": "哈弗茨",
+                        "team_id": "50000868",
+                        "team_name": "德国",
+                        "count": "1",
+                    }
+                ]
+            }
+        },
+    }
+
+    players = DongqiudiWorldCupDataAdapter.extract_players(ranking_payloads)
+
+    assert players == [
+        {
+            "code": "DQD-P50259320",
+            "source_player_id": "50259320",
+            "name": "哈弗茨",
+            "team": "德国",
+            "source_team_id": "50000868",
+            "recent_matches": 1,
+            "source_count": 1,
+            "goals": 2,
+            "assists": 1,
+        }
+    ]
 
 
 def test_thestatsapi_fixtures_adapter_parses_static_json():

@@ -15,11 +15,11 @@
 - 前端数据库模式已优先展示 `dongqiudi-` 开头的真实比赛
 - TheStatsAPI 2026 世界杯 fixtures：`https://www.thestatsapi.com/world-cup/data/fixtures.json`
 - 已能写入全量 104 场赛程、球队占位/参赛队、场地、城市、国家和时区
+- 懂球帝 sport-data 世界杯 2026 接口：`competition_id=61`、`season_id=26123`
+- 已能写入 12 个小组积分榜，以及球员射手、助攻、射门、射正、关键传球榜
 
 当前还不能当成真实生产数据：
 
-- 球员近期进球、助攻、评分：现有 `players`、`player_form_snapshots` 可能来自 seed 或 `local_sample`
-- 小组积分榜：现有数据可能来自 seed 或 `local_sample`
 - 球队今年比赛状态、对不同世界排名球队战绩、阵容稳定性
 - 球员/球队身价、主教练带队战绩
 - 场地、天气、海拔、草皮
@@ -92,8 +92,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 赛程/比分/状态 | TheStatsAPI fixtures + 懂球帝首页 | 赛程/场地真实，比分片段部分真实 | 官方/授权赛程源 + 懂球帝校验 | `matches` | 每日，比赛日加密 | 覆盖全部世界杯比赛，时间/双方/状态可解析 |
 | 中文新闻链接 | 懂球帝首页 | 部分真实 | 懂球帝/新闻源 | `news_items` | 每日 | 去重、保留 URL、可关联球队 |
-| 小组积分榜 | local sample/seed | 非真实 | 官方/授权积分源 | `group_standings` | 赛后 30 分钟 | 积分、净胜球、排名一致 |
-| 球员近期进球助攻 | local sample/seed | 非真实 | 授权球员数据或稳定页面 | `players`、`player_form_snapshots` | 每日 | 至少进球、助攻、分钟、评分、可用状态 |
+| 小组积分榜 | 懂球帝 sport-data | 部分真实 | 官方/授权积分源交叉校验 | `group_standings` | 赛后 30 分钟 | 积分、净胜球、排名一致 |
+| 球员近期进球助攻 | 懂球帝 sport-data | 部分真实 | 授权球员数据或稳定页面 | `players`、`player_form_snapshots` | 每日 | 已有进球、助攻、射门、射正、关键传球；分钟、评分、可用状态待补 |
 | 球队今年比赛状态 | 未接入 | 缺失 | 历史比赛库/授权数据源 | `team_form_snapshots` | 每日 | 最近 N 场、进失球、场均积分 |
 | 对不同世界排名球队战绩 | 未接入 | 缺失 | 历史比赛 + FIFA/Elo 排名快照 | `team_form_snapshots.top30_record` | 每周/赛前 | Top10/Top30/Top50 战绩可计算 |
 | 阵容稳定性 | 未接入 | 缺失 | 首发/出场分钟/大名单 | `team_form_snapshots.lineup_stability_score` | 每日 | 最近 N 场主力出勤率可计算 |
@@ -111,8 +111,8 @@
 | --- | --- | --- | --- |
 | 1 | `dongqiudi_homepage` | 已有真实入口稳定化 | 保留 raw、比赛、新闻链接；继续做解析健壮性 |
 | 2 | `official_schedule_venues` | 全量赛程 + 场地 | 已用 TheStatsAPI fixtures 接入 104 场赛程和场地基础字段 |
-| 3 | `group_standings` | 小组积分榜 | 支撑小组页和出线模拟 |
-| 4 | `player_recent_form` | 球员进球、助攻、评分 | 支撑球队页、比赛模型特征 |
+| 3 | `group_standings` | 小组积分榜 | 已用懂球帝 sport-data 接入 12 个小组 |
+| 4 | `player_recent_form` | 球员进球、助攻、评分 | 已用懂球帝 sport-data 接入射手/助攻/射门等榜单；评分和出勤待补 |
 | 5 | `team_form` | 球队近期状态 | 支撑模型主要特征 |
 | 6 | `team_market_value` | 身价 | 作为实力特征之一 |
 | 7 | `coach_records` | 主教练 | 后续补 schema 和采集 |
@@ -397,8 +397,8 @@ select source, count(*) from news_items group by 1;
 
 1. 保持现有懂球帝首页采集稳定，补解析测试样本。
 2. TheStatsAPI fixtures 已接入；下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
-3. 接入真实积分榜，替换 seed/local sample。
-4. 接入球员近期榜单或球员详情数据，替换 `player_form_snapshots` 样例数据。
+3. 懂球帝世界杯积分榜已接入；后续接官方/授权积分源做交叉校验。
+4. 懂球帝球员榜已接入；下一步补球员分钟、评分、可用状态和国家队名单。
 5. 建 `team_form_snapshots` 的真实采集和计算任务。
 6. 补 `coaches`、`weather_snapshots`、`injuries` schema。
 7. 接 AI 新闻抽取，生成 `ai_insights`。

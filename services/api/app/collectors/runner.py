@@ -419,12 +419,8 @@ class CollectorRunner:
         if not rows:
             return 0
 
-        for row in rows:
-            self.db.execute(
-                delete(group_standings).where(
-                    and_(group_standings.c.stage_id == row["stage_id"], group_standings.c.team_id == row["team_id"])
-                )
-            )
+        stage_ids_to_replace = {row["stage_id"] for row in rows}
+        self.db.execute(delete(group_standings).where(group_standings.c.stage_id.in_(stage_ids_to_replace)))
         self.db.execute(insert(group_standings), rows)
         return len(rows)
 

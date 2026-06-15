@@ -144,6 +144,15 @@ python scripts/run_collector.py --source thestatsapi --source-type fixtures --dr
 python scripts/run_collector.py --source thestatsapi --source-type fixtures
 ```
 
+World Cup 2026 standings and player ranking data from Dongqiudi sport-data are available as:
+
+```powershell
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings --dry-run
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings --dry-run
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings
+```
+
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
 
 - `raw_snapshots`: immutable source payload and checksum.
@@ -182,6 +191,8 @@ Each adapter should emit the same canonical payload shape before normalization:
 Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, market value, lineup stability and coach records still need dedicated adapters or an authorized data source before they should be treated as production-grade.
 
 TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, country and timezone into `matches`, `teams`, `team_aliases` and `venues`. This source covers static schedule data only; it does not cover live scores, player form, standings or match stats.
+
+Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings`, and player ranking data into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target and key passes; minutes, ratings, injuries and availability still need a dedicated source.
 
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
 

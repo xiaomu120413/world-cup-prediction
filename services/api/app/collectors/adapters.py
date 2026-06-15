@@ -252,6 +252,158 @@ class DongqiudiHomepageAdapter:
         return slug or "team"
 
 
+class DongqiudiWorldCupDataAdapter:
+    source = "dongqiudi"
+    competition_id = "61"
+    season_id = "26123"
+    parser_version = "dongqiudi_world_cup_data_v1"
+    api_base_url = "https://sport-data.dongqiudi.com/soccer/biz/data"
+
+    ranking_types = {
+        "goals": "goals",
+        "assists": "assists",
+        "shots": "shots",
+        "shots_on_target": "shots_on_target",
+        "key_passes": "key_passes",
+    }
+
+    def __init__(self, source_type: str, timeout_seconds: float = 20.0):
+        if source_type not in {"world_cup_standings", "world_cup_player_rankings"}:
+            raise ValueError(f"Unsupported dongqiudi world cup source_type: {source_type}")
+        self.source_type = source_type
+        self.timeout_seconds = timeout_seconds
+
+    def fetch(self) -> RawSnapshot:
+        if self.source_type == "world_cup_standings":
+            url = self.standings_url()
+            response = self.get_json(url)
+            payload = {
+                "competition_id": self.competition_id,
+                "season_id": self.season_id,
+                "groups": self.extract_groups(response),
+                "items": [],
+            }
+            return RawSnapshot(
+                source=self.source,
+                source_type=self.source_type,
+                source_url=url,
+                payload=payload,
+                parser_version=self.parser_version,
+            )
+
+        ranking_payloads = {name: self.get_json(self.ranking_url(api_type)) for name, api_type in self.ranking_types.items()}
+        payload = {
+            "competition_id": self.competition_id,
+            "season_id": self.season_id,
+            "players": self.extract_players(ranking_payloads),
+            "ranking_sources": {name: self.ranking_url(api_type) for name, api_type in self.ranking_types.items()},
+            "items": [],
+        }
+        return RawSnapshot(
+            source=self.source,
+            source_type=self.source_type,
+            source_url=self.ranking_url("goals"),
+            payload=payload,
+            parser_version=self.parser_version,
+        )
+
+    def get_json(self, url: str) -> dict:
+        response = httpx.get(
+            url,
+            timeout=self.timeout_seconds,
+            headers={
+                "User-Agent": "world-cup-prediction-bot/0.1 (+low-frequency research collector)",
+                "Accept": "application/json",
+                "Referer": "https://m.dongqiudi.com/stat/9/rankingGoal",
+            },
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def standings_url(self) -> str:
+        return (
+            f"{self.api_base_url}/standing?season_id={self.season_id}"
+            "&app=dqd&version=830&platform=miniprogram&language=zh-cn&app_type="
+        )
+
+    def ranking_url(self, ranking_type: str) -> str:
+        return (
+            f"{self.api_base_url}/person_ranking?app=dqd&version=830&platform=miniprogram"
+            f"&type={ranking_type}&season_id={self.season_id}"
+        )
+
+    @classmethod
+    def extract_groups(cls, data: dict) -> list[dict]:
+        values = []
+        rounds = data.get("content", {}).get("rounds", [])
+        for round_item in rounds:
+            for group_item in round_item.get("content", {}).get("data", []):
+                group_name = group_item.get("name") or ""
+                group_code = cls.group_code(group_name)
+                teams = []
+                for row in group_item.get("data", []):
+                    goals_for = cls.to_int(row.get("goals_pro"))
+                    goals_against = cls.to_int(row.get("goals_against"))
+                    teams.append(
+                        {
+                            "team": row.get("team_name"),
+                            "source_team_id": row.get("team_id"),
+                            "rank": cls.to_int(row.get("rank"), 99),
+                            "played": cls.to_int(row.get("matches_total")),
+                            "wins": cls.to_int(row.get("matches_won")),
+                            "draws": cls.to_int(row.get("matches_draw")),
+                            "losses": cls.to_int(row.get("matches_lost")),
+                            "goals_for": goals_for,
+                            "goals_against": goals_against,
+                            "goal_diff": goals_for - goals_against,
+                            "points": cls.to_int(row.get("points")),
+                        }
+                    )
+                if teams:
+                    values.append({"code": group_code, "name": group_name, "teams": teams})
+        return values
+
+    @classmethod
+    def extract_players(cls, ranking_payloads: dict[str, dict]) -> list[dict]:
+        players: dict[str, dict] = {}
+        for stat_name, payload in ranking_payloads.items():
+            for row in payload.get("content", {}).get("data", []):
+                person_id = row.get("person_id")
+                if not person_id:
+                    continue
+                player = players.setdefault(
+                    person_id,
+                    {
+                        "code": f"DQD-P{person_id}",
+                        "source_player_id": person_id,
+                        "name": row.get("person_name"),
+                        "team": row.get("team_name") or row.get("row_1"),
+                        "source_team_id": row.get("team_id"),
+                        "recent_matches": 1,
+                        "source_count": 1,
+                    },
+                )
+                player[stat_name] = cls.to_int(row.get("count") or row.get("row_2"))
+        return list(players.values())
+
+    @staticmethod
+    def group_code(value: str) -> str:
+        match = re.search(r"([A-ZＡ-ＺA-L])\s*组|([A-L])", value, re.IGNORECASE)
+        if match:
+            letter = (match.group(1) or match.group(2)).lower()
+            return f"group-{letter}"
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+        return slug or "group-unknown"
+
+    @staticmethod
+    def to_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+
 class TheStatsApiFixturesAdapter:
     source = "thestatsapi"
     source_type = "fixtures"
@@ -408,6 +560,8 @@ def build_adapter(source: str, source_type: str) -> CollectorAdapter:
     if source == "local_sample":
         return LocalSampleAdapter(source_type)
     if source == "dongqiudi":
+        if source_type in {"world_cup_standings", "world_cup_player_rankings"}:
+            return DongqiudiWorldCupDataAdapter(source_type)
         return DongqiudiHomepageAdapter(source_type)
     if source == "thestatsapi":
         return TheStatsApiFixturesAdapter(source_type)

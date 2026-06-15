@@ -200,6 +200,8 @@ def collect_standings(snapshot: RawSnapshot, records: dict) -> None:
             records["standings"].append(
                 {
                     "stage_code": stage_code,
+                    "stage_name": group.get("name") or stage_code.replace("-", " ").title(),
+                    "stage_type": group.get("stage_type", "group"),
                     "team_code": team["code"],
                     "played": int(item.get("played", wins + draws + losses)),
                     "wins": wins,

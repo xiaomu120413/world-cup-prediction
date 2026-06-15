@@ -23,23 +23,23 @@ COLLECTOR_CATALOG = [
     },
     {
         "job_id": "group_standings",
-        "source": "authorized_or_official",
-        "source_type": "standings",
+        "source": "dongqiudi",
+        "source_type": "world_cup_standings",
         "domains": ["standings"],
         "target_tables": ["raw_snapshots", "collector_runs", "group_standings"],
-        "status": "planned_required",
+        "status": "implemented_partial_real",
         "frequency": "daily_and_post_match",
-        "notes": "Current standings are sample/local unless a real adapter writes them.",
+        "notes": "World Cup 2026 group standings from Dongqiudi sport-data API.",
     },
     {
         "job_id": "player_recent_form",
-        "source": "authorized_stats_or_dongqiudi_detail",
-        "source_type": "player_ranking",
+        "source": "dongqiudi",
+        "source_type": "world_cup_player_rankings",
         "domains": ["players", "player_form"],
         "target_tables": ["raw_snapshots", "collector_runs", "players", "player_form_snapshots"],
-        "status": "planned_required",
+        "status": "implemented_partial_real",
         "frequency": "daily",
-        "notes": "Goals, assists, minutes, shots, key passes, ratings and availability. Current rows can be sample data.",
+        "notes": "World Cup 2026 player rankings from Dongqiudi sport-data API: goals, assists, shots, shots on target and key passes.",
     },
     {
         "job_id": "team_form",
@@ -102,6 +102,8 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     player_forms = counts.get("player_form_snapshots", 0)
     standings = counts.get("group_standings", 0)
     news = counts.get("news_items", 0)
+    dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
+    dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
 
     return {
         "domains": [
@@ -127,14 +129,20 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             },
             {
                 "domain": "standings",
-                "status": "sample_or_partial" if standings > 0 else "missing_real_source",
-                "current_source": "local_sample_or_seed" if standings > 0 else None,
+                "status": "partial_real" if dongqiudi_standings > 0 else ("sample_or_partial" if standings > 0 else "missing_real_source"),
+                "current_source": "dongqiudi/world_cup_standings"
+                if dongqiudi_standings > 0
+                else ("local_sample_or_seed" if standings > 0 else None),
                 "target_tables": ["group_standings"],
             },
             {
                 "domain": "player_form",
-                "status": "sample_or_partial" if players > 0 and player_forms > 0 else "missing_real_source",
-                "current_source": "local_sample_or_seed" if players > 0 and player_forms > 0 else None,
+                "status": "partial_real"
+                if dongqiudi_player_rankings > 0
+                else ("sample_or_partial" if players > 0 and player_forms > 0 else "missing_real_source"),
+                "current_source": "dongqiudi/world_cup_player_rankings"
+                if dongqiudi_player_rankings > 0
+                else ("local_sample_or_seed" if players > 0 and player_forms > 0 else None),
                 "target_tables": ["players", "player_form_snapshots"],
             },
             {
