@@ -80,6 +80,31 @@ Required result:
 - all `*_without_source=0`
 - `team_stat_snapshots_without_source=0`
 
+## Executable Scheduler
+
+Use the API scheduler entrypoint for local cron, Windows Task Scheduler, Mac mini launchd, or cloud crontab:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/run_refresh_schedule.py --cadence daily_00
+python scripts/run_refresh_schedule.py --cadence daily_12
+python scripts/run_refresh_schedule.py --cadence post_match
+python scripts/run_refresh_schedule.py --cadence weekly
+```
+
+Supported cadences:
+
+| Cadence | Intended trigger | Main work |
+| --- | --- | --- |
+| `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores, standings, player ranking, team detail data, FIFA ranks, verified injuries, news, prediction recompute, audit |
+| `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, verified injuries, news, prediction recompute, audit |
+| `post_match` | 30-60 minutes after matches finish | Scores, standings, played lineups, player ranking, matchday news, prediction recompute, audit |
+| `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, historical results, market-value export, prediction recompute, audit |
+| `auto` | Optional frequent runner | Chooses `daily_00`, `daily_12`, or `post_match` from local time and match context |
+
+The scheduler writes `collector_runs` rows with `source=scheduler` and `job_type=refresh:{cadence}`. It also uses PostgreSQL advisory locks and once-per-slot checks to avoid duplicate concurrent runs.
+
 ## Current Canonical Sources
 
 | Domain | Canonical source |

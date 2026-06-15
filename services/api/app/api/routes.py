@@ -23,6 +23,7 @@ from app.data.mock_store import (
 )
 from app.repositories.repository_provider import use_database, with_public_repository
 from app.predictions.service import BaselinePredictionService
+from app.scheduler.refresh import RefreshScheduler
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -386,6 +387,28 @@ def recompute_predictions(payload: dict, settings: Settings = Depends(get_settin
             "scope": payload.get("scope", "matchday"),
             "match_ids": payload.get("match_ids", []),
             "model_version": payload.get("model_version", "baseline_2026_06_13"),
+            "queued_at": now_iso(),
+        }
+    )
+
+
+@admin_router.post("/refresh/run", dependencies=[Depends(require_admin)])
+def run_refresh(payload: dict, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        with SessionLocal() as db:
+            result = RefreshScheduler(db).run(
+                cadence=payload.get("cadence", "auto"),
+                dry_run=payload.get("dry_run", False),
+                force=payload.get("force", False),
+                stop_on_error=not payload.get("continue_on_error", False),
+            )
+        return envelope(result)
+
+    return envelope(
+        {
+            "status": "accepted",
+            "cadence": payload.get("cadence", "auto"),
+            "dry_run": payload.get("dry_run", False),
             "queued_at": now_iso(),
         }
     )

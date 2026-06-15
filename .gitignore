@@ -22,6 +22,7 @@ apps/miniapp/screenshots/
 services/api/.venv/
 services/api/.pytest_cache/
 services/api/**/__pycache__/
+services/api/exports/
 
 # Logs
 npm-debug.log*

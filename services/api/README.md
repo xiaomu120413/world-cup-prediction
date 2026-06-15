@@ -254,6 +254,19 @@ The source-link audit should print `0` for every `*_without_source` check. The r
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
 The operational refresh cadence is documented in `docs/world-cup-prediction/DATA_REFRESH_POLICY.md`. Weather refresh is fixed at 00:00 and 12:00 local time for the MVP; matchday only raises news/injury/lineup priority and post-match refreshes.
 
+Run the executable refresh scheduler:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/run_refresh_schedule.py --cadence daily_00 --dry-run
+python scripts/run_refresh_schedule.py --cadence daily_12
+python scripts/run_refresh_schedule.py --cadence post_match
+python scripts/run_refresh_schedule.py --cadence weekly
+```
+
+The scheduler writes its own `collector_runs` records with `source=scheduler` and `job_type=refresh:{cadence}`. It uses PostgreSQL advisory locks so the same cadence cannot run concurrently. Use `--force` only for manual reruns after checking the previous run.
+
 Admin API trigger:
 
 ```powershell
@@ -261,6 +274,15 @@ curl -X POST http://127.0.0.1:8000/api/admin/collectors/run `
   -H "Authorization: Bearer change-me" `
   -H "Content-Type: application/json" `
   -d '{"source":"local_sample","source_type":"schedule"}'
+```
+
+Refresh scheduler API trigger:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/api/admin/refresh/run `
+  -H "Authorization: Bearer change-me" `
+  -H "Content-Type: application/json" `
+  -d '{"cadence":"daily_12","dry_run":true}'
 ```
 
 ## Notes
