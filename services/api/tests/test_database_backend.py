@@ -330,6 +330,12 @@ def test_database_collector_writes_fixture_venues():
         match_row = db.execute(
             select(matches.c.venue_id).where(matches.c.public_id == "thestatsapi-match-test")
         ).first()
+        db.execute(
+            data_source_links.delete().where(
+                data_source_links.c.entity_type.in_(["match", "venue"]),
+                data_source_links.c.entity_key.in_(["thestatsapi-match-test", "test-venue"]),
+            )
+        )
         db.execute(matches.delete().where(matches.c.public_id == "thestatsapi-match-test"))
         db.execute(teams.delete().where(teams.c.name_zh.in_(["Test Home", "Test Away"])))
         db.execute(venues.delete().where(venues.c.code == "test-venue"))
