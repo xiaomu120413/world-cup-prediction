@@ -1,0 +1,100 @@
+# 世界杯预测小程序测试报告
+
+测试日期：2026-06-15
+
+## 1. 测试范围
+
+本轮覆盖 MVP 当前可运行部分：
+
+- 后端 FastAPI 契约测试
+- 后端数据库 schema / repository 查询测试
+- 本地 HTTP smoke test
+- Taro 小程序 TypeScript 检查
+- H5 构建
+- 微信小程序构建
+- H5 浏览器移动端和桌面端页面 smoke
+- 首页到比赛详情跳转
+- 底部导航跳转
+
+## 2. 自动化测试结果
+
+| 测试项 | 命令 | 结果 |
+| --- | --- | --- |
+| 后端 pytest | `.venv\Scripts\python.exe -m pytest` | 通过，27 passed |
+| 小程序类型检查 | `npm.cmd run typecheck` | 通过 |
+| H5 构建 | `npm.cmd run build:h5` | 通过，有 entrypoint size warning |
+| 微信小程序构建 | `npm.cmd run build:weapp` | 通过 |
+
+## 3. HTTP Smoke Test
+
+本地 API 地址：`http://127.0.0.1:8001`
+
+| 接口 | 结果 |
+| --- | --- |
+| `GET /health` | 200 |
+| `GET /api/v1/version` | 200 |
+| `GET /api/v1/home` | 200 |
+| `GET /api/v1/matches/today` | 200 |
+| `GET /api/v1/matches/usa-paraguay-2026-06-13` | 200 |
+| `GET /api/v1/matches/usa-paraguay-2026-06-13/prediction` | 200 |
+| `GET /api/v1/groups` | 200 |
+| `GET /api/v1/groups/group-a` | 200 |
+| `GET /api/v1/predictions/rankings?type=champion` | 200 |
+| `GET /api/v1/teams/france` | 200 |
+
+## 4. 浏览器 Smoke Test
+
+H5 预览地址：`http://127.0.0.1:4173`
+
+移动端视口：390 x 844
+
+| 页面 | 必要内容 | 横向溢出 | 结果 |
+| --- | --- | --- | --- |
+| 首页 | 今日预测、AI 简报、冠军概率 | 无 | 通过 |
+| 比赛详情 | AI 赛前报告、关键证据、比分分布、出线影响 | 无 | 通过 |
+| 小组页 | A组形势、积分榜、出线概率、关键赛程 | 无 | 通过 |
+| 预测榜 | 预测榜、AI 榜单解读、概率排名、今日变化 | 无 | 通过 |
+| 球队页 | AI 球队判断、赛事概率、核心评分、关键球员 | 无 | 通过 |
+
+桌面视口：1280 x 720
+
+| 页面 | 横向溢出 | 结果 |
+| --- | --- | --- |
+| 首页 | 无 | 通过 |
+| 比赛详情 | 无 | 通过 |
+| 小组页 | 无 | 通过 |
+| 预测榜 | 无 | 通过 |
+| 球队页 | 无 | 通过 |
+
+交互测试：
+
+| 交互 | 结果 |
+| --- | --- |
+| 首页点击“查看 AI 赛前报告” | 通过，进入比赛详情 |
+| 底部导航：比赛 -> 小组 | 通过 |
+| 底部导航：小组 -> 预测 | 通过 |
+| 底部导航：预测 -> 球队 | 通过 |
+| 底部导航：球队 -> 比赛 | 通过 |
+
+控制台错误：未发现 error。
+
+## 5. 本轮发现并修复的问题
+
+| 问题 | 处理 |
+| --- | --- |
+| H5 浏览器标题显示乱码 | 在 `apps/miniapp/src/index.html` 增加 `<meta charset="utf-8" />` |
+| 底部导航自动化定位不稳定 | 在 `BottomNav` 导航项增加 `data-testid` |
+| 后端接口测试覆盖不足 | 扩展 `tests/test_contract.py`，覆盖核心公开接口 |
+
+## 6. 已知非阻断项
+
+- H5 构建存在 Taro entrypoint size warning，当前约 290 KiB。MVP 阶段可接受，上线前需要做包体优化。
+- 后端测试在 Python 3.14 下有 FastAPI / Starlette 的弃用警告。建议生产环境使用 Python 3.12。
+- PostgreSQL 实例尚未在本机执行迁移，本轮只验证了 schema 元数据、Alembic history 和 repository 查询构造。
+
+## 7. 下一轮测试重点
+
+- 启动真实 PostgreSQL，执行 `alembic upgrade head` 和 seed。
+- 设置 `DATA_BACKEND=database`，验证比赛详情、预测、球队列表读库。
+- 前端 service 层从 mock 切 API 后，补接口失败、空状态、超时状态测试。
+- 微信开发者工具真机预览。

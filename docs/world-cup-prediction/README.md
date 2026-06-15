@@ -29,6 +29,7 @@
 | [FUNCTIONAL_DESIGN.md](./FUNCTIONAL_DESIGN.md) | 功能设计，包含首页、比赛详情、小组、预测榜、球队页、采集、预测、AI 情报和验收点 |
 | [TECHNICAL_EXECUTION_PLAN.md](./TECHNICAL_EXECUTION_PLAN.md) | 可正式执行的技术方案，包含服务器、域名、部署、模块拆解、接口、任务、模型、AI 和上线里程碑 |
 | [EXECUTION_CHECKLIST.md](./EXECUTION_CHECKLIST.md) | 执行清单，包含阶段任务、交付物、验收标准、测试点、上线检查和 Done 定义 |
+| [TEST_REPORT.md](./TEST_REPORT.md) | 测试报告，记录自动化测试、HTTP smoke、浏览器 smoke、已知问题和下一轮重点 |
 
 ## MVP 范围
 

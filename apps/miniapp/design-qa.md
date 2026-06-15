@@ -20,12 +20,22 @@
 | Text overflow | Pass | Probability labels and list rows fit the tested viewport. |
 | Design direction match | Pass | Uses the selected analyst-report direction: compact sports data UI, AI explanation cards, probability bars, and dense scan-friendly rows. |
 
+## 2026-06-15 Regression
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| H5 browser title | Pass | Added UTF-8 charset so the browser title displays `世界杯预测` correctly. |
+| Core route smoke | Pass | Checked five H5 routes at 390 x 844 and 1280 x 720; no horizontal overflow. |
+| Detail entry click | Pass | Home `查看 AI 赛前报告` navigates to match detail. |
+| Bottom navigation click | Pass | Added stable `data-testid` attributes and verified all four bottom navigation routes. |
+| Console errors | Pass | No browser console errors observed during smoke test. |
+
 ## Verification Commands
 
 ```bash
-npm run typecheck
-npm run build:h5
-npm run build:weapp
+npm.cmd run typecheck
+npm.cmd run build:h5
+npm.cmd run build:weapp
 ```
 
 ## Known Follow-Ups

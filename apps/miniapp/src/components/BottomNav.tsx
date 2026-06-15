@@ -16,6 +16,7 @@ export function BottomNav({ active }: { active: TabKey }) {
       {tabs.map(tab => (
         <View
           key={tab.key}
+          data-testid={`bottom-nav-${tab.key}`}
           className={`bottom-nav__item ${active === tab.key ? 'bottom-nav__item--active' : ''}`}
           onClick={() => active !== tab.key && switchSection(tab.url)}
         >
@@ -25,4 +26,3 @@ export function BottomNav({ active }: { active: TabKey }) {
     </View>
   )
 }
-
