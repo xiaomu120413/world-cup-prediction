@@ -206,6 +206,37 @@ create table if not exists lineup_snapshots (
 create index if not exists idx_lineup_snapshots_match_team on lineup_snapshots(match_id, team_id);
 create index if not exists idx_lineup_snapshots_team_player on lineup_snapshots(team_id, player_id);
 
+create table if not exists historical_international_matches (
+    id uuid primary key default gen_random_uuid(),
+    source_match_id varchar(128) not null unique,
+    match_date date not null,
+    played_at timestamptz not null,
+    home_team_id uuid not null references teams(id) on delete cascade,
+    away_team_id uuid not null references teams(id) on delete cascade,
+    home_team_name varchar(128) not null,
+    away_team_name varchar(128) not null,
+    home_score int not null check (home_score >= 0),
+    away_score int not null check (away_score >= 0),
+    tournament varchar(128) not null,
+    city varchar(128),
+    country varchar(128),
+    neutral boolean not null default true,
+    source varchar(64) not null,
+    source_type varchar(64) not null,
+    source_url text,
+    source_line_number int,
+    source_confidence numeric(4,3) not null default 0.9,
+    snapshot_id uuid references raw_snapshots(id) on delete set null,
+    metadata jsonb not null default '{}'::jsonb,
+    updated_at timestamptz not null default now(),
+    check (home_team_id <> away_team_id)
+);
+
+create index if not exists idx_historical_international_matches_date on historical_international_matches(match_date desc);
+create index if not exists idx_historical_international_matches_home_team on historical_international_matches(home_team_id, match_date desc);
+create index if not exists idx_historical_international_matches_away_team on historical_international_matches(away_team_id, match_date desc);
+create index if not exists idx_historical_international_matches_tournament on historical_international_matches(tournament);
+
 create table if not exists team_match_results (
     id uuid primary key default gen_random_uuid(),
     team_id uuid not null references teams(id) on delete cascade,
@@ -226,6 +257,30 @@ create table if not exists team_match_results (
 );
 
 create index if not exists idx_team_match_results_team_time on team_match_results(team_id, played_at desc);
+
+create table if not exists team_stat_snapshots (
+    id uuid primary key default gen_random_uuid(),
+    team_id uuid not null references teams(id) on delete cascade,
+    metric_type varchar(64) not null,
+    metric_name varchar(128) not null,
+    rank int,
+    raw_value varchar(64),
+    numeric_value numeric(18,4),
+    value_unit varchar(32),
+    source varchar(64) not null,
+    source_type varchar(64) not null,
+    source_team_id varchar(128),
+    source_url text,
+    source_confidence numeric(4,3) not null default 0.8,
+    snapshot_id uuid references raw_snapshots(id) on delete set null,
+    as_of_at timestamptz not null,
+    metadata jsonb not null default '{}'::jsonb,
+    updated_at timestamptz not null default now(),
+    unique (team_id, metric_type, as_of_at, source)
+);
+
+create index if not exists idx_team_stat_snapshots_team_metric on team_stat_snapshots(team_id, metric_type);
+create index if not exists idx_team_stat_snapshots_metric_rank on team_stat_snapshots(metric_type, rank);
 
 create table if not exists coaches (
     id uuid primary key default gen_random_uuid(),

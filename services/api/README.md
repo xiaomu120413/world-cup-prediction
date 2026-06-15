@@ -153,12 +153,49 @@ python scripts/run_collector.py --source dongqiudi --source-type world_cup_playe
 python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings
 ```
 
-Enrich low-frequency foundation data, including FIFA official squad list coaches/players, venue capacity/surface/coordinates, Open-Meteo venue weather observations and derived team market values:
+Enrich low-frequency foundation data, including venue capacity/surface/coordinates, Open-Meteo venue weather observations and derived team market values from the Dongqiudi roster:
 
 ```powershell
 $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
 python scripts/enrich_foundation_data.py
 python scripts/backfill_data_source_links.py
+```
+
+Collect Dongqiudi World Cup national-team pages and team ranking metrics. This is the canonical player dataset: teams are matched by country/team first, and players are keyed by `DQD-P{person_id}` from `team/member_v2`:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/collect_dongqiudi_team_details.py
+python scripts/export_missing_market_values.py
+python scripts/audit_real_data.py
+```
+
+The missing-value export checks only Dongqiudi roster rows. A healthy local run should export `0` rows because `team/member_v2` and team/player pages currently provide market values for all roster players.
+
+If a licensed/provider export is added later, it must update existing `DQD-P*` player codes only. Do not create a parallel FIFA/offical player roster table for prediction features.
+
+Collect or refresh the other public real-data sources:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/collect_dongqiudi_match_context.py
+python scripts/collect_fifa_rankings.py
+python scripts/collect_public_news.py
+python scripts/audit_real_data.py
+```
+
+`collect_public_news.py` uses `--mode auto` by default. Matchday is derived from `matches.kickoff_at` on the Asia/Shanghai local date, not from a blanket tournament flag. News still runs on the low-frequency policy: 00:00, 12:00 and post-match. The collector expands keywords from the Dongqiudi 48-team roster, writes matched teams into `news_items.related_team_ids`, and records matched keywords/teams in `data_source_links.metadata`.
+
+Import historical men's national-team match results without depending on Kaggle authentication. This writes one actual source match per row into `historical_international_matches` first, then writes `team_match_results` rows only as compatibility data for existing model queries. By default this pulls the same public dataset from GitHub raw; use `--csv-path` for a local Kaggle export:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/collect_historical_international_results.py --dry-run
+python scripts/collect_historical_international_results.py
+python scripts/collect_historical_international_results.py --csv-path path/to/results.csv
 ```
 
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
@@ -196,11 +233,11 @@ Each adapter should emit the same canonical payload shape before normalization:
 }
 ```
 
-Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, market value, lineup stability and coach records still need dedicated adapters or an authorized data source before they should be treated as production-grade.
+Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, public market value, lineup stability and coach records now have real coverage from public sources. Player rows use a single canonical source: Dongqiudi `team/member_v2` with code `DQD-P{person_id}`.
 
 TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, country and timezone into `matches`, `teams`, `team_aliases` and `venues`. This source covers static schedule data only; it does not cover live scores, player form, standings or match stats.
 
-Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values; minutes, ratings, injuries and availability still need a dedicated source.
+Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values. `collect_dongqiudi_team_details.py` starts from the World Cup team list, then fetches each team page, `detail/team/{team_id}`, `team/member_v2/{team_id}` and the `cid=61` team ranking page APIs. It canonicalizes the national team first, then writes exactly one player row per Dongqiudi `person_id` as `DQD-P{person_id}`. It writes squad players, player market values, player appearance/goal/assist rows, team market values, Dongqiudi team aliases, coach/staff history and all available team-stat ranking metrics into `team_stat_snapshots` plus source links. These team-stat rows include cards, fouls, shots, passes, duels, saves, ratings and market value with both raw and numeric values for later model features. Historical `FIFA-*` player rows are removed during the run so prediction features consume only this one roster dataset.
 
 All normalized data must have a provenance row in `data_source_links`. The collector runner writes these rows for canonical entities such as `match`, `venue`, `team`, `team_alias`, `group_standing`, `team_form`, `player`, `player_form` and `news_item`.
 
@@ -215,6 +252,7 @@ python scripts/audit_real_data.py
 The source-link audit should print `0` for every `*_without_source` check. The real-data audit must return `"status": "pass"` before data is used by the prediction pipeline or production mini program.
 
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
+The operational refresh cadence is documented in `docs/world-cup-prediction/DATA_REFRESH_POLICY.md`. Weather refresh is fixed at 00:00 and 12:00 local time for the MVP; matchday only raises news/injury/lineup priority and post-match refreshes.
 
 Admin API trigger:
 

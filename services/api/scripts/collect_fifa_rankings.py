@@ -11,10 +11,60 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import data_source_links, players, raw_snapshots, team_aliases, teams
+from app.db.schema import data_source_links, raw_snapshots, team_aliases, teams
 from app.db.session import SessionLocal
 
 FIFA_RANKINGS_URL = "https://api.fifa.com/api/v3/rankings?gender=1&count=300"
+FIFA_CODE_TO_TEAM_CODE = {
+    "ALG": "ALGERIA",
+    "ARG": "ARGENTINA",
+    "AUS": "AUSTRALIA",
+    "AUT": "AUSTRIA",
+    "BEL": "BELGIUM",
+    "BIH": "BOSNIA-AND-HERZEGOVINA",
+    "BRA": "BRA",
+    "CAN": "CANADA",
+    "CIV": "COTE-D-IVOIRE",
+    "CPV": "CABO-VERDE",
+    "COL": "COLOMBIA",
+    "COD": "CONGO-DR",
+    "CRO": "CROATIA",
+    "CUW": "CURACAO",
+    "CZE": "CZECHIA",
+    "ECU": "ECUADOR",
+    "EGY": "EGYPT",
+    "ENG": "ENG",
+    "ESP": "SPAIN",
+    "FRA": "FRA",
+    "GER": "GERMANY",
+    "GHA": "GHANA",
+    "HAI": "HAITI",
+    "IRN": "IR-IRAN",
+    "IRQ": "IRAQ",
+    "JOR": "JORDAN",
+    "JPN": "JAPAN",
+    "KOR": "KOREA-REPUBLIC",
+    "KSA": "SAUDI-ARABIA",
+    "MAR": "MOROCCO",
+    "MEX": "MEXICO",
+    "NED": "NETHERLANDS",
+    "NOR": "NORWAY",
+    "NZL": "NEW-ZEALAND",
+    "PAN": "PANAMA",
+    "PAR": "PAR",
+    "POR": "PORTUGAL",
+    "QAT": "QATAR",
+    "RSA": "SOUTH-AFRICA",
+    "SCO": "SCOTLAND",
+    "SEN": "SENEGAL",
+    "SUI": "SWITZERLAND",
+    "SWE": "SWEDEN",
+    "TUN": "TUNISIA",
+    "TUR": "TURKIYE",
+    "URU": "URUGUAY",
+    "USA": "USA",
+    "UZB": "UZBEKISTAN",
+}
 
 
 def checksum(payload: dict) -> str:
@@ -57,23 +107,20 @@ def english_name(item: dict) -> str | None:
 
 
 def find_team(db, country_code: str, name: str | None):
-    team = db.execute(
-        select(teams.c.id, teams.c.code)
-        .select_from(teams.join(players, players.c.team_id == teams.c.id))
-        .where(players.c.code.like(f"FIFA-{country_code}-%"))
-        .limit(1)
-    ).mappings().first()
-    if team:
-        return team
+    code_candidates = [country_code]
+    mapped_code = FIFA_CODE_TO_TEAM_CODE.get(country_code)
+    if mapped_code and mapped_code not in code_candidates:
+        code_candidates.append(mapped_code)
     team = db.execute(
         select(teams.c.id, teams.c.code)
         .outerjoin(team_aliases, team_aliases.c.team_id == teams.c.id)
         .where(
             or_(
-                teams.c.code == country_code,
+                teams.c.code.in_(code_candidates),
                 teams.c.name_en == name,
                 teams.c.name_zh == name,
                 team_aliases.c.alias == country_code,
+                team_aliases.c.alias.in_(code_candidates),
                 team_aliases.c.alias == name,
             )
         )

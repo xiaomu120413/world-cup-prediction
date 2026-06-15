@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import subprocess
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -15,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import coaches, data_source_links, players, raw_snapshots, teams, venues, weather_snapshots
+from app.db.schema import data_source_links, raw_snapshots, teams, venues, weather_snapshots
 from app.db.session import SessionLocal
 
 API_TZ = ZoneInfo("Asia/Shanghai")
@@ -24,60 +22,6 @@ FIFA_STADIUM_INFO_URL = (
     "canadamexicousa2026/articles/stadium-information-details"
 )
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-FIFA_SQUAD_LIST_URL = "https://fdp.fifa.org/assetspublic/ce281/pdf/SquadLists-English.pdf"
-
-FIFA_CODE_TO_TEAM_NAME = {
-    "ALG": "阿尔及利亚",
-    "ARG": "阿根廷",
-    "AUS": "澳大利亚",
-    "AUT": "奥地利",
-    "BEL": "比利时",
-    "BIH": "波黑",
-    "BRA": "Brazil",
-    "CAN": "加拿大",
-    "CIV": "科特迪瓦",
-    "COD": "刚果民主共和国",
-    "COL": "哥伦比亚",
-    "CPV": "佛得角",
-    "CRO": "克罗地亚",
-    "CUW": "库拉索",
-    "CZE": "捷克",
-    "ECU": "厄瓜多尔",
-    "EGY": "埃及",
-    "ENG": "England",
-    "ESP": "西班牙",
-    "FRA": "France",
-    "GER": "德国",
-    "GHA": "加纳",
-    "HAI": "海地",
-    "IRN": "伊朗",
-    "IRQ": "伊拉克",
-    "JOR": "约旦",
-    "JPN": "日本",
-    "KOR": "韩国",
-    "KSA": "沙特阿拉伯",
-    "MAR": "摩洛哥",
-    "MEX": "墨西哥",
-    "NED": "荷兰",
-    "NOR": "挪威",
-    "NZL": "新西兰",
-    "PAN": "巴拿马",
-    "PAR": "Paraguay",
-    "POR": "葡萄牙",
-    "QAT": "卡塔尔",
-    "RSA": "南非",
-    "SCO": "苏格兰",
-    "SEN": "塞内加尔",
-    "SUI": "瑞士",
-    "SWE": "瑞典",
-    "TUN": "突尼斯",
-    "TUR": "土耳其",
-    "URU": "乌拉圭",
-    "USA": "United States",
-    "UZB": "乌兹别克斯坦",
-}
-
-
 VENUE_ENRICHMENT = [
     {
         "code": "arrowhead-stadium",
@@ -433,21 +377,29 @@ def write_weather_snapshots(db) -> dict:
 def aggregate_team_market_values(db) -> dict:
     latest_market_snapshot = db.execute(
         select(raw_snapshots.c.id)
-        .where(raw_snapshots.c.source == "dongqiudi", raw_snapshots.c.source_type == "world_cup_player_rankings")
+        .where(
+            raw_snapshots.c.source == "dongqiudi",
+            raw_snapshots.c.source_type.in_(["world_cup_team_details", "world_cup_player_rankings"]),
+        )
         .order_by(raw_snapshots.c.fetched_at.desc())
         .limit(1)
     ).scalar_one_or_none()
 
     rows = db.execute(
-        select(
-            teams.c.id,
-            teams.c.code,
-            func.sum(players.c.market_value_eur).label("market_value_eur"),
-            func.count(players.c.id).label("player_count"),
+        text(
+            """
+            with selected_players as (
+                select p.team_id, p.market_value_eur
+                from players p
+                where p.market_value_eur is not null
+                  and p.code like 'DQD-P%'
+            )
+            select t.id, t.code, sum(sp.market_value_eur) as market_value_eur, count(*) as player_count
+            from teams t
+            join selected_players sp on sp.team_id = t.id
+            group by t.id, t.code
+            """
         )
-        .select_from(teams.join(players, players.c.team_id == teams.c.id))
-        .where(players.c.market_value_eur.is_not(None))
-        .group_by(teams.c.id, teams.c.code)
     ).mappings().all()
 
     source_links = []
@@ -465,8 +417,8 @@ def aggregate_team_market_values(db) -> dict:
                 "confidence": 0.65,
                 "metadata": {
                     "player_count": int(row.player_count),
-                    "aggregation": "sum_matched_player_market_value_eur",
-                    "quality": "partial_roster_coverage",
+                    "aggregation": "sum_market_value_eur_from_dongqiudi_member_v2_roster",
+                    "selected_roster_priority": ["Dongqiudi team/member_v2 roster"],
                 },
             }
         )
@@ -474,179 +426,17 @@ def aggregate_team_market_values(db) -> dict:
     return {"team_market_values": len(rows), "team_market_value_source_links": links_written}
 
 
-def extract_fifa_squad_text() -> str:
-    pdf_path = Path(__file__).resolve().parents[1] / ".tmp-fifa-squad-list.pdf"
-    txt_path = Path(__file__).resolve().parents[1] / ".tmp-fifa-squad-list.txt"
-    response = httpx.get(FIFA_SQUAD_LIST_URL, timeout=60.0, follow_redirects=True)
-    response.raise_for_status()
-    pdf_path.write_bytes(response.content)
-    subprocess.run(["pdftotext", "-layout", str(pdf_path), str(txt_path)], check=True)
-    return txt_path.read_text(encoding="utf-8", errors="replace")
-
-
-def normalize_official_name(value: str) -> str:
-    return " ".join(value.split())
-
-
-def parse_fifa_squad_list(text_value: str) -> dict:
-    teams_payload = []
-    for page in text_value.split("\f"):
-        team_match = re.search(r"([A-Za-z][A-Za-z\s\-]+?)\s*\(([A-Z]{3})\)", page)
-        coach_match = re.search(r"Head coach\s+(.+?)(?:\s{2,}|\n)", page)
-        if not team_match:
-            continue
-        fifa_code = team_match.group(2)
-        players_payload = []
-        for line in page.splitlines():
-            player_match = re.match(r"^\s*(\d{1,2})\s+(GK|DF|MF|FW)\s+(.+?)(?:\s{2,}|$)", line)
-            if not player_match:
-                continue
-            players_payload.append(
-                {
-                    "shirt_number": int(player_match.group(1)),
-                    "position": player_match.group(2),
-                    "name": normalize_official_name(player_match.group(3)),
-                }
-            )
-        teams_payload.append(
-            {
-                "fifa_code": fifa_code,
-                "team_name": normalize_official_name(team_match.group(1)),
-                "mapped_team_name": FIFA_CODE_TO_TEAM_NAME.get(fifa_code),
-                "coach_name": normalize_official_name(coach_match.group(1)) if coach_match else None,
-                "players": players_payload,
-            }
-        )
-    return {"source_url": FIFA_SQUAD_LIST_URL, "teams": teams_payload}
-
-
-def import_fifa_squads(db) -> dict:
-    parsed = parse_fifa_squad_list(extract_fifa_squad_text())
-    snapshot_id = write_raw_snapshot(
-        db,
-        "fifa",
-        "official_squad_list",
-        FIFA_SQUAD_LIST_URL,
-        parsed,
-        "fifa_squad_pdf_v1",
-    )
-    team_rows = db.execute(select(teams.c.id, teams.c.code, teams.c.name_zh, teams.c.name_en)).mappings().all()
-    team_by_name = {row.name_zh: row for row in team_rows}
-    team_by_code = {row.code: row for row in team_rows}
-
-    coach_rows = []
-    player_rows = []
-    source_links = []
-    mapped_teams = 0
-    for team_item in parsed["teams"]:
-        mapped_name = team_item.get("mapped_team_name")
-        team_row = team_by_name.get(mapped_name) or team_by_code.get(team_item["fifa_code"])
-        if team_row is None:
-            continue
-        mapped_teams += 1
-        if team_item.get("coach_name"):
-            coach_rows.append(
-                {
-                    "team_id": team_row.id,
-                    "name_zh": team_item["coach_name"],
-                    "name_en": team_item["coach_name"],
-                    "major_tournament_record": {"fifa_team_code": team_item["fifa_code"]},
-                    "source_confidence": 0.95,
-                    "quality_status": "source",
-                }
-            )
-            source_links.append(
-                {
-                    "entity_type": "coach",
-                    "entity_key": f"{team_row.code}:{team_item['coach_name']}",
-                    "source": "fifa",
-                    "source_type": "official_squad_list",
-                    "source_url": FIFA_SQUAD_LIST_URL,
-                    "raw_snapshot_id": snapshot_id,
-                    "source_record_id": f"{team_item['fifa_code']}:coach",
-                    "confidence": 0.95,
-                    "metadata": {"team_code": team_row.code, "fifa_team_code": team_item["fifa_code"]},
-                }
-            )
-        for player in team_item["players"]:
-            player_code = f"FIFA-{team_item['fifa_code']}-{player['shirt_number']:02d}"
-            player_rows.append(
-                {
-                    "team_id": team_row.id,
-                    "code": player_code,
-                    "name_zh": player["name"],
-                    "name_en": player["name"],
-                    "position": player["position"],
-                    "shirt_number": player["shirt_number"],
-                    "quality_status": "source",
-                }
-            )
-            source_links.append(
-                {
-                    "entity_type": "player",
-                    "entity_key": player_code,
-                    "source": "fifa",
-                    "source_type": "official_squad_list",
-                    "source_url": FIFA_SQUAD_LIST_URL,
-                    "raw_snapshot_id": snapshot_id,
-                    "source_record_id": player_code,
-                    "confidence": 0.95,
-                    "metadata": {
-                        "team_code": team_row.code,
-                        "fifa_team_code": team_item["fifa_code"],
-                        "shirt_number": player["shirt_number"],
-                        "position": player["position"],
-                    },
-                }
-            )
-
-    if coach_rows:
-        coach_statement = (
-            pg_insert(coaches)
-            .values(coach_rows)
-            .on_conflict_do_update(
-                index_elements=["team_id", "name_zh"],
-                set_={
-                    "name_en": pg_insert(coaches).excluded.name_en,
-                    "major_tournament_record": pg_insert(coaches).excluded.major_tournament_record,
-                    "source_confidence": pg_insert(coaches).excluded.source_confidence,
-                    "quality_status": pg_insert(coaches).excluded.quality_status,
-                    "updated_at": text("now()"),
-                },
-            )
-        )
-        db.execute(coach_statement)
-    if player_rows:
-        player_statement = (
-            pg_insert(players)
-            .values(player_rows)
-            .on_conflict_do_update(
-                index_elements=["code"],
-                set_={
-                    "team_id": pg_insert(players).excluded.team_id,
-                    "name_zh": pg_insert(players).excluded.name_zh,
-                    "name_en": pg_insert(players).excluded.name_en,
-                    "position": pg_insert(players).excluded.position,
-                    "shirt_number": pg_insert(players).excluded.shirt_number,
-                    "quality_status": pg_insert(players).excluded.quality_status,
-                    "updated_at": text("now()"),
-                },
-            )
-        )
-        db.execute(player_statement)
-    links_written = write_source_links(db, snapshot_id, source_links)
+def skip_fifa_squad_import() -> dict:
     return {
-        "fifa_squad_teams_mapped": mapped_teams,
-        "fifa_coaches": len(coach_rows),
-        "fifa_official_players": len(player_rows),
-        "fifa_squad_source_links": links_written,
+        "fifa_squad_import": "skipped",
+        "player_roster_source": "dongqiudi/team_member_v2",
     }
 
 
 def main() -> None:
     with SessionLocal() as db:
         result = {}
-        result.update(import_fifa_squads(db))
+        result.update(skip_fifa_squad_import())
         result.update(enrich_venues(db))
         result.update(write_weather_snapshots(db))
         result.update(aggregate_team_market_values(db))

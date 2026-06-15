@@ -258,6 +258,40 @@ lineup_snapshots = Table(
 Index("idx_lineup_snapshots_match_team", lineup_snapshots.c.match_id, lineup_snapshots.c.team_id)
 Index("idx_lineup_snapshots_team_player", lineup_snapshots.c.team_id, lineup_snapshots.c.player_id)
 
+historical_international_matches = Table(
+    "historical_international_matches",
+    metadata,
+    uuid_pk(),
+    Column("source_match_id", VARCHAR(128), nullable=False),
+    Column("match_date", Date, nullable=False),
+    Column("played_at", DateTime(timezone=True), nullable=False),
+    Column("home_team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("away_team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("home_team_name", VARCHAR(128), nullable=False),
+    Column("away_team_name", VARCHAR(128), nullable=False),
+    Column("home_score", Integer, nullable=False),
+    Column("away_score", Integer, nullable=False),
+    Column("tournament", VARCHAR(128), nullable=False),
+    Column("city", VARCHAR(128)),
+    Column("country", VARCHAR(128)),
+    Column("neutral", Boolean, nullable=False, server_default=text("true")),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_type", VARCHAR(64), nullable=False),
+    Column("source_url", Text),
+    Column("source_line_number", Integer),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("0.9")),
+    Column("snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id", ondelete="SET NULL")),
+    Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("home_team_id <> away_team_id", name="different_teams"),
+    CheckConstraint("home_score >= 0 and away_score >= 0", name="non_negative_score"),
+    UniqueConstraint("source_match_id", name="uq_historical_international_matches_source_match"),
+)
+Index("idx_historical_international_matches_date", historical_international_matches.c.match_date.desc())
+Index("idx_historical_international_matches_home_team", historical_international_matches.c.home_team_id, historical_international_matches.c.match_date.desc())
+Index("idx_historical_international_matches_away_team", historical_international_matches.c.away_team_id, historical_international_matches.c.match_date.desc())
+Index("idx_historical_international_matches_tournament", historical_international_matches.c.tournament)
+
 team_match_results = Table(
     "team_match_results",
     metadata,
@@ -281,6 +315,31 @@ team_match_results = Table(
     UniqueConstraint("team_id", "source_match_id", name="uq_team_match_results_team_match"),
 )
 Index("idx_team_match_results_team_time", team_match_results.c.team_id, team_match_results.c.played_at.desc())
+
+team_stat_snapshots = Table(
+    "team_stat_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("metric_type", VARCHAR(64), nullable=False),
+    Column("metric_name", VARCHAR(128), nullable=False),
+    Column("rank", Integer),
+    Column("raw_value", VARCHAR(64)),
+    Column("numeric_value", Numeric(18, 4)),
+    Column("value_unit", VARCHAR(32)),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_type", VARCHAR(64), nullable=False),
+    Column("source_team_id", VARCHAR(128)),
+    Column("source_url", Text),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("0.8")),
+    Column("snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id", ondelete="SET NULL")),
+    Column("as_of_at", DateTime(timezone=True), nullable=False),
+    Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("team_id", "metric_type", "as_of_at", "source", name="uq_team_stat_snapshots_team_metric_time_source"),
+)
+Index("idx_team_stat_snapshots_team_metric", team_stat_snapshots.c.team_id, team_stat_snapshots.c.metric_type)
+Index("idx_team_stat_snapshots_metric_rank", team_stat_snapshots.c.metric_type, team_stat_snapshots.c.rank)
 
 coaches = Table(
     "coaches",

@@ -72,34 +72,61 @@ COLLECTOR_CATALOG = [
         "notes": "Full World Cup schedule plus match lineups for played matches. Lineup stability grows as played-match sample increases.",
     },
     {
-        "job_id": "team_market_value",
-        "source": "authorized_market_value_source",
-        "source_type": "market_value",
-        "domains": ["teams", "players"],
-        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "teams", "players"],
-        "status": "planned_required",
-        "frequency": "weekly",
-        "notes": "Team and player market value. Needs licensing check before production use.",
+        "job_id": "historical_international_results",
+        "source": "martj42_international_results",
+        "source_type": "historical_results",
+        "domains": ["historical_international_matches", "historical_team_match_results", "team_form"],
+        "target_tables": [
+            "raw_snapshots",
+            "collector_runs",
+            "data_source_links",
+            "teams",
+            "team_aliases",
+            "historical_international_matches",
+            "team_match_results",
+        ],
+        "status": "implemented_public_dataset",
+        "frequency": "manual_weekly_or_before_model_recompute",
+        "notes": "Historical men's full international results. Writes one actual match row per source match, plus team-perspective rows for existing model compatibility. Defaults to GitHub raw CSV from martj42/international_results so the pipeline does not depend on Kaggle authentication.",
+    },
+    {
+        "job_id": "world_cup_team_details",
+        "source": "dongqiudi",
+        "source_type": "world_cup_team_details",
+        "domains": ["teams", "players", "player_form", "market_value", "coaches", "team_stats"],
+        "target_tables": [
+            "raw_snapshots",
+            "data_source_links",
+            "teams",
+            "team_aliases",
+            "players",
+            "player_form_snapshots",
+            "coaches",
+            "team_stat_snapshots",
+        ],
+        "status": "implemented_real_roster_coverage",
+        "frequency": "manual_low_frequency",
+        "notes": "Dongqiudi national-team pages, member_v2 APIs and World Cup team ranking data page. Covers 48 team IDs, squad players, player market values, team market values, current staff, coach history and sourced team-stat ranking metrics.",
     },
     {
         "job_id": "official_squad_list",
         "source": "fifa",
         "source_type": "official_squad_list",
-        "domains": ["players", "coaches"],
-        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "players", "coaches"],
-        "status": "implemented_official",
+        "domains": ["reference_only"],
+        "target_tables": ["raw_snapshots"],
+        "status": "disabled_as_player_source",
         "frequency": "manual_low_frequency",
-        "notes": "FIFA official World Cup 2026 Squad List PDF. Normalizes 26-player squads and head coaches.",
+        "notes": "FIFA squad PDF is no longer written to players. Dongqiudi member_v2 is the single canonical player roster source.",
     },
     {
         "job_id": "coach_records",
-        "source": "authorized_or_manual_verified",
+        "source": "dongqiudi",
         "source_type": "coach_record",
         "domains": ["coaches"],
         "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "coaches"],
         "status": "schema_ready_partial_real",
         "frequency": "weekly",
-        "notes": "Head coach identity is implemented from FIFA official squad list; tenure, win rate and tournament record still need a dedicated source.",
+        "notes": "Head coach identity and history are implemented from Dongqiudi detail/team and team/member_v2. A dedicated source can still improve tenure and win-rate quality later.",
     },
     {
         "job_id": "venue_weather",
@@ -108,8 +135,8 @@ COLLECTOR_CATALOG = [
         "domains": ["venues", "weather"],
         "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "venues", "weather_snapshots"],
         "status": "implemented_partial_real",
-        "frequency": "matchday_minus_24h_and_minus_3h",
-        "notes": "Venue enrichment and Open-Meteo current observations are implemented; matchday weather should be refreshed 24h/3h before kickoff.",
+        "frequency": "daily_00_12",
+        "notes": "Venue enrichment and Open-Meteo current observations are implemented; weather is refreshed twice daily at 00:00 and 12:00 local time.",
     },
     {
         "job_id": "ai_news_insights",
@@ -118,18 +145,18 @@ COLLECTOR_CATALOG = [
         "domains": ["ai_insights"],
         "target_tables": ["ai_insights", "ai_explanations"],
         "status": "planned_required",
-        "frequency": "after_news_collection",
-        "notes": "LLM extraction for injuries, suspensions, lineup, coach comments and tactical signals.",
+        "frequency": "after_news_collection_00_12_post_match",
+        "notes": "LLM extraction for injuries, suspensions, lineup, coach comments and tactical signals after the 00:00/12:00 news refresh and post-match refresh.",
     },
     {
         "job_id": "public_news_rss",
-        "source": "guardian_bbc_espn",
+        "source": "guardian_bbc_espn_foxsports",
         "source_type": "football_rss",
         "domains": ["news"],
         "target_tables": ["raw_snapshots", "data_source_links", "news_items"],
         "status": "implemented_partial_real",
-        "frequency": "manual_now_hourly_later",
-        "notes": "Public English football RSS feeds used to avoid Dongqiudi-only news coverage.",
+        "frequency": "daily_00_12_and_post_match",
+        "notes": "Public English football RSS feeds plus dynamic Dongqiudi roster team keywords. Matchday means at least one kickoff on the Asia/Shanghai local date; it raises news priority but does not trigger all-day high-frequency collection.",
     },
 ]
 
@@ -139,9 +166,10 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     dongqiudi_matches = counts.get("dongqiudi_matches", 0)
     thestatsapi_matches = counts.get("thestatsapi_matches", 0)
     players = counts.get("players", 0)
-    fifa_official_players = counts.get("fifa_official_players", 0)
     player_forms = counts.get("player_form_snapshots", 0)
     player_market_values = counts.get("player_market_values", 0)
+    dongqiudi_roster_players = counts.get("dongqiudi_roster_players", 0)
+    dongqiudi_roster_player_market_values = counts.get("dongqiudi_roster_player_market_values", 0)
     team_market_values = counts.get("team_market_values", 0)
     standings = counts.get("group_standings", 0)
     team_forms = counts.get("team_form_snapshots", 0)
@@ -151,6 +179,9 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     injuries = counts.get("injury_reports", 0)
     lineups = counts.get("lineup_snapshots", 0)
     team_match_results = counts.get("team_match_results", 0)
+    historical_international_matches = counts.get("historical_international_matches", 0)
+    historical_team_match_results = counts.get("historical_team_match_results", 0)
+    dongqiudi_team_stats = counts.get("team_stat_snapshots", counts.get("dongqiudi_team_stat_links", 0))
     news = counts.get("news_items", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
@@ -175,7 +206,7 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "news",
                 "status": "partial_real" if news > 0 else "missing_real_source",
-                "current_source": "dongqiudi/homepage_links + guardian/bbc/espn rss" if news > 0 else None,
+                "current_source": "dongqiudi/homepage_links + guardian/bbc/espn/foxsports rss" if news > 0 else None,
                 "target_tables": ["news_items", "ai_insights"],
             },
             {
@@ -189,17 +220,17 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "player_form",
                 "status": "partial_real"
-                if dongqiudi_player_rankings > 0 or fifa_official_players > 0
+                if dongqiudi_player_rankings > 0 or dongqiudi_roster_players > 0
                 else ("sample_or_partial" if players > 0 and player_forms > 0 else "missing_real_source"),
                 "current_source": ", ".join(
                     value
                     for value in [
-                        "fifa/official_squad_list" if fifa_official_players > 0 else "",
                         "dongqiudi/world_cup_player_rankings" if dongqiudi_player_rankings > 0 else "",
+                        "dongqiudi/world_cup_team_details" if dongqiudi_roster_players > 0 else "",
                     ]
                     if value
                 )
-                if dongqiudi_player_rankings > 0 or fifa_official_players > 0
+                if dongqiudi_player_rankings > 0 or dongqiudi_roster_players > 0
                 else ("local_sample_or_seed" if players > 0 and player_forms > 0 else None),
                 "target_tables": ["players", "player_form_snapshots"],
             },
@@ -212,7 +243,15 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "market_value",
                 "status": "partial_real" if player_market_values > 0 or team_market_values > 0 else "missing_real_source",
-                "current_source": "dongqiudi/market_value_ranking" if player_market_values > 0 or team_market_values > 0 else None,
+                "current_source": ", ".join(
+                    value
+                    for value in [
+                        "dongqiudi/world_cup_team_details" if dongqiudi_roster_player_market_values > 0 or team_market_values > 0 else "",
+                        "dongqiudi/market_value_ranking" if player_market_values > 0 else "",
+                    ]
+                    if value
+                )
+                or None,
                 "target_tables": ["players.market_value_eur", "teams.market_value_eur"],
             },
             {
@@ -222,10 +261,32 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 "target_tables": ["team_form_snapshots"],
             },
             {
+                "domain": "historical_international_matches",
+                "status": "partial_real" if historical_international_matches > 0 else "missing_real_source",
+                "current_source": "martj42_international_results/historical_results"
+                if historical_international_matches > 0
+                else None,
+                "target_tables": ["historical_international_matches"],
+            },
+            {
                 "domain": "team_match_results",
                 "status": "partial_real" if team_match_results > 0 else "missing_real_source",
-                "current_source": "dongqiudi/world_cup_schedule" if team_match_results > 0 else None,
+                "current_source": ", ".join(
+                    value
+                    for value in [
+                        "dongqiudi/world_cup_schedule" if team_match_results > 0 else "",
+                        "martj42_international_results/historical_results" if historical_team_match_results > 0 else "",
+                    ]
+                    if value
+                )
+                or None,
                 "target_tables": ["team_match_results"],
+            },
+            {
+                "domain": "team_stats",
+                "status": "partial_real" if dongqiudi_team_stats > 0 else "schema_ready_missing_source",
+                "current_source": "dongqiudi/world_cup_team_ranking" if dongqiudi_team_stats > 0 else None,
+                "target_tables": ["team_stat_snapshots", "data_source_links.team_stat"],
             },
             {
                 "domain": "lineups",
@@ -251,13 +312,13 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "coaches",
                 "status": "partial_real" if coaches > 0 else "schema_ready_missing_source",
-                "current_source": "manual_verified_or_authorized" if coaches > 0 else None,
+                "current_source": "dongqiudi/world_cup_team_details" if coaches > 0 else None,
                 "target_tables": ["coaches"],
             },
             {
                 "domain": "injuries",
                 "status": "partial_real" if injuries > 0 else "schema_ready_missing_source",
-                "current_source": "verified_news_or_authorized" if injuries > 0 else None,
+                "current_source": "fifa/verified_injury_news" if injuries > 0 else None,
                 "target_tables": ["injury_reports", "ai_insights"],
             },
         ],

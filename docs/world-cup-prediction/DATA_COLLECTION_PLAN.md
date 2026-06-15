@@ -101,7 +101,7 @@
 | 球员/球队身价 | 懂球帝 market_value_ranking | 球员部分真实 | 授权身价源/人工核验 | `players.market_value_eur`，后续补 `teams.market_value_eur` | 每周 | 已按 `person_id` 匹配部分世界杯球员，单位 EUR |
 | 主教练带队战绩 | 未接入 | schema 缺口 | 授权源/人工核验 | `coaches` | 每周 | 任期、场次、胜率、大赛成绩 |
 | 场地信息 | TheStatsAPI fixtures | 部分真实 | 官方场馆源补容量/海拔/草皮 | `venues` | 低频 | 城市、时区、国家已入库；容量、海拔、草皮待补 |
-| 天气 | 未接入 | schema 缺口 | 天气 API | `weather_snapshots` | 赛前 24h/3h | 温度、湿度、风、降水概率 |
+| 天气 | Open-Meteo | 部分真实 | 天气 API | `weather_snapshots` | 每日 00:00/12:00 | 温度、湿度、风、降水概率 |
 | 伤停/停赛 | 未接入 | 缺失 | 新闻 + AI 抽取 + 人工确认 | `injuries` 或 `ai_insights` | 每日/赛前 | 置信度大于 0.65 才进模型 |
 
 ## 4. 采集任务目录
@@ -263,12 +263,13 @@ MVP 不做秒级实时，按低频批处理。
 
 | 场景 | 频率 |
 | --- | --- |
-| 平时赛程/球队/球员 | 每日 02:00 |
-| 比赛日前一天 | 开赛前 24 小时 |
-| 比赛日 | 开赛前 3 小时 |
+| 平时赛程/球队/球员 | 每日 00:00 |
+| 午间复查 | 每日 12:00，天气、新闻、伤停 |
+| 比赛日前一天 | 开赛前 24 小时，伤停、预计阵容、新闻 |
+| 比赛日 | 开赛前 3 小时，关键情报和最终预测 |
 | 赛后 | 完场后 30 分钟 |
 | 身价/教练 | 每周 |
-| 天气 | 开赛前 24 小时、3 小时 |
+| 天气 | 每日 00:00、12:00 |
 
 每次采集后：
 
@@ -418,28 +419,31 @@ select source, count(*) from news_items group by 1;
 
 当前本地真实库快照：
 
-- `matches=107`：TheStatsAPI fixtures 105 条，懂球帝首页 2 条。
-- `venues=17`：TheStatsAPI fixtures。
-- `players=227`、`player_form_snapshots=227`：懂球帝 World Cup player rankings。
+- `matches=211`：TheStatsAPI fixtures 与懂球帝 World Cup schedule/homepage 合并后的本地覆盖。
+- `venues=16`：正式比赛场馆已补齐静态信息和天气坐标。
+- `players=1248`：全部来自懂球帝 `team/member_v2`，编码统一为 `DQD-P{person_id}`，`FIFA-*` 球员为 `0`。
+- `player_form_snapshots=5272`：懂球帝 World Cup player rankings 与 `team/member_v2` 统计派生。
 - `group_standings=48`、`team_form_snapshots=24`：懂球帝 World Cup standings 派生。
-- `news_items=62`：懂球帝首页新闻链接。
-- `data_source_links=1300`，`local_sample_source_links=0`。
+- `lineup_snapshots=264`、`team_match_results=208`：懂球帝比赛上下文派生。
+- `team_stat_snapshots=868`、`team_stat_metrics=45`：懂球帝 `cid=61` 球队榜指标结构化落库，覆盖红牌、黄牌、犯规、射门、传球、评分、身价等模型候选特征。
+- `news_items=186`：懂球帝首页、Guardian、BBC、ESPN。
+- `data_source_links=12471`，`local_sample_source_links=0`。
 
 ## 2026-06-15 Foundation Data Enrichment
 
 本轮新增低频基础数据补齐：
 
-- FIFA official squad list PDF：导入 48 支球队主教练、48x26 官方名单球员，共 `coaches=48`、`fifa_official_players=1248`。
+- 懂球帝国家队详情：以 `team/member_v2` 作为唯一球员名单源，写入 48 支球队、48x26 球员、教练/工作人员和球员身价。球员主键统一为 `DQD-P{person_id}`，不再写入 `FIFA-*` 球员。
 - 场馆增强：16 个正式比赛场馆补齐 `capacity`、`surface`、`weather_profile.latitude/longitude/roof_type`，删除无比赛引用的 `los-angeles` 占位场馆。
-- Open-Meteo：按场馆坐标写入 `weather_snapshots=16` 当前天气观测。该数据只作为场馆天气基线，不等同于赛前天气；赛前 24h/3h 仍需刷新。
-- 球队身价：基于已匹配球员 `market_value_eur` 聚合出 `team_market_values=18`，质量标记为 partial roster coverage。
-- 来源审计：`coaches`、`players`、`venues`、`weather_snapshots`、`team_market_values` 均写入 `data_source_links`，`*_without_source` 全部为 `0`。
+- Open-Meteo：按场馆坐标写入 `weather_snapshots` 当前天气观测。该数据只作为场馆天气基线，MVP 固定每日 00:00 和 12:00 刷新。
+- 球队身价：基于懂球帝 `DQD-P*` 球员 `market_value_eur` 聚合，质量标记为 Dongqiudi roster coverage。
+- 来源审计：`coaches`、`players`、`venues`、`weather_snapshots`、`team_market_values`、`team_stat_snapshots` 均写入 `data_source_links`，`*_without_source` 全部为 `0`。
 
 仍不应伪装成完整的数据：
 
 - 伤停/停赛：`injury_reports` schema 已有，但真实可信源未接入，当前 `injury_reports=0`。
-- 教练战绩：主教练身份已来自 FIFA 官方名单，但 `matches_count/win_rate/major_tournament_record` 仍缺授权或可验证来源。
-- 阵容稳定性：官方名单已入库，但首发、出场分钟、最近 N 场主力使用率仍未接入。
+- 教练战绩：主教练身份和历史记录已来自懂球帝 `detail/team` 与 `team/member_v2`，但长期 `matches_count/win_rate/major_tournament_record` 仍可用授权或可验证来源增强。
+- 阵容稳定性：懂球帝国家队名单已入库，但首发、出场分钟、最近 N 场主力使用率仍依赖已完赛比赛的阵容数据。
 
 ## 2026-06-15 Real Data Trust Gate
 
@@ -454,7 +458,7 @@ python services/api/scripts/audit_real_data.py
 
 可信来源等级：
 
-- `official`：FIFA 官方名单、官方赛事实体，默认置信度约 `0.95`。
+- `official`：FIFA 官方排名、官方赛事实体，默认置信度约 `0.95`。
 - `public_dataset`：TheStatsAPI fixture 等公开结构化数据集，默认置信度约 `0.90`。
 - `public_api`：Open-Meteo 等公开 API，默认置信度约 `0.85`。
 - `public_source`：懂球帝页面或 sport-data，默认置信度约 `0.80`，适合中文补充和状态榜单。
