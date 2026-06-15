@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.db.session import SessionLocal
 from app.main import app
+from app.predictions.service import BaselinePredictionService
 
 
 pytestmark = pytest.mark.skipif(
@@ -42,7 +44,7 @@ def test_database_prediction_contract(database_client):
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13/prediction")
     assert response.status_code == 200
     body = response.json()["data"]
-    assert body["probabilities"]["home_win"] == 0.44
+    assert abs(sum(body["probabilities"].values()) - 1) < 0.001
     assert len(body["scorelines"]) == 4
 
 
@@ -74,4 +76,19 @@ def test_database_rankings_contract(database_client):
     assert response.status_code == 200
     body = response.json()["data"]
     assert body[0]["team"]["id"] == "france"
-    assert body[0]["probability"] == 0.158
+    assert body[0]["rank"] == 1
+    assert 0 < body[0]["probability"] < 1
+
+
+def test_database_baseline_recompute_writes_outputs():
+    with SessionLocal() as db:
+        result = BaselinePredictionService(db).recompute(
+            scope="test",
+            match_ids=["usa-paraguay-2026-06-13"],
+            seed=20260615,
+        )
+
+    assert result["status"] == "completed"
+    assert result["matches_written"] == 1
+    assert result["rankings_written"] >= 3
+    assert result["group_simulations_written"] >= 4

@@ -775,3 +775,12 @@ Update date: 2026-06-15
 - Public database-backed read routes support optional Redis JSON caching.
 - Cache is disabled by default and enabled with `CACHE_ENABLED=true`.
 - Local Redis smoke passed with `REDIS_URL=redis://127.0.0.1:63791/0`.
+
+## Baseline Prediction Task Update
+
+Update date: 2026-06-15
+
+- Added deterministic Elo/FIFA-rank Poisson baseline prediction task.
+- `scripts/recompute_predictions.py` can write match predictions, scoreline predictions, ranking predictions, and group simulations.
+- `POST /api/admin/predictions/recompute` now executes the task when `DATA_BACKEND=database`.
+- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 38 tests.

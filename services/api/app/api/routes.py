@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from app.core.cache import cached_json
 from app.core.config import Settings, get_settings
 from app.core.responses import envelope, list_envelope, not_found, now_iso
+from app.db.session import SessionLocal
 from app.data.mock_store import (
     AI_REPORTS,
     GROUP_DETAILS,
@@ -19,6 +20,7 @@ from app.data.mock_store import (
     UPDATED_AT,
 )
 from app.repositories.repository_provider import use_database, with_public_repository
+from app.predictions.service import BaselinePredictionService
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -329,7 +331,17 @@ def run_collector(payload: dict):
 
 
 @admin_router.post("/predictions/recompute", dependencies=[Depends(require_admin)])
-def recompute_predictions(payload: dict):
+def recompute_predictions(payload: dict, settings: Settings = Depends(get_settings)):
+    if use_database(settings) and not payload.get("dry_run", False):
+        with SessionLocal() as db:
+            result = BaselinePredictionService(db).recompute(
+                scope=payload.get("scope", "matchday"),
+                match_ids=payload.get("match_ids") or None,
+                model_version=payload.get("model_version", "baseline_2026_06_13"),
+                seed=payload.get("seed"),
+            )
+        return envelope(result)
+
     return envelope(
         {
             "status": "accepted",

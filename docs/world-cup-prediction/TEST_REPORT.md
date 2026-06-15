@@ -167,3 +167,14 @@ Test date: 2026-06-15
 | `GET /api/v1/predictions/rankings?type=champion` | 200 |
 | `GET /api/v1/groups/group-a` | 200 |
 | Redis key write check | Passed for `public:home:default:Asia/Shanghai`, `public:rankings:champion:20`, `public:groups:group-a` |
+
+## Baseline Prediction Recompute Smoke
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 38 tests |
+| `python scripts/recompute_predictions.py --scope matchday --match-id usa-paraguay-2026-06-13 --seed 20260615` | Passed |
+| `POST /api/admin/predictions/recompute` in database mode | 200, `status=completed` |
+| Outputs written | Match prediction, scorelines, rankings, group simulations |
