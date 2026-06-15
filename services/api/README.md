@@ -201,6 +201,20 @@ python scripts/collect_historical_international_results.py
 python scripts/collect_historical_international_results.py --csv-path path/to/results.csv
 ```
 
+Export only actual national-team match records involving the 48 World Cup teams:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/export_world_cup_48_national_team_matches.py
+python scripts/export_world_cup_48_national_team_matches.py --refresh-source
+```
+
+The export writes only match data into `exports/world_cup_48_national_team_matches_latest.csv`,
+`exports/world_cup_48_national_team_latest_match_by_team.csv` and
+`exports/world_cup_48_national_team_matches_summary.json`. Use `--refresh-source` when the upstream historical
+results CSV has changed; it imports the latest source first, then regenerates the 48-team match exports.
+
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
 
 - `raw_snapshots`: immutable source payload and checksum.

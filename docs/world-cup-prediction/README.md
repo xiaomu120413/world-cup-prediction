@@ -1,5 +1,9 @@
 # World Cup Prediction Mini Program
 
+Data operations quick reference:
+
+- [DATA_SOURCE_REFRESH_SUMMARY.md](./DATA_SOURCE_REFRESH_SUMMARY.md): real-data source ownership, refresh cadence, matchday/news rules, provenance gate, concurrency rules, and acceptance checks.
+
 世界杯预测小程序项目文档。
 
 ## 项目定位
