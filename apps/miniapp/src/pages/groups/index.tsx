@@ -13,11 +13,11 @@ import { getTeamIdByName } from '@/services/teamResources'
 import { goTo, routes } from '@/utils/navigation'
 
 const fallbackGroup: GroupData = {
-  title: 'A组形势',
-  subtitle: '小组赛 · 已完成 2/6 场',
-  summary: '墨西哥和韩国出线优势明显，捷克仍保留第三名晋级机会。南非需要下一场拿分才能避免提前进入低概率区。',
+  title: '小组形势',
+  subtitle: '真实积分榜待同步',
+  summary: '连接后端后展示真实积分榜和出线模拟；当前仅显示小组数据待同步空态。',
   teams: groupATeams,
-  updatedAt: '模拟更新于 18:00'
+  updatedAt: '更新时间待同步'
 }
 
 export default function GroupsPage() {
@@ -60,8 +60,8 @@ export default function GroupsPage() {
         </View>
       </View>
 
-      {loadState === 'loading' && <StatusView title='正在更新小组形势' detail='稍后显示最新模拟快照' />}
-      {loadState === 'error' && <StatusView title='小组形势暂未更新' detail='当前显示本地模拟快照' />}
+      {loadState === 'loading' && <StatusView title='正在更新小组形势' detail='稍后显示最新真实积分榜' />}
+      {loadState === 'error' && <StatusView title='小组形势暂未更新' detail='仅显示空态占位，请检查小组接口' />}
 
       <Section title='AI 小组判断'>
         <AIReportCard title='出线形势' status={groupData.updatedAt}>
@@ -76,11 +76,16 @@ export default function GroupsPage() {
           <Text>净胜</Text>
           <Text>积分</Text>
         </View>
-        {groupData.teams.map(team => (
+        {groupData.teams.length ? groupData.teams.map(team => (
           <View
             className='table-row'
             key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+            onClick={() => {
+              const teamId = team.teamId || getTeamIdByName(team.name)
+              if (teamId) {
+                goTo(`${routes.teamDetail}?teamId=${teamId}`)
+              }
+            }}
           >
             <Text className='table-row__rank'>{team.rank}</Text>
             <View className='table-row__team-wrap'>
@@ -91,7 +96,7 @@ export default function GroupsPage() {
             <Text className='table-row__meta'>{team.goals}</Text>
             <Text className='table-row__points'>{team.points}</Text>
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实积分榜数据</Text>}
       </Section>
 
       <Section title='出线概率'>
@@ -100,25 +105,25 @@ export default function GroupsPage() {
           <Text className='legend-dot legend-dot--warn'>竞争区</Text>
           <Text className='legend-dot legend-dot--danger'>低概率</Text>
         </View>
-        {groupData.teams.map(team => (
+        {groupData.teams.length ? groupData.teams.map(team => (
           <ProgressRow key={team.name} label={team.name} value={team.qualification} />
-        ))}
+        )) : <Text className='empty-state'>暂无真实出线模拟数据</Text>}
       </Section>
 
-      <Section title='关键赛程'>
-        <View className='list-row' onClick={() => goTo(routes.matchDetail)}>
+      <Section title='数据状态'>
+        <View className='list-row'>
           <View>
-            <Text className='list-row__title'>墨西哥 vs 韩国</Text>
-            <Text className='list-row__meta'>小组头名战</Text>
+            <Text className='list-row__title'>积分榜快照</Text>
+            <Text className='list-row__meta'>{groupData.updatedAt}</Text>
           </View>
-          <Text className='list-row__right'>决定第一路径</Text>
+          <Text className='list-row__right'>{groupData.teams.length ? '真实表' : '待同步'}</Text>
         </View>
-        <View className='list-row' onClick={() => goTo(routes.matchDetail)}>
+        <View className='list-row' onClick={() => goTo(routes.matches)}>
           <View>
-            <Text className='list-row__title'>捷克 vs 南非</Text>
-            <Text className='list-row__meta'>第三名关键战</Text>
+            <Text className='list-row__title'>相关赛程</Text>
+            <Text className='list-row__meta'>按 matches 表实时同步</Text>
           </View>
-          <Text className='list-row__right'>淘汰风险</Text>
+          <Text className='list-row__right'>查看</Text>
         </View>
       </Section>
 

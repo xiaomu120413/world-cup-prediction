@@ -18,11 +18,14 @@ const fallbackHome: HomeData = {
   upcomingMatches,
   championTop,
   dataSourceStatus: {
-    label: 'Mock',
-    detail: 'Local fallback',
-    isDatabase: false
+    label: '离线',
+    detail: '未连接后端',
+    isDatabase: false,
+    audit: '真实数据未同步',
+    counts: '无本地比赛数据',
+    freshness: '离线'
   },
-  updatedAt: '更新于 18:00'
+  updatedAt: '更新时间待同步'
 }
 
 export default function MatchesPage() {
@@ -61,7 +64,7 @@ export default function MatchesPage() {
             <Text>今日赛程</Text>
           </View>
         </View>
-        <View className='header-ai' onClick={() => goTo(routes.matchDetail)}>
+        <View className='header-ai' onClick={() => goTo(`${routes.matchDetail}?matchId=${match.id}`)}>
           <Icon name='ai' color='#2563eb' size={30} />
           <Text>AI 赛前报告</Text>
         </View>
@@ -74,16 +77,19 @@ export default function MatchesPage() {
           {homeData.dataSourceStatus.label}
         </Text>
         <Text>{homeData.dataSourceStatus.detail}</Text>
+        <Text>{homeData.dataSourceStatus.counts}</Text>
+        <Text>{homeData.dataSourceStatus.audit}</Text>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新赛前数据' detail='稍后显示最新预测快照' />}
-      {loadState === 'error' && <StatusView title='赛前数据暂未更新' detail='当前显示本地预测快照' />}
+      {loadState === 'error' && <StatusView title='赛前数据暂未更新' detail='仅显示空态占位，请检查后端真实数据接口' />}
 
-      <View className='focus-card' onClick={() => goTo(routes.matchDetail)}>
+      <View className='focus-card' onClick={() => goTo(`${routes.matchDetail}?matchId=${match.id}`)}>
         <View className='focus-card__top'>
           <View>
             <Text className='card-eyebrow'>今日重点</Text>
             <Text className='card-title'>{match.stage}</Text>
+            {match.source ? <Text className='card-meta'>{match.source}</Text> : null}
           </View>
           <Text className='status-pill'>{match.status}</Text>
         </View>
@@ -95,7 +101,7 @@ export default function MatchesPage() {
           </View>
           <View className='fixture__middle'>
             <Text className='fixture__time'>{match.time}</Text>
-            <Text className='fixture__vs'>VS</Text>
+            <Text className={match.score ? 'fixture__score' : 'fixture__vs'}>{match.score || 'VS'}</Text>
             <Text className='fixture__venue'>{match.venue}</Text>
           </View>
           <View className='fixture__team fixture__team--away'>
@@ -118,8 +124,8 @@ export default function MatchesPage() {
       </View>
 
       <Section title='即将开始'>
-        {homeData.upcomingMatches.map(item => (
-          <View className='list-row match-row' key={item.id} onClick={() => goTo(routes.matchDetail)}>
+        {homeData.upcomingMatches.length ? homeData.upcomingMatches.map(item => (
+          <View className='list-row match-row' key={item.id} onClick={() => goTo(`${routes.matchDetail}?matchId=${item.id}`)}>
             <View className='match-row__teams'>
               <Flag team={item.home} size='sm' />
               <Text className='list-row__title'>{item.home}</Text>
@@ -129,31 +135,35 @@ export default function MatchesPage() {
             </View>
             <View className='list-row__right'>
               <Text>{item.time}</Text>
+              {item.status ? <Text className='list-row__meta'>{item.status}</Text> : null}
               <Text className='trend-pill'>{item.tendency}</Text>
             </View>
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实赛程数据</Text>}
       </Section>
 
       <Section title='冠军概率' action='全部'>
-        {homeData.championTop.map((team, index) => (
+        {homeData.championTop.length ? homeData.championTop.map((team, index) => (
           <View
             className='champion-row'
             key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}`)}
           >
             <View className='rank-medal'>
               <Icon name='medal' color={index === 0 ? '#f59e0b' : '#94a3b8'} size={30} />
               <Text>{index + 1}</Text>
             </View>
             <Flag team={team.name} size='sm' />
-            <Text className='champion-row__name'>{team.name}</Text>
+            <View className='champion-row__main'>
+              <Text className='champion-row__name'>{team.name}</Text>
+              {team.meta ? <Text className='champion-row__meta'>{team.meta}</Text> : null}
+            </View>
             <View className='champion-row__bar'>
               <ProgressRow label='' value={team.probability} />
             </View>
             <Text className='champion-row__value'>{team.probability}%</Text>
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实冠军概率数据</Text>}
       </Section>
 
       <BottomNav active='matches' />

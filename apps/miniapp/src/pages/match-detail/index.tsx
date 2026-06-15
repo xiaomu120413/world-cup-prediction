@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
+import Taro from '@tarojs/taro'
 import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { EvidenceList } from '@/components/EvidenceList'
@@ -13,7 +14,14 @@ import { StatusView } from '@/components/StatusView'
 import { getMatchData, type LoadState } from '@/services/data'
 import { featuredMatch, type Match } from '@/services/mock'
 
+function getRouteMatchId() {
+  const params = Taro.getCurrentInstance().router?.params
+  const value = params?.matchId
+  return typeof value === 'string' && value ? value : undefined
+}
+
 export default function MatchDetailPage() {
+  const [matchId] = useState(getRouteMatchId)
   const [match, setMatch] = useState<Match>(featuredMatch)
   const [updatedAt, setUpdatedAt] = useState('更新于 18:00')
   const [loadState, setLoadState] = useState<LoadState>('idle')
@@ -21,7 +29,7 @@ export default function MatchDetailPage() {
   useEffect(() => {
     let mounted = true
     setLoadState('loading')
-    getMatchData()
+    getMatchData(matchId)
       .then(data => {
         if (mounted) {
           setMatch(data.match)
@@ -38,7 +46,7 @@ export default function MatchDetailPage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [matchId])
 
   return (
     <View className='page'>
@@ -58,7 +66,7 @@ export default function MatchDetailPage() {
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新赛前报告' detail='稍后显示最新预测快照' />}
-      {loadState === 'error' && <StatusView title='赛前报告暂未更新' detail='当前显示本地预测快照' />}
+      {loadState === 'error' && <StatusView title='赛前报告暂未更新' detail='仅显示空态占位，请检查比赛详情接口' />}
 
       <View className='match-card'>
         <View className='fixture fixture--compact'>
@@ -68,7 +76,7 @@ export default function MatchDetailPage() {
           </View>
           <View className='fixture__middle'>
             <Text className='fixture__time'>{match.time}</Text>
-            <Text className='fixture__vs'>VS</Text>
+            <Text className={match.score ? 'fixture__score' : 'fixture__vs'}>{match.score || 'VS'}</Text>
             <Text className='fixture__venue'>{match.venue}</Text>
           </View>
           <View className='fixture__team fixture__team--away'>
@@ -87,7 +95,7 @@ export default function MatchDetailPage() {
       </View>
 
       <Section title='AI 分析师结论'>
-        <AIReportCard title='核心判断' status='模型 + 情报'>
+        <AIReportCard title='核心判断' status={match.modelStatus || '模型 + 情报'}>
           {match.insight}
         </AIReportCard>
       </Section>
@@ -105,10 +113,18 @@ export default function MatchDetailPage() {
           <Icon name='trophy' color='#16a34a' size={36} />
         </View>
         <View className='impact-card__content'>
-          <Text className='impact-card__title'>出线影响</Text>
-          <ProgressRow label='美国胜后出线概率变化' value={18} meta='+18%' />
-          <ProgressRow label='平局后出线概率变化' value={6} meta='+6%' />
-          <ProgressRow label='失利后出线概率变化' value={21} meta='-21%' />
+          <Text className='impact-card__title'>数据状态</Text>
+          {match.sourceConfidence !== undefined ? (
+            <ProgressRow label='赛程来源可信度' value={match.sourceConfidence} meta={match.source} />
+          ) : null}
+          <View className='data-point-list'>
+            {(match.dataPoints || []).map(item => (
+              <View className='data-point-row' key={item.label}>
+                <Text className='data-point-row__label'>{item.label}</Text>
+                <Text className='data-point-row__value'>{item.value}</Text>
+              </View>
+            ))}
+          </View>
         </View>
       </View>
 

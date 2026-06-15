@@ -15,11 +15,11 @@ import type { TeamProfile } from '@/services/mock'
 function getRouteTeamId() {
   const params = Taro.getCurrentInstance().router?.params
   const value = params?.teamId
-  return typeof value === 'string' && value ? value : 'france'
+  return typeof value === 'string' && value ? value : undefined
 }
 
 export default function TeamDetailPage() {
-  const [teamId] = useState(getRouteTeamId)
+  const [teamId] = useState<string | undefined>(getRouteTeamId)
   const [team, setTeam] = useState<TeamProfile>(() => getTeamProfileById(teamId))
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
@@ -59,11 +59,18 @@ export default function TeamDetailPage() {
           <Flag team={team.name} size='lg' />
           <Text className='team-hero__name'>{team.name}</Text>
           <Text className='team-hero__subtitle'>{team.subtitle}</Text>
+          {team.dataChips?.length ? (
+            <View className='team-chip-row'>
+              {team.dataChips.map(chip => (
+                <Text className='stat-chip' key={chip}>{chip}</Text>
+              ))}
+            </View>
+          ) : null}
         </View>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新球队数据' detail='稍后显示最新球队快照' />}
-      {loadState === 'error' && <StatusView title='球队数据暂未更新' detail='当前显示本地球队快照' />}
+      {loadState === 'error' && <StatusView title='球队数据暂未更新' detail='仅显示空态占位，请检查球队画像接口' />}
 
       <Section title='AI 球队判断'>
         <AIReportCard title='球队状态' status={team.updatedAt}>
@@ -72,34 +79,34 @@ export default function TeamDetailPage() {
       </Section>
 
       <View className='probability-mini-grid'>
-        {team.probabilities.map(item => (
+        {team.probabilities.length ? team.probabilities.map(item => (
           <View className='probability-mini' key={item.label}>
             <Text className='probability-mini__value'>{item.value}</Text>
             <Text className='probability-mini__label'>{item.label}</Text>
             {item.delta ? <Text className='delta delta--up'>{item.delta}</Text> : null}
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实球队概率数据</Text>}
       </View>
 
       <Section title='核心评分'>
-        {team.ratings.map(item => (
+        {team.ratings.length ? team.ratings.map(item => (
           <RatingRow key={item.label} label={item.label} value={item.value} />
-        ))}
+        )) : <Text className='empty-state'>暂无真实评分数据</Text>}
       </Section>
 
       <Section title='近期状态'>
         <View className='form-card'>
           <Text className='form-card__headline'>{team.form.headline}</Text>
           <View className='stat-grid'>
-            {team.form.stats.map(stat => (
+            {team.form.stats.length ? team.form.stats.map(stat => (
               <Text className='stat-chip' key={stat}>{stat}</Text>
-            ))}
+            )) : <Text className='empty-state'>暂无真实近期状态数据</Text>}
           </View>
         </View>
       </Section>
 
       <Section title='关键球员'>
-        {team.players.map(player => (
+        {team.players.length ? team.players.map(player => (
           <View className='player-row' key={player.name}>
             <View className='avatar'>
               <Text>{player.name.slice(0, 1)}</Text>
@@ -107,10 +114,11 @@ export default function TeamDetailPage() {
             <View className='player-row__main'>
               <Text className='list-row__title'>{player.name}</Text>
               <Text className='list-row__meta'>{player.role}</Text>
+              {player.meta ? <Text className='list-row__meta'>{player.meta}</Text> : null}
             </View>
             <Text className='player-score'>{player.form}</Text>
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实关键球员数据</Text>}
       </Section>
 
       <View className='risk-card'>
@@ -118,12 +126,12 @@ export default function TeamDetailPage() {
           <Icon name='shield' color='#dc2626' size={34} />
           <Text>风险提醒</Text>
         </View>
-        {team.risks.map(risk => (
+        {team.risks.length ? team.risks.map(risk => (
           <View className='risk-card__row' key={risk.label}>
             <Text>{risk.label}</Text>
             <Text className='text-negative'>{risk.value}</Text>
           </View>
-        ))}
+        )) : <Text className='risk-card__empty'>暂无明确风险项</Text>}
       </View>
 
       <BottomNav active='teams' />

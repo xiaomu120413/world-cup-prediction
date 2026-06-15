@@ -29,6 +29,7 @@ type Tab = keyof typeof rankingMap
 export default function PredictionsPage() {
   const [active, setActive] = useState<Tab>('champion')
   const [rankings, setRankings] = useState<RankingTeam[]>(rankingMap[active])
+  const [rankingMeta, setRankingMeta] = useState({ updatedAt: '更新时间待同步', source: '等待后端真实预测' })
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
@@ -38,7 +39,8 @@ export default function PredictionsPage() {
     getRankingData(active)
       .then(data => {
         if (mounted) {
-          setRankings(data)
+          setRankings(data.rankings)
+          setRankingMeta({ updatedAt: data.updatedAt, source: data.source })
           setLoadState('ready')
         }
       })
@@ -57,11 +59,11 @@ export default function PredictionsPage() {
     <View className='page'>
       <View className='page-head page-head--center'>
         <Text className='app-title app-title--sm'>预测榜</Text>
-        <Text className='page-head__subtitle'>基于 50,000 次模拟 · 更新于 18:00</Text>
+        <Text className='page-head__subtitle'>{rankingMeta.source} · {rankingMeta.updatedAt}</Text>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新预测榜' detail='稍后显示最新模拟快照' />}
-      {loadState === 'error' && <StatusView title='预测榜暂未更新' detail='当前显示本地模拟快照' />}
+      {loadState === 'error' && <StatusView title='预测榜暂未更新' detail='仅显示空态占位，请检查 ranking_predictions 接口' />}
 
       <View className='segmented'>
         {Object.keys(tabLabels).map(key => (
@@ -77,16 +79,16 @@ export default function PredictionsPage() {
 
       <Section title='AI 榜单解读'>
         <AIReportCard title='概率变化' status={tabLabels[active]}>
-          法国仍是当前榜单第一档，巴西和英格兰差距很小。今日变化主要来自阵容可用性、赛程路径和近期进攻效率。
+          {rankings[0] ? `${rankings[0].name} 暂列${tabLabels[active]}榜首，榜单来自当前 ranking_predictions 快照。原因字段保留模型输出口径，后续可继续接入伤停、天气和赛程路径变化。` : '当前榜单等待模型快照生成。'}
         </AIReportCard>
       </Section>
 
       <Section title='概率排名'>
-        {rankings.map(team => (
+        {rankings.length ? rankings.map(team => (
           <View
             className='ranking-row'
             key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${getTeamIdByName(team.name)}`)}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}`)}
           >
             <View className='ranking-row__top'>
               <Text className='ranking-row__rank'>{team.rank}</Text>
@@ -103,17 +105,18 @@ export default function PredictionsPage() {
               </Text>
               <Text className='reason-chip'>{team.reason}</Text>
             </View>
+            {team.meta ? <Text className='ranking-row__meta'>{team.meta}</Text> : null}
           </View>
-        ))}
+        )) : <Text className='empty-state'>暂无真实概率排名数据</Text>}
       </Section>
 
-      <View className='today-change-card' onClick={() => goTo(routes.matchDetail)}>
+      <View className='today-change-card' onClick={() => goTo(routes.matches)}>
         <View className='today-change-card__icon'>
           <Icon name='chart' color='#2563eb' size={36} />
         </View>
         <View>
           <Text className='today-change-card__title'>今日变化</Text>
-          <Text className='today-change-card__text'>美国胜率上调，主场环境和阵容完整度带来 +2.1% 的黑马概率变化。</Text>
+          <Text className='today-change-card__text'>{rankings[0] ? `${rankings[0].name} 当前概率 ${rankings[0].probability}%，变化 ${rankings[0].delta >= 0 ? '+' : '-'}${Math.abs(rankings[0].delta)}%。` : '等待最新模型输出。'}</Text>
         </View>
       </View>
 

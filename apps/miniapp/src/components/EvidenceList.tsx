@@ -2,6 +2,10 @@ import { Text, View } from '@tarojs/components'
 import type { Evidence } from '@/services/mock'
 
 export function EvidenceList({ items }: { items: Evidence[] }) {
+  if (!items.length) {
+    return <View className='empty-state'>关键证据待情报任务生成</View>
+  }
+
   return (
     <View className='evidence-list'>
       {items.map(item => (
@@ -18,4 +22,3 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
     </View>
   )
 }
-

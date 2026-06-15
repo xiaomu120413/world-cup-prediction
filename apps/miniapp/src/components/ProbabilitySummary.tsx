@@ -2,6 +2,10 @@ import { Text, View } from '@tarojs/components'
 import type { Probability } from '@/services/mock'
 
 export function ProbabilitySummary({ probabilities }: { probabilities: Probability[] }) {
+  if (!probabilities.length) {
+    return <View className='empty-state'>预测概率待模型重算</View>
+  }
+
   const maxValue = Math.max(...probabilities.map(item => item.value))
 
   return (
@@ -18,4 +22,3 @@ export function ProbabilitySummary({ probabilities }: { probabilities: Probabili
     </View>
   )
 }
-
