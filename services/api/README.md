@@ -192,7 +192,7 @@ Homepage match data is used as the primary read source when `DATA_BACKEND=databa
 
 TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, country and timezone into `matches`, `teams`, `team_aliases` and `venues`. This source covers static schedule data only; it does not cover live scores, player form, standings or match stats.
 
-Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings`, and player ranking data into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target and key passes; minutes, ratings, injuries and availability still need a dedicated source.
+Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values; minutes, ratings, injuries and availability still need a dedicated source.
 
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
 

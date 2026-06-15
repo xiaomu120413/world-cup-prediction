@@ -93,6 +93,7 @@ def canonical_records_from_snapshot(snapshot: RawSnapshot) -> dict:
         "venues": [],
         "matches": [],
         "standings": [],
+        "team_forms": [],
         "players": [],
         "player_forms": [],
     }
@@ -106,6 +107,7 @@ def canonical_records_from_snapshot(snapshot: RawSnapshot) -> dict:
         "venues": records["venues"],
         "matches": records["matches"],
         "standings": records["standings"],
+        "team_forms": records["team_forms"],
         "players": records["players"],
         "player_forms": records["player_forms"],
     }
@@ -186,6 +188,7 @@ def collect_venues(snapshot: RawSnapshot, records: dict) -> None:
 
 
 def collect_standings(snapshot: RawSnapshot, records: dict) -> None:
+    as_of_at = parse_datetime(snapshot.payload.get("as_of_at"))
     for group in snapshot.payload.get("groups", []):
         stage_code = group.get("code", "group-a")
         for item in group.get("teams", []):
@@ -197,23 +200,39 @@ def collect_standings(snapshot: RawSnapshot, records: dict) -> None:
             losses = int(item.get("losses", 0))
             goals_for = int(item.get("goals_for", 0))
             goals_against = int(item.get("goals_against", 0))
+            played = int(item.get("played", wins + draws + losses))
+            points = int(item.get("points", wins * 3 + draws))
             records["standings"].append(
                 {
                     "stage_code": stage_code,
                     "stage_name": group.get("name") or stage_code.replace("-", " ").title(),
                     "stage_type": group.get("stage_type", "group"),
                     "team_code": team["code"],
-                    "played": int(item.get("played", wins + draws + losses)),
+                    "played": played,
                     "wins": wins,
                     "draws": draws,
                     "losses": losses,
                     "goals_for": goals_for,
                     "goals_against": goals_against,
                     "goal_diff": int(item.get("goal_diff", goals_for - goals_against)),
-                    "points": int(item.get("points", wins * 3 + draws)),
+                    "points": points,
                     "rank": int(item.get("rank", 99)),
                 }
             )
+            if played > 0:
+                records["team_forms"].append(
+                    {
+                        "team_code": team["code"],
+                        "as_of_at": as_of_at,
+                        "recent_matches": played,
+                        "points_per_match": round(points / played, 2),
+                        "goals_for_per_match": round(goals_for / played, 2),
+                        "goals_against_per_match": round(goals_against / played, 2),
+                        "lineup_stability_score": None,
+                        "injury_impact_score": None,
+                        "data_quality": "source",
+                    }
+                )
 
 
 def collect_player_rankings(snapshot: RawSnapshot, records: dict) -> None:

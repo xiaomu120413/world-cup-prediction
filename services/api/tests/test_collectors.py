@@ -88,6 +88,7 @@ def test_collection_catalog_tracks_required_data_domains():
             "news_items": 10,
             "dongqiudi_standings_snapshots": 1,
             "dongqiudi_player_ranking_snapshots": 1,
+            "player_market_values": 20,
         }
     )
 
@@ -97,6 +98,7 @@ def test_collection_catalog_tracks_required_data_domains():
     assert "thestatsapi/fixtures" in summary["domains"][0]["current_source"]
     assert next(domain for domain in summary["domains"] if domain["domain"] == "standings")["status"] == "partial_real"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "player_form")["status"] == "partial_real"
+    assert next(domain for domain in summary["domains"] if domain["domain"] == "market_value")["status"] == "partial_real"
 
 
 def test_dongqiudi_world_cup_standings_parser():
@@ -167,7 +169,7 @@ def test_dongqiudi_world_cup_player_ranking_parser_merges_stats():
         },
     }
 
-    players = DongqiudiWorldCupDataAdapter.extract_players(ranking_payloads)
+    players = DongqiudiWorldCupDataAdapter.extract_players(ranking_payloads, {"50259320": 75000000})
 
     assert players == [
         {
@@ -176,12 +178,28 @@ def test_dongqiudi_world_cup_player_ranking_parser_merges_stats():
             "name": "哈弗茨",
             "team": "德国",
             "source_team_id": "50000868",
+            "market_value_eur": 75000000,
             "recent_matches": 1,
             "source_count": 1,
             "goals": 2,
             "assists": 1,
         }
     ]
+
+
+def test_dongqiudi_market_value_parser_keeps_eur_values():
+    values = DongqiudiWorldCupDataAdapter.extract_market_values(
+        {
+            "content": {
+                "data": [
+                    {"person_id": "1", "currency": "EUR", "value": "100000000"},
+                    {"person_id": "2", "currency": "USD", "value": "90000000"},
+                ]
+            }
+        }
+    )
+
+    assert values == {"1": 100000000}
 
 
 def test_thestatsapi_fixtures_adapter_parses_static_json():
@@ -329,8 +347,46 @@ def test_canonical_records_from_standings_snapshot():
     records = canonical_records_from_snapshot(snapshot)
 
     assert len(records["standings"]) == 4
+    assert len(records["team_forms"]) == 0
     assert records["standings"][0]["stage_code"] == "group-a"
     assert records["standings"][0]["team_code"] == "FRA"
+
+
+def test_canonical_records_from_real_standings_create_team_forms():
+    snapshot = RawSnapshot(
+        source="dongqiudi",
+        source_type="world_cup_standings",
+        source_url="https://sport-data.dongqiudi.com/soccer/biz/data/standing?season_id=26123",
+        payload={
+            "as_of_at": "2026-06-15T12:00:00+08:00",
+            "groups": [
+                {
+                    "code": "group-a",
+                    "name": "A组",
+                    "teams": [
+                        {
+                            "team": "墨西哥",
+                            "rank": 1,
+                            "played": 1,
+                            "wins": 1,
+                            "draws": 0,
+                            "losses": 0,
+                            "goals_for": 2,
+                            "goals_against": 0,
+                            "points": 3,
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert records["standings"][0]["stage_name"] == "A组"
+    assert records["team_forms"][0]["team_code"].startswith("DQD")
+    assert records["team_forms"][0]["points_per_match"] == 3.0
+    assert records["team_forms"][0]["goals_for_per_match"] == 2.0
 
 
 def test_canonical_records_from_player_ranking_snapshot():

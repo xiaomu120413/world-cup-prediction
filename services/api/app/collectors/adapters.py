@@ -292,11 +292,15 @@ class DongqiudiWorldCupDataAdapter:
             )
 
         ranking_payloads = {name: self.get_json(self.ranking_url(api_type)) for name, api_type in self.ranking_types.items()}
+        market_values = self.extract_market_values(self.get_json(self.market_value_url()))
         payload = {
             "competition_id": self.competition_id,
             "season_id": self.season_id,
-            "players": self.extract_players(ranking_payloads),
-            "ranking_sources": {name: self.ranking_url(api_type) for name, api_type in self.ranking_types.items()},
+            "players": self.extract_players(ranking_payloads, market_values),
+            "ranking_sources": {
+                **{name: self.ranking_url(api_type) for name, api_type in self.ranking_types.items()},
+                "market_values": self.market_value_url(),
+            },
             "items": [],
         }
         return RawSnapshot(
@@ -333,6 +337,9 @@ class DongqiudiWorldCupDataAdapter:
             f"&type={ranking_type}&season_id={self.season_id}"
         )
 
+    def market_value_url(self) -> str:
+        return f"{self.api_base_url}/market_value_ranking?&app=dqd&version=830&platform=miniprogram&language=zh-cn&app_type="
+
     @classmethod
     def extract_groups(cls, data: dict) -> list[dict]:
         values = []
@@ -365,7 +372,8 @@ class DongqiudiWorldCupDataAdapter:
         return values
 
     @classmethod
-    def extract_players(cls, ranking_payloads: dict[str, dict]) -> list[dict]:
+    def extract_players(cls, ranking_payloads: dict[str, dict], market_values: dict[str, int] | None = None) -> list[dict]:
+        market_values = market_values or {}
         players: dict[str, dict] = {}
         for stat_name, payload in ranking_payloads.items():
             for row in payload.get("content", {}).get("data", []):
@@ -380,12 +388,26 @@ class DongqiudiWorldCupDataAdapter:
                         "name": row.get("person_name"),
                         "team": row.get("team_name") or row.get("row_1"),
                         "source_team_id": row.get("team_id"),
+                        "market_value_eur": market_values.get(person_id),
                         "recent_matches": 1,
                         "source_count": 1,
                     },
                 )
+                if person_id in market_values:
+                    player["market_value_eur"] = market_values[person_id]
                 player[stat_name] = cls.to_int(row.get("count") or row.get("row_2"))
         return list(players.values())
+
+    @classmethod
+    def extract_market_values(cls, data: dict) -> dict[str, int]:
+        values = {}
+        for row in data.get("content", {}).get("data", []):
+            person_id = row.get("person_id")
+            currency = row.get("currency")
+            if not person_id or currency != "EUR":
+                continue
+            values[person_id] = cls.to_int(row.get("value"))
+        return values
 
     @staticmethod
     def group_code(value: str) -> str:

@@ -22,6 +22,7 @@ from app.db.schema import (
     players,
     raw_snapshots,
     team_aliases,
+    team_form_snapshots,
     teams,
     venues,
 )
@@ -156,6 +157,7 @@ class CollectorRunner:
         stage_ids = self.ensure_stages(canonical["matches"], canonical["standings"])
         written += self.upsert_matches(canonical["matches"], team_ids, stage_ids, venue_ids)
         written += self.replace_standings(canonical["standings"], team_ids, stage_ids, snapshot_id)
+        written += self.replace_team_forms(canonical.get("team_forms", []), team_ids)
         player_ids = self.upsert_players(canonical["players"], team_ids)
         written += self.replace_player_forms(canonical["player_forms"], player_ids, team_ids)
         return written
@@ -422,6 +424,39 @@ class CollectorRunner:
         stage_ids_to_replace = {row["stage_id"] for row in rows}
         self.db.execute(delete(group_standings).where(group_standings.c.stage_id.in_(stage_ids_to_replace)))
         self.db.execute(insert(group_standings), rows)
+        return len(rows)
+
+    def replace_team_forms(self, values: list[dict], team_ids: dict[str, object]) -> int:
+        rows = []
+        for value in values:
+            team_id = team_ids.get(value["team_code"])
+            if team_id is None:
+                continue
+            rows.append(
+                {
+                    "team_id": team_id,
+                    "as_of_at": value["as_of_at"],
+                    "recent_matches": value["recent_matches"],
+                    "points_per_match": value["points_per_match"],
+                    "goals_for_per_match": value["goals_for_per_match"],
+                    "goals_against_per_match": value["goals_against_per_match"],
+                    "lineup_stability_score": value["lineup_stability_score"],
+                    "injury_impact_score": value["injury_impact_score"],
+                    "data_quality": value["data_quality"],
+                }
+            )
+        if not rows:
+            return 0
+        for row in rows:
+            self.db.execute(
+                delete(team_form_snapshots).where(
+                    and_(
+                        team_form_snapshots.c.team_id == row["team_id"],
+                        team_form_snapshots.c.as_of_at == row["as_of_at"],
+                    )
+                )
+            )
+        self.db.execute(insert(team_form_snapshots), rows)
         return len(rows)
 
     def upsert_players(self, values: list[dict], team_ids: dict[str, object]) -> dict[str, object]:

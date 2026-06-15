@@ -43,13 +43,13 @@ COLLECTOR_CATALOG = [
     },
     {
         "job_id": "team_form",
-        "source": "historical_match_dataset_or_authorized_stats",
+        "source": "dongqiudi",
         "source_type": "team_form",
         "domains": ["team_form"],
         "target_tables": ["raw_snapshots", "collector_runs", "team_form_snapshots"],
-        "status": "planned_required",
+        "status": "implemented_partial_real",
         "frequency": "daily",
-        "notes": "Recent team form, records against ranked teams, lineup stability and injury impact.",
+        "notes": "Current tournament team form derived from Dongqiudi World Cup standings. Lineup stability and injury impact still need dedicated sources.",
     },
     {
         "job_id": "team_market_value",
@@ -100,7 +100,9 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     thestatsapi_matches = counts.get("thestatsapi_matches", 0)
     players = counts.get("players", 0)
     player_forms = counts.get("player_form_snapshots", 0)
+    player_market_values = counts.get("player_market_values", 0)
     standings = counts.get("group_standings", 0)
+    team_forms = counts.get("team_form_snapshots", 0)
     news = counts.get("news_items", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
@@ -146,9 +148,15 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 "target_tables": ["players", "player_form_snapshots"],
             },
             {
+                "domain": "market_value",
+                "status": "partial_real" if player_market_values > 0 else "missing_real_source",
+                "current_source": "dongqiudi/market_value_ranking" if player_market_values > 0 else None,
+                "target_tables": ["players.market_value_eur", "teams.market_value_eur"],
+            },
+            {
                 "domain": "team_form",
-                "status": "missing_real_source",
-                "current_source": None,
+                "status": "partial_real" if team_forms > 0 and dongqiudi_standings > 0 else "missing_real_source",
+                "current_source": "dongqiudi/world_cup_standings" if team_forms > 0 and dongqiudi_standings > 0 else None,
                 "target_tables": ["team_form_snapshots"],
             },
             {

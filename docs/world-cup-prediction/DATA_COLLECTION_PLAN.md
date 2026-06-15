@@ -17,11 +17,12 @@
 - 已能写入全量 104 场赛程、球队占位/参赛队、场地、城市、国家和时区
 - 懂球帝 sport-data 世界杯 2026 接口：`competition_id=61`、`season_id=26123`
 - 已能写入 12 个小组积分榜，以及球员射手、助攻、射门、射正、关键传球榜
+- 懂球帝全站球员身价榜：按 `person_id` 匹配世界杯球员，已能写入匹配球员的 `market_value_eur`
 
 当前还不能当成真实生产数据：
 
-- 球队今年比赛状态、对不同世界排名球队战绩、阵容稳定性
-- 球员/球队身价、主教练带队战绩
+- 球队对不同世界排名球队战绩、阵容稳定性
+- 球队总身价、主教练带队战绩
 - 场地、天气、海拔、草皮
 - AI 新闻结构化情报
 
@@ -94,10 +95,10 @@
 | 中文新闻链接 | 懂球帝首页 | 部分真实 | 懂球帝/新闻源 | `news_items` | 每日 | 去重、保留 URL、可关联球队 |
 | 小组积分榜 | 懂球帝 sport-data | 部分真实 | 官方/授权积分源交叉校验 | `group_standings` | 赛后 30 分钟 | 积分、净胜球、排名一致 |
 | 球员近期进球助攻 | 懂球帝 sport-data | 部分真实 | 授权球员数据或稳定页面 | `players`、`player_form_snapshots` | 每日 | 已有进球、助攻、射门、射正、关键传球；分钟、评分、可用状态待补 |
-| 球队今年比赛状态 | 未接入 | 缺失 | 历史比赛库/授权数据源 | `team_form_snapshots` | 每日 | 最近 N 场、进失球、场均积分 |
+| 球队今年比赛状态 | 懂球帝 sport-data 积分榜 | 部分真实 | 历史比赛库/授权数据源补全年队比赛 | `team_form_snapshots` | 每日 | 已有当前杯赛已赛、场均积分、进失球 |
 | 对不同世界排名球队战绩 | 未接入 | 缺失 | 历史比赛 + FIFA/Elo 排名快照 | `team_form_snapshots.top30_record` | 每周/赛前 | Top10/Top30/Top50 战绩可计算 |
 | 阵容稳定性 | 未接入 | 缺失 | 首发/出场分钟/大名单 | `team_form_snapshots.lineup_stability_score` | 每日 | 最近 N 场主力出勤率可计算 |
-| 球员/球队身价 | 未接入 | 缺失 | 授权身价源/人工核验 | `teams.market_value_eur`、`players.market_value_eur` | 每周 | 单位统一 EUR，更新时间可见 |
+| 球员/球队身价 | 懂球帝 market_value_ranking | 球员部分真实 | 授权身价源/人工核验 | `players.market_value_eur`，后续补 `teams.market_value_eur` | 每周 | 已按 `person_id` 匹配部分世界杯球员，单位 EUR |
 | 主教练带队战绩 | 未接入 | schema 缺口 | 授权源/人工核验 | `coaches` | 每周 | 任期、场次、胜率、大赛成绩 |
 | 场地信息 | TheStatsAPI fixtures | 部分真实 | 官方场馆源补容量/海拔/草皮 | `venues` | 低频 | 城市、时区、国家已入库；容量、海拔、草皮待补 |
 | 天气 | 未接入 | schema 缺口 | 天气 API | `weather_snapshots` | 赛前 24h/3h | 温度、湿度、风、降水概率 |
@@ -113,8 +114,8 @@
 | 2 | `official_schedule_venues` | 全量赛程 + 场地 | 已用 TheStatsAPI fixtures 接入 104 场赛程和场地基础字段 |
 | 3 | `group_standings` | 小组积分榜 | 已用懂球帝 sport-data 接入 12 个小组 |
 | 4 | `player_recent_form` | 球员进球、助攻、评分 | 已用懂球帝 sport-data 接入射手/助攻/射门等榜单；评分和出勤待补 |
-| 5 | `team_form` | 球队近期状态 | 支撑模型主要特征 |
-| 6 | `team_market_value` | 身价 | 作为实力特征之一 |
+| 5 | `team_form` | 球队近期状态 | 已从积分榜派生当前杯赛场均积分/进失球 |
+| 6 | `team_market_value` | 身价 | 已按 `person_id` 匹配部分球员身价；球队总身价待聚合/校验 |
 | 7 | `coach_records` | 主教练 | 后续补 schema 和采集 |
 | 8 | `venue_weather` | 场地天气 | 后续补天气快照表 |
 | 9 | `ai_news_insights` | AI 情报 | 把新闻转伤停、阵容、战术、教练言论 |
@@ -399,7 +400,8 @@ select source, count(*) from news_items group by 1;
 2. TheStatsAPI fixtures 已接入；下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
 3. 懂球帝世界杯积分榜已接入；后续接官方/授权积分源做交叉校验。
 4. 懂球帝球员榜已接入；下一步补球员分钟、评分、可用状态和国家队名单。
-5. 建 `team_form_snapshots` 的真实采集和计算任务。
-6. 补 `coaches`、`weather_snapshots`、`injuries` schema。
-7. 接 AI 新闻抽取，生成 `ai_insights`。
-8. 每次数据域变成真实后，更新 `collection_catalog` 状态和测试。
+5. `team_form_snapshots` 已从当前杯赛积分榜派生；下一步补全年国家队近期战绩。
+6. 球员身价已部分接入；下一步聚合球队总身价并补缺失球员。
+7. 补 `coaches`、`weather_snapshots`、`injuries` schema。
+8. 接 AI 新闻抽取，生成 `ai_insights`。
+9. 每次数据域变成真实后，更新 `collection_catalog` 状态和测试。
