@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { ProgressRow } from '@/components/ProgressRow'
 import { Section } from '@/components/Section'
-import { championRankings, darkHorseRankings, semiFinalRankings } from '@/services/mock'
+import { StatusView } from '@/components/StatusView'
+import { getRankingData, type LoadState } from '@/services/data'
+import { championRankings, darkHorseRankings, semiFinalRankings, type RankingTeam } from '@/services/mock'
 import { goTo, routes } from '@/utils/navigation'
 
 const rankingMap = {
@@ -17,7 +19,30 @@ type Tab = keyof typeof rankingMap
 
 export default function PredictionsPage() {
   const [active, setActive] = useState<Tab>('champion')
-  const rankings = rankingMap[active]
+  const [rankings, setRankings] = useState<RankingTeam[]>(rankingMap[active])
+  const [loadState, setLoadState] = useState<LoadState>('idle')
+
+  useEffect(() => {
+    let mounted = true
+    setRankings(rankingMap[active])
+    setLoadState('loading')
+    getRankingData(active)
+      .then(data => {
+        if (mounted) {
+          setRankings(data)
+          setLoadState('ready')
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setLoadState('error')
+        }
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [active])
 
   return (
     <View className='page'>
@@ -26,6 +51,9 @@ export default function PredictionsPage() {
         <Text className='page-head__subtitle'>基于 50,000 次模拟</Text>
         <Text className='muted'>更新于 18:00</Text>
       </View>
+
+      {loadState === 'loading' && <StatusView title='正在更新预测榜' detail='稍后显示最新模拟快照' />}
+      {loadState === 'error' && <StatusView title='预测榜暂未更新' detail='当前显示本地模拟快照' />}
 
       <View className='segmented'>
         <Text className={`segmented__item ${active === 'champion' ? 'segmented__item--active' : ''}`} onClick={() => setActive('champion')}>冠军</Text>
@@ -69,4 +97,3 @@ export default function PredictionsPage() {
     </View>
   )
 }
-

@@ -115,9 +115,32 @@ H5 预览地址：`http://127.0.0.1:4173`
 | `GET /api/v1/matches/usa-paraguay-2026-06-13/prediction` | 200 |
 | `GET /api/v1/teams` | 200 |
 
-## 8. 下一轮测试重点
+## 8. 小程序 API 模式验证
 
-- 前端 service 层从 mock 切 API 后，补接口失败、空状态、超时状态测试。
+测试日期：2026-06-15
+
+本轮新增验证：
+
+| 测试项 | 结果 |
+| --- | --- |
+| `TARO_APP_API_BASE_URL=http://127.0.0.1:8001 npm.cmd run build:h5` | 通过 |
+| H5 首页 API 模式 smoke | 通过 |
+| H5 比赛详情 API 模式 smoke | 通过 |
+| H5 小组页 API 模式 smoke | 通过 |
+| H5 预测榜 API 模式 smoke | 通过 |
+| H5 球队页 API 模式 smoke | 通过 |
+| API 模式浏览器 console error | 未发现 |
+
+本轮发现并修复：
+
+| 问题 | 处理 |
+| --- | --- |
+| H5 运行时保留 `process.env.TARO_APP_API_BASE_URL` 导致页面空白 | 改为 Taro `defineConstants` 注入 `__API_BASE_URL__` |
+| API 返回 `medium` 直接展示到首页 | 增加信心标签中文映射 |
+
+## 9. 下一轮测试重点
+
 - 将首页、小组、预测榜更多接口逐步切到 repository 读库。
 - 接入 Redis 缓存降级测试。
+- 补接口失败、空状态、超时状态自动化测试。
 - 微信开发者工具真机预览。

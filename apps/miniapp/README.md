@@ -1,6 +1,6 @@
 # World Cup Prediction Miniapp
 
-Taro React 小程序前端骨架，当前阶段使用 `src/services/mock.ts` 中的 mock 数据。
+Taro React 小程序前端骨架。默认使用 `src/services/mock.ts` 中的本地预测快照；构建时配置 `TARO_APP_API_BASE_URL` 后，页面会从后端 API 读取数据，接口失败时保留本地快照兜底。
 
 ## Pages
 
@@ -17,6 +17,13 @@ npm install
 npm run typecheck
 npm run build:h5
 npm run build:weapp
+```
+
+API 联调构建：
+
+```powershell
+$env:TARO_APP_API_BASE_URL="http://127.0.0.1:8001"
+npm.cmd run build:h5
 ```
 
 本地 H5 静态预览可以在构建后执行：

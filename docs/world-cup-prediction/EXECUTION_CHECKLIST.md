@@ -85,6 +85,7 @@ AI 解读任务
 | M2 设计 | 已完成 | `DATA_MODEL.md`、`API_CONTRACT.md`、`FUNCTIONAL_DESIGN.md` 已定义数据表、接口合约和功能闭环。 |
 | M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、mock 数据接口、OpenAPI 文档和契约测试。 |
 | M2 数据库 | 进行中 | `services/api/db` 已提供初始 PostgreSQL schema 和 mock seed；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本、Docker Compose 已接入。`matches`、`predictions`、`teams` 已通过 PostgreSQL 读库集成测试，默认仍使用 mock。 |
+| M6 小程序联调 | 已开始 | `apps/miniapp/src/services/data.ts` 已接入 API service 层，支持 `TARO_APP_API_BASE_URL` 从 mock 切后端 API；H5 API 模式 smoke 已通过。 |
 
 ## 4. M0 基础设施
 

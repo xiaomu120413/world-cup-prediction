@@ -17,7 +17,9 @@ export default defineConfig<'webpack5'>(async (merge) => {
     sourceRoot: 'src',
     outputRoot: process.env.TARO_ENV === 'weapp' ? 'dist-weapp' : 'dist',
     plugins: ['@tarojs/plugin-generator'],
-    defineConstants: {},
+    defineConstants: {
+      __API_BASE_URL__: JSON.stringify(process.env.TARO_APP_API_BASE_URL || '')
+    },
     copy: {
       patterns: [],
       options: {}

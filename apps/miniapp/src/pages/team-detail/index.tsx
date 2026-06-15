@@ -1,12 +1,37 @@
+import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { RatingRow } from '@/components/RatingRow'
 import { Section } from '@/components/Section'
-import { franceProfile } from '@/services/mock'
+import { StatusView } from '@/components/StatusView'
+import { getTeamProfile, type LoadState } from '@/services/data'
+import { franceProfile, type TeamProfile } from '@/services/mock'
 
 export default function TeamDetailPage() {
-  const team = franceProfile
+  const [team, setTeam] = useState<TeamProfile>(franceProfile)
+  const [loadState, setLoadState] = useState<LoadState>('idle')
+
+  useEffect(() => {
+    let mounted = true
+    setLoadState('loading')
+    getTeamProfile()
+      .then(data => {
+        if (mounted) {
+          setTeam(data)
+          setLoadState('ready')
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setLoadState('error')
+        }
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   return (
     <View className='page'>
@@ -15,6 +40,9 @@ export default function TeamDetailPage() {
         <Text className='page-head__subtitle'>{team.subtitle}</Text>
         <Text className='muted'>{team.updatedAt}</Text>
       </View>
+
+      {loadState === 'loading' && <StatusView title='正在更新球队数据' detail='稍后显示最新球队快照' />}
+      {loadState === 'error' && <StatusView title='球队数据暂未更新' detail='当前显示本地球队快照' />}
 
       <Section title='AI 球队判断'>
         <AIReportCard title='球队状态'>
