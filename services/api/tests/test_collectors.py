@@ -1,5 +1,5 @@
 from app.collectors.adapters import DongqiudiHomepageAdapter, LocalSampleAdapter, RawSnapshot, build_adapter
-from app.collectors.normalizers import news_items_from_snapshot
+from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
 from app.collectors.runner import snapshot_checksum
 
 
@@ -65,3 +65,34 @@ def test_news_items_from_dongqiudi_snapshot():
     assert len(values) == 1
     assert values[0]["source"] == "dongqiudi"
     assert values[0]["language"] == "zh"
+
+
+def test_canonical_records_from_schedule_snapshot():
+    snapshot = LocalSampleAdapter("schedule").fetch()
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert {team["code"] for team in records["teams"]} == {"USA", "PAR"}
+    assert records["matches"][0]["public_id"] == "usa-paraguay-2026-06-13"
+    assert records["matches"][0]["home_team_code"] == "USA"
+    assert any(alias["alias"] == "United States" for alias in records["team_aliases"])
+
+
+def test_canonical_records_from_standings_snapshot():
+    snapshot = LocalSampleAdapter("standings").fetch()
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert len(records["standings"]) == 4
+    assert records["standings"][0]["stage_code"] == "group-a"
+    assert records["standings"][0]["team_code"] == "FRA"
+
+
+def test_canonical_records_from_player_ranking_snapshot():
+    snapshot = LocalSampleAdapter("player_ranking").fetch()
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert len(records["players"]) == 2
+    assert records["players"][0]["team_code"] == "FRA"
+    assert records["player_forms"][0]["goals"] == 3

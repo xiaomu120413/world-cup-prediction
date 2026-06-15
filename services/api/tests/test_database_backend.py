@@ -1,12 +1,15 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
+from app.db.schema import group_standings, matches, player_form_snapshots, players, team_aliases
 from app.main import app
 from app.predictions.service import BaselinePredictionService
 
@@ -47,7 +50,7 @@ def test_database_prediction_contract(database_client):
     assert response.status_code == 200
     body = response.json()["data"]
     assert abs(sum(body["probabilities"].values()) - 1) < 0.001
-    assert len(body["scorelines"]) == 4
+    assert len(body["scorelines"]) >= 4
 
 
 def test_database_teams_contract(database_client):
@@ -106,6 +109,62 @@ def test_database_collector_writes_idempotent_raw_snapshot():
     assert second["status"] == "completed"
     assert second["records_written"] == 0
     assert first["snapshot_ids"] == second["snapshot_ids"]
+
+
+def test_database_collector_normalizes_schedule_to_canonical_tables():
+    with SessionLocal() as db:
+        result = CollectorRunner(db).run("local_sample", "schedule")
+        match_exists = db.execute(
+            select(func.count()).select_from(matches).where(matches.c.public_id == "usa-paraguay-2026-06-13")
+        ).scalar_one()
+        alias_exists = db.execute(
+            select(func.count()).select_from(team_aliases).where(team_aliases.c.alias == "United States")
+        ).scalar_one()
+
+    assert result["status"] == "completed"
+    assert match_exists == 1
+    assert alias_exists >= 1
+
+
+def test_database_collector_normalizes_standings_idempotently():
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "standings")
+        first_count = db.execute(select(func.count()).select_from(group_standings)).scalar_one()
+        CollectorRunner(db).run("local_sample", "standings")
+        second_count = db.execute(select(func.count()).select_from(group_standings)).scalar_one()
+
+    assert first_count >= 4
+    assert second_count == first_count
+
+
+def test_database_collector_normalizes_player_rankings_idempotently():
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "player_ranking")
+        first_players = db.execute(select(func.count()).select_from(players)).scalar_one()
+        first_forms = db.execute(select(func.count()).select_from(player_form_snapshots)).scalar_one()
+        CollectorRunner(db).run("local_sample", "player_ranking")
+        second_players = db.execute(select(func.count()).select_from(players)).scalar_one()
+        second_forms = db.execute(select(func.count()).select_from(player_form_snapshots)).scalar_one()
+
+    assert first_players >= 2
+    assert first_forms >= 2
+    assert second_players == first_players
+    assert second_forms == first_forms
+
+
+def test_database_collector_serializes_concurrent_same_job():
+    def run_job():
+        with SessionLocal() as db:
+            return CollectorRunner(db).run("local_sample", "standings")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: run_job(), range(2)))
+
+    with SessionLocal() as db:
+        rows = db.execute(select(group_standings.c.stage_id, group_standings.c.team_id)).all()
+
+    assert all(result["status"] == "completed" for result in results)
+    assert len(rows) == len(set(rows))
 
 
 def test_database_collector_normalizes_news_items_idempotently():

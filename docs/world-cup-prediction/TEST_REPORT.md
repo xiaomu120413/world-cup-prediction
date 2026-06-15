@@ -201,3 +201,24 @@ Test date: 2026-06-15
 | `python scripts/run_collector.py --source dongqiudi --source-type homepage` | Passed, raw snapshot written |
 | `news_items` normalization | Passed, latest smoke wrote 24 candidate news items |
 | Source URL | `https://pc.dongqiudi.com/` |
+
+## Canonical Collector Normalization Smoke
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `python -m pytest tests/test_collectors.py` | Passed, 8 tests |
+| `python -m pytest` | Passed, 39 passed / 13 skipped |
+| `RUN_DATABASE_TESTS=1 python -m pytest tests/test_database_backend.py` | Passed, 13 tests |
+| `python scripts/run_collector.py --source local_sample --source-type schedule` | Passed, idempotent rerun |
+| `python scripts/run_collector.py --source local_sample --source-type standings` | Passed, idempotent rerun |
+| `python scripts/run_collector.py --source local_sample --source-type player_ranking` | Passed, idempotent rerun |
+| Canonical tables verified | `matches=1`, `group_standings=4`, `players=2`, `player_form_snapshots=2`, `team_aliases=13` |
+| Concurrent same collector job | Passed, advisory transaction lock prevents duplicate `group_standings` rows |
+
+Implementation notes:
+
+- Collector snapshots now normalize into canonical `teams`, `team_aliases`, `matches`, `group_standings`, `players`, and `player_form_snapshots`.
+- Same `source/source_type` collector writes are serialized with PostgreSQL advisory transaction locks.
+- Raw snapshot uniqueness remains checksum-based; canonical writes are still executed for existing snapshots so upgraded normalizers can backfill missing canonical rows.
