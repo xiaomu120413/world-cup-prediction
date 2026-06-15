@@ -234,6 +234,68 @@ player_form_snapshots = Table(
 )
 Index("idx_player_form_player_time", player_form_snapshots.c.player_id, player_form_snapshots.c.as_of_at.desc())
 
+coaches = Table(
+    "coaches",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("name_zh", VARCHAR(128), nullable=False),
+    Column("name_en", VARCHAR(128)),
+    Column("started_at", Date),
+    Column("matches_count", Integer),
+    Column("wins", Integer),
+    Column("draws", Integer),
+    Column("losses", Integer),
+    Column("win_rate", Numeric(5, 2)),
+    Column("major_tournament_record", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("1.0")),
+    Column("quality_status", VARCHAR(32), nullable=False, server_default=text("'partial'")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("team_id", "name_zh", name="uq_coaches_team_name"),
+)
+Index("idx_coaches_team", coaches.c.team_id)
+
+weather_snapshots = Table(
+    "weather_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("venue_id", UUID(as_uuid=True), ForeignKey("venues.id", ondelete="CASCADE"), nullable=False),
+    Column("observed_at", DateTime(timezone=True), nullable=False),
+    Column("provider", VARCHAR(64), nullable=False),
+    Column("temperature_c", Numeric(5, 2)),
+    Column("humidity_pct", Integer),
+    Column("precipitation_mm", Numeric(6, 2)),
+    Column("wind_speed_kph", Numeric(6, 2)),
+    Column("wind_direction_deg", Integer),
+    Column("weather_code", Integer),
+    Column("source_url", Text),
+    Column("data_quality", VARCHAR(64), nullable=False, server_default=text("'current_observation'")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("venue_id", "provider", "observed_at", name="uq_weather_snapshots_venue_provider_time"),
+)
+Index("idx_weather_snapshots_venue_time", weather_snapshots.c.venue_id, weather_snapshots.c.observed_at.desc())
+
+injury_reports = Table(
+    "injury_reports",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("player_id", UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL")),
+    Column("report_type", VARCHAR(32), nullable=False),
+    Column("status", VARCHAR(32), nullable=False),
+    Column("impact_score", Numeric(5, 2)),
+    Column("started_at", Date),
+    Column("expected_return_at", Date),
+    Column("source_url", Text, nullable=False),
+    Column("confidence", Numeric(4, 3), nullable=False),
+    Column("evidence_text", Text, nullable=False),
+    Column("is_model_eligible", Boolean, nullable=False, server_default=text("false")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("report_type in ('injury', 'suspension', 'fitness')", name="report_type_valid"),
+    CheckConstraint("status in ('confirmed', 'doubtful', 'returned', 'suspended')", name="status_valid"),
+)
+Index("idx_injury_reports_team_status", injury_reports.c.team_id, injury_reports.c.status)
+
 model_versions = Table(
     "model_versions",
     metadata,

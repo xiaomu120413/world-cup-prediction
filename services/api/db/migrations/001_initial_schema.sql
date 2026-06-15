@@ -184,6 +184,63 @@ create table if not exists player_form_snapshots (
 
 create index if not exists idx_player_form_player_time on player_form_snapshots(player_id, as_of_at desc);
 
+create table if not exists coaches (
+    id uuid primary key default gen_random_uuid(),
+    team_id uuid not null references teams(id) on delete cascade,
+    name_zh varchar(128) not null,
+    name_en varchar(128),
+    started_at date,
+    matches_count int,
+    wins int,
+    draws int,
+    losses int,
+    win_rate numeric(5,2),
+    major_tournament_record jsonb not null default '{}'::jsonb,
+    source_confidence numeric(4,3) not null default 1.0,
+    quality_status varchar(32) not null default 'partial',
+    updated_at timestamptz not null default now(),
+    unique (team_id, name_zh)
+);
+
+create index if not exists idx_coaches_team on coaches(team_id);
+
+create table if not exists weather_snapshots (
+    id uuid primary key default gen_random_uuid(),
+    venue_id uuid not null references venues(id) on delete cascade,
+    observed_at timestamptz not null,
+    provider varchar(64) not null,
+    temperature_c numeric(5,2),
+    humidity_pct int,
+    precipitation_mm numeric(6,2),
+    wind_speed_kph numeric(6,2),
+    wind_direction_deg int,
+    weather_code int,
+    source_url text,
+    data_quality varchar(64) not null default 'current_observation',
+    created_at timestamptz not null default now(),
+    unique (venue_id, provider, observed_at)
+);
+
+create index if not exists idx_weather_snapshots_venue_time on weather_snapshots(venue_id, observed_at desc);
+
+create table if not exists injury_reports (
+    id uuid primary key default gen_random_uuid(),
+    team_id uuid not null references teams(id) on delete cascade,
+    player_id uuid references players(id) on delete set null,
+    report_type varchar(32) not null check (report_type in ('injury', 'suspension', 'fitness')),
+    status varchar(32) not null check (status in ('confirmed', 'doubtful', 'returned', 'suspended')),
+    impact_score numeric(5,2),
+    started_at date,
+    expected_return_at date,
+    source_url text not null,
+    confidence numeric(4,3) not null,
+    evidence_text text not null,
+    is_model_eligible boolean not null default false,
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_injury_reports_team_status on injury_reports(team_id, status);
+
 create table if not exists model_versions (
     id uuid primary key default gen_random_uuid(),
     name varchar(128) not null,

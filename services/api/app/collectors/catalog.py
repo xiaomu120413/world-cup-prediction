@@ -62,24 +62,34 @@ COLLECTOR_CATALOG = [
         "notes": "Team and player market value. Needs licensing check before production use.",
     },
     {
+        "job_id": "official_squad_list",
+        "source": "fifa",
+        "source_type": "official_squad_list",
+        "domains": ["players", "coaches"],
+        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "players", "coaches"],
+        "status": "implemented_official",
+        "frequency": "manual_low_frequency",
+        "notes": "FIFA official World Cup 2026 Squad List PDF. Normalizes 26-player squads and head coaches.",
+    },
+    {
         "job_id": "coach_records",
         "source": "authorized_or_manual_verified",
         "source_type": "coach_record",
         "domains": ["coaches"],
         "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "coaches"],
-        "status": "schema_gap",
+        "status": "schema_ready_partial_real",
         "frequency": "weekly",
-        "notes": "Head coach tenure, win rate and tournament record. Schema still needs implementation.",
+        "notes": "Head coach identity is implemented from FIFA official squad list; tenure, win rate and tournament record still need a dedicated source.",
     },
     {
         "job_id": "venue_weather",
         "source": "venue_source_and_weather_api",
         "source_type": "weather",
         "domains": ["venues", "weather"],
-        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "venues"],
-        "status": "schema_gap",
+        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "venues", "weather_snapshots"],
+        "status": "implemented_partial_real",
         "frequency": "matchday_minus_24h_and_minus_3h",
-        "notes": "Weather should be attached to match/venue features. Weather snapshot schema still needs implementation.",
+        "notes": "Venue enrichment and Open-Meteo current observations are implemented; matchday weather should be refreshed 24h/3h before kickoff.",
     },
     {
         "job_id": "ai_news_insights",
@@ -99,10 +109,16 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     dongqiudi_matches = counts.get("dongqiudi_matches", 0)
     thestatsapi_matches = counts.get("thestatsapi_matches", 0)
     players = counts.get("players", 0)
+    fifa_official_players = counts.get("fifa_official_players", 0)
     player_forms = counts.get("player_form_snapshots", 0)
     player_market_values = counts.get("player_market_values", 0)
+    team_market_values = counts.get("team_market_values", 0)
     standings = counts.get("group_standings", 0)
     team_forms = counts.get("team_form_snapshots", 0)
+    weather = counts.get("weather_snapshots", 0)
+    venue_enriched = counts.get("venue_enriched", 0)
+    coaches = counts.get("coaches", 0)
+    injuries = counts.get("injury_reports", 0)
     news = counts.get("news_items", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
@@ -140,17 +156,24 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "player_form",
                 "status": "partial_real"
-                if dongqiudi_player_rankings > 0
+                if dongqiudi_player_rankings > 0 or fifa_official_players > 0
                 else ("sample_or_partial" if players > 0 and player_forms > 0 else "missing_real_source"),
-                "current_source": "dongqiudi/world_cup_player_rankings"
-                if dongqiudi_player_rankings > 0
+                "current_source": ", ".join(
+                    value
+                    for value in [
+                        "fifa/official_squad_list" if fifa_official_players > 0 else "",
+                        "dongqiudi/world_cup_player_rankings" if dongqiudi_player_rankings > 0 else "",
+                    ]
+                    if value
+                )
+                if dongqiudi_player_rankings > 0 or fifa_official_players > 0
                 else ("local_sample_or_seed" if players > 0 and player_forms > 0 else None),
                 "target_tables": ["players", "player_form_snapshots"],
             },
             {
                 "domain": "market_value",
-                "status": "partial_real" if player_market_values > 0 else "missing_real_source",
-                "current_source": "dongqiudi/market_value_ranking" if player_market_values > 0 else None,
+                "status": "partial_real" if player_market_values > 0 or team_market_values > 0 else "missing_real_source",
+                "current_source": "dongqiudi/market_value_ranking" if player_market_values > 0 or team_market_values > 0 else None,
                 "target_tables": ["players.market_value_eur", "teams.market_value_eur"],
             },
             {
@@ -161,15 +184,30 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             },
             {
                 "domain": "venues_weather",
-                "status": "partial_real" if counts.get("venues", 0) > 0 else "missing_schema_or_source",
-                "current_source": "thestatsapi/fixtures" if counts.get("venues", 0) > 0 else None,
+                "status": "partial_real" if venue_enriched > 0 and weather > 0 else ("partial_real" if counts.get("venues", 0) > 0 else "missing_real_source"),
+                "current_source": ", ".join(
+                    value
+                    for value in [
+                        "thestatsapi/fixtures" if counts.get("venues", 0) > 0 else "",
+                        "manual_verified/venue_enrichment" if venue_enriched > 0 else "",
+                        "open_meteo/venue_current_weather" if weather > 0 else "",
+                    ]
+                    if value
+                )
+                or None,
                 "target_tables": ["venues", "weather_snapshots"],
             },
             {
                 "domain": "coaches",
-                "status": "missing_schema_or_source",
-                "current_source": None,
+                "status": "partial_real" if coaches > 0 else "schema_ready_missing_source",
+                "current_source": "manual_verified_or_authorized" if coaches > 0 else None,
                 "target_tables": ["coaches"],
+            },
+            {
+                "domain": "injuries",
+                "status": "partial_real" if injuries > 0 else "schema_ready_missing_source",
+                "current_source": "verified_news_or_authorized" if injuries > 0 else None,
+                "target_tables": ["injury_reports", "ai_insights"],
             },
         ],
         "jobs": COLLECTOR_CATALOG,

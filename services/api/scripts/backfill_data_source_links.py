@@ -175,6 +175,38 @@ where not exists (
     where l.entity_type = 'player_form'
       and l.entity_key = p.code || ':' || to_char(pf.as_of_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD"T"HH24:MI:SS') || '+08:00'
 )
+union all
+select 'team_market_values_without_source', count(*)
+from teams t
+where t.market_value_eur is not null
+  and not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'team_market_value' and l.entity_key = t.code
+  )
+union all
+select 'weather_snapshots_without_source', count(*)
+from weather_snapshots ws
+join venues v on v.id = ws.venue_id
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'weather_snapshot'
+      and l.entity_key = v.code || ':' || to_char(ws.observed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') || '+00:00'
+)
+union all
+select 'coaches_without_source', count(*)
+from coaches c
+join teams t on t.id = c.team_id
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'coach' and l.entity_key = t.code || ':' || c.name_zh
+)
+union all
+select 'injury_reports_without_source', count(*)
+from injury_reports ir
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'injury_report' and l.entity_key = ir.id::text
+)
 order by check_name;
 """
 

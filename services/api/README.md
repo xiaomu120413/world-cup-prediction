@@ -153,6 +153,14 @@ python scripts/run_collector.py --source dongqiudi --source-type world_cup_playe
 python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings
 ```
 
+Enrich low-frequency foundation data, including FIFA official squad list coaches/players, venue capacity/surface/coordinates, Open-Meteo venue weather observations and derived team market values:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/enrich_foundation_data.py
+python scripts/backfill_data_source_links.py
+```
+
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
 
 - `raw_snapshots`: immutable source payload and checksum.

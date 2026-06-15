@@ -5,9 +5,11 @@ from app.collectors.catalog import collection_catalog_summary
 from app.db.schema import (
     competition_stages,
     collector_runs,
+    coaches,
     data_source_links,
     group_simulations,
     group_standings,
+    injury_reports,
     match_predictions,
     matches,
     news_items,
@@ -20,6 +22,7 @@ from app.db.schema import (
     team_form_snapshots,
     teams,
     venues,
+    weather_snapshots,
 )
 
 TEAM_PUBLIC_IDS = {
@@ -288,10 +291,16 @@ class PublicDataRepository:
             "dongqiudi_matches": self.count_real_matches(),
             "thestatsapi_matches": self.count_thestatsapi_matches(),
             "venues": self.count_rows(venues),
+            "venue_enriched": self.count_enriched_venues(),
             "players": self.count_rows(players),
+            "fifa_official_players": self.count_fifa_official_players(),
             "player_market_values": self.count_player_market_values(),
+            "team_market_values": self.count_team_market_values(),
             "player_form_snapshots": self.count_rows(player_form_snapshots),
             "team_form_snapshots": self.count_rows(team_form_snapshots),
+            "weather_snapshots": self.count_rows(weather_snapshots),
+            "coaches": self.count_rows(coaches),
+            "injury_reports": self.count_rows(injury_reports),
             "group_standings": self.count_rows(group_standings),
             "raw_snapshots": self.count_rows(raw_snapshots),
             "data_source_links": self.count_rows(data_source_links),
@@ -368,6 +377,33 @@ class PublicDataRepository:
         return int(
             self.db.execute(
                 select(func.count()).select_from(players).where(players.c.market_value_eur.is_not(None))
+            ).scalar_one()
+        )
+
+    def count_fifa_official_players(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count()).select_from(players).where(players.c.code.like("FIFA-%"))
+            ).scalar_one()
+        )
+
+    def count_team_market_values(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count()).select_from(teams).where(teams.c.market_value_eur.is_not(None))
+            ).scalar_one()
+        )
+
+    def count_enriched_venues(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count())
+                .select_from(venues)
+                .where(
+                    venues.c.capacity.is_not(None),
+                    venues.c.surface.is_not(None),
+                    venues.c.weather_profile.is_not(None),
+                )
             ).scalar_one()
         )
 

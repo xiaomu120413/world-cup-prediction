@@ -424,3 +424,19 @@ select source, count(*) from news_items group by 1;
 - `group_standings=48`、`team_form_snapshots=24`：懂球帝 World Cup standings 派生。
 - `news_items=62`：懂球帝首页新闻链接。
 - `data_source_links=1300`，`local_sample_source_links=0`。
+
+## 2026-06-15 Foundation Data Enrichment
+
+本轮新增低频基础数据补齐：
+
+- FIFA official squad list PDF：导入 48 支球队主教练、48x26 官方名单球员，共 `coaches=48`、`fifa_official_players=1248`。
+- 场馆增强：16 个正式比赛场馆补齐 `capacity`、`surface`、`weather_profile.latitude/longitude/roof_type`，删除无比赛引用的 `los-angeles` 占位场馆。
+- Open-Meteo：按场馆坐标写入 `weather_snapshots=16` 当前天气观测。该数据只作为场馆天气基线，不等同于赛前天气；赛前 24h/3h 仍需刷新。
+- 球队身价：基于已匹配球员 `market_value_eur` 聚合出 `team_market_values=18`，质量标记为 partial roster coverage。
+- 来源审计：`coaches`、`players`、`venues`、`weather_snapshots`、`team_market_values` 均写入 `data_source_links`，`*_without_source` 全部为 `0`。
+
+仍不应伪装成完整的数据：
+
+- 伤停/停赛：`injury_reports` schema 已有，但真实可信源未接入，当前 `injury_reports=0`。
+- 教练战绩：主教练身份已来自 FIFA 官方名单，但 `matches_count/win_rate/major_tournament_record` 仍缺授权或可验证来源。
+- 阵容稳定性：官方名单已入库，但首发、出场分钟、最近 N 场主力使用率仍未接入。
