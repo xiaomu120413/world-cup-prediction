@@ -143,10 +143,10 @@ COLLECTOR_CATALOG = [
         "source": "news_items",
         "source_type": "ai_insight",
         "domains": ["ai_insights"],
-        "target_tables": ["ai_insights", "ai_explanations"],
-        "status": "planned_required",
+        "target_tables": ["ai_insights", "data_source_links"],
+        "status": "implemented_rules_baseline",
         "frequency": "after_news_collection_00_12_post_match",
-        "notes": "LLM extraction for injuries, suspensions, lineup, coach comments and tactical signals after the 00:00/12:00 news refresh and post-match refresh.",
+        "notes": "Rules-based AI insight baseline extracts injuries, suspensions, fitness, lineup, squad, coach, training and tactic signals from sourced news. Model eligibility requires confidence >= 0.65. LLM enrichment can replace the classifier later.",
     },
     {
         "job_id": "public_news_rss",
@@ -183,6 +183,7 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     historical_team_match_results = counts.get("historical_team_match_results", 0)
     dongqiudi_team_stats = counts.get("team_stat_snapshots", counts.get("dongqiudi_team_stat_links", 0))
     news = counts.get("news_items", 0)
+    ai_news_insights = counts.get("ai_insights", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
     fifa_ranking_source_links = counts.get("fifa_ranking_source_links", 0)
@@ -320,6 +321,12 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 "status": "partial_real" if injuries > 0 else "schema_ready_missing_source",
                 "current_source": "fifa/verified_injury_news" if injuries > 0 else None,
                 "target_tables": ["injury_reports", "ai_insights"],
+            },
+            {
+                "domain": "ai_insights",
+                "status": "partial_real" if ai_news_insights > 0 else "schema_ready_missing_source",
+                "current_source": "ai_news_extractor/news_insight_v1" if ai_news_insights > 0 else None,
+                "target_tables": ["ai_insights", "data_source_links.ai_insight"],
             },
         ],
         "jobs": COLLECTOR_CATALOG,

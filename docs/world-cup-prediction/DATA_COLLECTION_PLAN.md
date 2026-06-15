@@ -426,7 +426,8 @@ select source, count(*) from news_items group by 1;
 - `group_standings=48`、`team_form_snapshots=24`：懂球帝 World Cup standings 派生。
 - `lineup_snapshots=264`、`team_match_results=208`：懂球帝比赛上下文派生。
 - `team_stat_snapshots=868`、`team_stat_metrics=45`：懂球帝 `cid=61` 球队榜指标结构化落库，覆盖红牌、黄牌、犯规、射门、传球、评分、身价等模型候选特征。
-- `news_items=186`：懂球帝首页、Guardian、BBC、ESPN。
+- `news_items=221`：懂球帝首页、Guardian、BBC、ESPN、FOX Sports。
+- `ai_insights=67`：由 `build_ai_news_insights.py` 从已入库新闻抽取，包含伤病、停赛、阵容、名单、教练、训练和战术信号，其中 `8` 条达到 `is_model_eligible=true`。
 - `data_source_links=12471`，`local_sample_source_links=0`。
 
 ## 2026-06-15 Foundation Data Enrichment
@@ -441,7 +442,7 @@ select source, count(*) from news_items group by 1;
 
 仍不应伪装成完整的数据：
 
-- 伤停/停赛：`injury_reports` schema 已有，但真实可信源未接入，当前 `injury_reports=0`。
+- 伤停/停赛：`injury_reports=4` 来自 FIFA verified injury news；新闻抽取出的 availability 信号进入 `ai_insights`，只有置信度达标才可进入模型。
 - 教练战绩：主教练身份和历史记录已来自懂球帝 `detail/team` 与 `team/member_v2`，但长期 `matches_count/win_rate/major_tournament_record` 仍可用授权或可验证来源增强。
 - 阵容稳定性：懂球帝国家队名单已入库，但首发、出场分钟、最近 N 场主力使用率仍依赖已完赛比赛的阵容数据。
 

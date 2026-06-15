@@ -183,10 +183,13 @@ $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldc
 python scripts/collect_dongqiudi_match_context.py
 python scripts/collect_fifa_rankings.py
 python scripts/collect_public_news.py
+python scripts/build_ai_news_insights.py
 python scripts/audit_real_data.py
 ```
 
 `collect_public_news.py` uses `--mode auto` by default. Matchday is derived from `matches.kickoff_at` on the Asia/Shanghai local date, not from a blanket tournament flag. News still runs on the low-frequency policy: 00:00, 12:00 and post-match. The collector expands keywords from the Dongqiudi 48-team roster, writes matched teams into `news_items.related_team_ids`, and records matched keywords/teams in `data_source_links.metadata`.
+
+`build_ai_news_insights.py` is the first AI-news structuring baseline. It reads sourced `news_items`, extracts injury, suspension, fitness, lineup, squad, coach, training and tactic signals into `ai_insights`, and writes source links for every insight. Only high-confidence availability signals are marked `is_model_eligible=true`; lower-confidence context remains explainable but does not move the model.
 
 Import historical men's national-team match results without depending on Kaggle authentication. This writes one actual source match per row into `historical_international_matches` first, then writes `team_match_results` rows only as compatibility data for existing model queries. By default this pulls the same public dataset from GitHub raw; use `--csv-path` for a local Kaggle export:
 

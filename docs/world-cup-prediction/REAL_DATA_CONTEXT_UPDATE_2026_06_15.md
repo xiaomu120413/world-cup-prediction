@@ -16,6 +16,7 @@ This update locks the player dataset to one canonical source: Dongqiudi national
 | FIFA rankings | FIFA `api.fifa.com/api/v3/rankings` | `teams.fifa_rank`, `data_source_links` | Official coverage for all Dongqiudi roster teams |
 | Injury reports | FIFA official injury news | `injury_reports`, `data_source_links` | Official verified first batch |
 | Multi-source news | Dongqiudi homepage, Guardian, BBC, ESPN, FOX Sports RSS | `news_items`, `raw_snapshots`, `data_source_links` | Real public news coverage with matched keyword/team metadata |
+| AI news insights | `news_items` via internal extractor `news_insight_v1` | `ai_insights`, `data_source_links.ai_insight` | Rules baseline with sourced confidence and model-eligibility gate |
 
 ## Current Local Counts
 
@@ -35,6 +36,8 @@ After the Dongqiudi-only player refresh on 2026-06-15:
 - `team_match_results=208`
 - `injury_reports=4`
 - `news_items=221` (`dongqiudi=62`, `bbc=67`, `guardian=56`, `espn=22`, `foxsports=14`)
+- `ai_insights=67`
+- `model_eligible_ai_insights=8`
 - `team_market_values=84`
 - `coaches=1051`
 - `venues=16`
@@ -44,7 +47,7 @@ After the Dongqiudi-only player refresh on 2026-06-15:
 - `team_stat_snapshots=868`
 - `team_stat_metrics=45`
 - `dongqiudi_team_stat_links=868`
-- `data_source_links=111676`
+- `data_source_links=161317`
 
 ## Player Identity Rule
 
@@ -66,6 +69,7 @@ Current coverage state:
 - FIFA rankings for Dongqiudi roster teams: pass, `48 / 48`.
 - Venue enrichment: pass, `16 / 16`.
 - Multi-source news: pass, `5` sources: Dongqiudi, Guardian, BBC, ESPN, FOX Sports.
+- AI news insights: pass, `67` sourced insight rows, `8` model-eligible availability signals.
 - Team match result context: pass, `208 / 208` team-perspective rows for the Dongqiudi World Cup schedule.
 - Team market value coverage: pass, at least `48 / 48` participating teams have sourced team-level market values.
 - Team ranking metrics: pass, `45` ranking metrics, `868` structured `team_stat_snapshots`, and `868` team-stat source links from Dongqiudi `cid=61` APIs.
@@ -80,6 +84,7 @@ python scripts/collect_dongqiudi_match_context.py
 python scripts/collect_verified_injuries.py
 python scripts/collect_fifa_rankings.py
 python scripts/collect_public_news.py
+python scripts/build_ai_news_insights.py
 python scripts/collect_dongqiudi_team_details.py
 python scripts/enrich_foundation_data.py
 python scripts/export_missing_market_values.py
@@ -92,6 +97,7 @@ Current audit result:
 - `local_sample_records=0`
 - all `*_without_source=0`
 - `team_stat_snapshots_without_source=0`
+- `ai_insights_without_source=0`
 - `FIFA-*` player rows: `0`
 - missing Dongqiudi roster market values exported by `export_missing_market_values.py`: `0`
 
@@ -111,3 +117,4 @@ The active refresh cadence is documented in `DATA_REFRESH_POLICY.md`.
 - Weather is intentionally limited to 00:00 and 12:00 local time for MVP operations.
 - Matchday is defined by `matches.kickoff_at` on the Asia/Shanghai local date. Consecutive tournament matchdays only raise news/injury/lineup priority and post-match refreshes; they do not create hourly scraping.
 - Public news extraction now uses World Cup context terms, injury/lineup/team-news terms, and national-team names/aliases from the Dongqiudi 48-team roster. Matched keywords, matched teams and matchday context are stored in `data_source_links.metadata`.
+- AI news insight extraction runs after news refresh. The first baseline extracts injury, suspension, fitness, lineup, squad, coach, training and tactic signals; only confidence-qualified availability signals are marked `is_model_eligible=true`.

@@ -13,6 +13,7 @@ def test_daily_12_plan_keeps_weather_low_frequency():
 
     assert "venue_weather" in ids
     assert "world_cup_schedule_lineups" not in ids
+    assert ids.index("public_news_rss") < ids.index("ai_news_insights") < ids.index("prediction_recompute")
     assert "prediction_recompute" in ids
     assert "real_data_audit" in ids
 
@@ -24,6 +25,7 @@ def test_daily_00_plan_refreshes_core_match_data_and_news():
     assert "group_standings" in ids
     assert "player_recent_form" in ids
     assert "public_news_rss" in ids
+    assert ids.index("public_news_rss") < ids.index("ai_news_insights") < ids.index("prediction_recompute")
     assert "venue_weather" not in ids
 
 

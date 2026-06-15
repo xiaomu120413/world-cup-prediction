@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.collectors.catalog import collection_catalog_summary
 from app.db.schema import (
+    ai_insights,
     competition_stages,
     collector_runs,
     coaches,
@@ -78,6 +79,11 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.82,
         "label": "ESPN soccer RSS",
     },
+    "ai_news_extractor": {
+        "trust_level": "internal_derived",
+        "default_confidence": 0.65,
+        "label": "Internal AI news insight extractor",
+    },
     "foxsports": {
         "trust_level": "public_news",
         "default_confidence": 0.82,
@@ -104,6 +110,7 @@ APPROVED_REAL_SOURCES = {
     "guardian",
     "bbc",
     "espn",
+    "ai_news_extractor",
     "foxsports",
     "martj42_international_results",
 }
@@ -379,6 +386,7 @@ class PublicDataRepository:
             "weather_snapshots": self.count_rows(weather_snapshots),
             "coaches": self.count_rows(coaches),
             "injury_reports": self.count_rows(injury_reports),
+            "ai_insights": self.count_rows(ai_insights),
             "lineup_snapshots": self.count_rows(lineup_snapshots),
             "historical_international_matches": self.count_rows(historical_international_matches),
             "team_match_results": self.count_rows(team_match_results),
@@ -713,6 +721,13 @@ class PublicDataRepository:
                 where not exists (
                     select 1 from data_source_links l
                     where l.entity_type = 'injury_report' and l.entity_key = ir.id::text
+                )
+                union all
+                select 'ai_insights_without_source', count(*)
+                from ai_insights ai
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'ai_insight' and l.entity_key = ai.id::text
                 )
                 union all
                 select 'lineup_snapshots_without_source', count(*)

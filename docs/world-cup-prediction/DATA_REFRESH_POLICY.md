@@ -97,9 +97,9 @@ Supported cadences:
 
 | Cadence | Intended trigger | Main work |
 | --- | --- | --- |
-| `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores, standings, player ranking, team detail data, FIFA ranks, verified injuries, news, prediction recompute, audit |
-| `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, verified injuries, news, prediction recompute, audit |
-| `post_match` | 30-60 minutes after matches finish | Scores, standings, played lineups, player ranking, matchday news, prediction recompute, audit |
+| `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores, standings, player ranking, team detail data, FIFA ranks, verified injuries, news, AI news insights, prediction recompute, audit |
+| `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, verified injuries, news, AI news insights, prediction recompute, audit |
+| `post_match` | 30-60 minutes after matches finish | Scores, standings, played lineups, player ranking, matchday news, AI news insights, prediction recompute, audit |
 | `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, historical results, market-value export, prediction recompute, audit |
 | `auto` | Optional frequent runner | Chooses `daily_00`, `daily_12`, or `post_match` from local time and match context |
 
