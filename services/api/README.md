@@ -75,7 +75,26 @@ $env:DATA_BACKEND="database"
 python -m pytest tests/test_database_backend.py
 ```
 
+## Cache
+
+Public database-backed read routes support optional Redis JSON caching.
+
+The cache is disabled by default:
+
+```text
+CACHE_ENABLED=false
+```
+
+To enable it with the bundled Docker Compose Redis service:
+
+```powershell
+$env:CACHE_ENABLED="true"
+$env:CACHE_TTL_SECONDS="60"
+$env:REDIS_URL="redis://127.0.0.1:63791/0"
+```
+
+If Redis is unavailable, the API falls back to direct repository reads.
+
 ## Notes
 
-Public routes still read mock data while the database layer is being wired in. The next step is replacing route reads with repository queries and keeping the same response contract.
 Set `DATA_BACKEND=database` to read supported routes from PostgreSQL after schema and seed data are initialized.

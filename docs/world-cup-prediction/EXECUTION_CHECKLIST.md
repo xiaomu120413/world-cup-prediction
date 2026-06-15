@@ -767,3 +767,11 @@ Update date: 2026-06-15
 - PostgreSQL seed data now includes ranking predictions, group standings, and group simulation rows for the local baseline.
 - Routes keep mock fallback for API areas where detailed content has not been collected yet.
 - Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 33 tests.
+
+## Backend Cache Update
+
+Update date: 2026-06-15
+
+- Public database-backed read routes support optional Redis JSON caching.
+- Cache is disabled by default and enabled with `CACHE_ENABLED=true`.
+- Local Redis smoke passed with `REDIS_URL=redis://127.0.0.1:63791/0`.

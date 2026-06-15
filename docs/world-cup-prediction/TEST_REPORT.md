@@ -155,3 +155,15 @@ Test date: 2026-06-15
 | `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 33 tests |
 | Database route coverage | Home, matches, rankings, groups, teams |
 | Seed repeatability | Ranking, group standing, and group simulation seed rows are idempotent |
+
+## Backend Redis Cache Smoke
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `CACHE_ENABLED=true` API startup on port 8002 | Passed |
+| `GET /api/v1/home` | 200 |
+| `GET /api/v1/predictions/rankings?type=champion` | 200 |
+| `GET /api/v1/groups/group-a` | 200 |
+| Redis key write check | Passed for `public:home:default:Asia/Shanghai`, `public:rankings:champion:20`, `public:groups:group-a` |

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Header, Query
 
+from app.core.cache import cached_json
 from app.core.config import Settings, get_settings
 from app.core.responses import envelope, list_envelope, not_found, now_iso
 from app.data.mock_store import (
@@ -57,7 +58,11 @@ def home(
     settings: Settings = Depends(get_settings),
 ):
     if use_database(settings):
-        home_data = with_public_repository(lambda repo: repo.get_home_data(date, timezone))
+        home_data = cached_json(
+            settings,
+            f"public:home:{date or 'default'}:{timezone}",
+            lambda: with_public_repository(lambda repo: repo.get_home_data(date, timezone)),
+        )
         if home_data and home_data["champion_rankings"]:
             return envelope(home_data, updated_at=now_iso())
 
@@ -93,7 +98,11 @@ def matches_today(
     settings: Settings = Depends(get_settings),
 ):
     if use_database(settings):
-        matches = with_public_repository(lambda repo: repo.list_matches(include_prediction=include_prediction))
+        matches = cached_json(
+            settings,
+            f"public:matches:today:{date or 'default'}:{include_prediction}",
+            lambda: with_public_repository(lambda repo: repo.list_matches(include_prediction=include_prediction)),
+        )
         if matches:
             return list_envelope(matches, updated_at=now_iso(), date=date)
 
@@ -153,7 +162,11 @@ def match_ai_report(match_id: str):
 @router.get("/groups")
 def groups(settings: Settings = Depends(get_settings)):
     if use_database(settings):
-        values = with_public_repository(lambda repo: repo.list_groups())
+        values = cached_json(
+            settings,
+            "public:groups",
+            lambda: with_public_repository(lambda repo: repo.list_groups()),
+        )
         if values:
             return list_envelope(values, updated_at=now_iso())
 
@@ -163,7 +176,11 @@ def groups(settings: Settings = Depends(get_settings)):
 @router.get("/groups/{group_id}")
 def group_detail(group_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
-        group = with_public_repository(lambda repo: repo.get_group_detail(group_id))
+        group = cached_json(
+            settings,
+            f"public:groups:{group_id}",
+            lambda: with_public_repository(lambda repo: repo.get_group_detail(group_id)),
+        )
         if group:
             return envelope(group, updated_at=now_iso())
 
@@ -176,7 +193,11 @@ def group_detail(group_id: str, settings: Settings = Depends(get_settings)):
 @router.get("/groups/{group_id}/simulation")
 def group_simulation(group_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
-        simulation = with_public_repository(lambda repo: repo.get_group_simulation(group_id))
+        simulation = cached_json(
+            settings,
+            f"public:groups:{group_id}:simulation",
+            lambda: with_public_repository(lambda repo: repo.get_group_simulation(group_id)),
+        )
         if simulation:
             return envelope(simulation, updated_at=now_iso())
 
@@ -193,7 +214,11 @@ def prediction_rankings(
     settings: Settings = Depends(get_settings),
 ):
     if use_database(settings):
-        ranking = with_public_repository(lambda repo: repo.list_rankings(type, limit))
+        ranking = cached_json(
+            settings,
+            f"public:rankings:{type}:{limit}",
+            lambda: with_public_repository(lambda repo: repo.list_rankings(type, limit)),
+        )
         if ranking:
             return envelope(ranking, ranking_type=type, updated_at=now_iso())
 
@@ -205,7 +230,11 @@ def prediction_rankings(
 
 @router.get("/teams")
 def teams(q: str | None = None, group_id: str | None = None, settings: Settings = Depends(get_settings)):
-    values = with_public_repository(lambda repo: repo.list_teams()) if use_database(settings) else list(TEAMS.values())
+    values = (
+        cached_json(settings, "public:teams", lambda: with_public_repository(lambda repo: repo.list_teams()))
+        if use_database(settings)
+        else list(TEAMS.values())
+    )
     if q:
         q_lower = q.lower()
         values = [

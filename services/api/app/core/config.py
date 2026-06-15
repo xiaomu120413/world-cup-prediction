@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://127.0.0.1:4173,http://localhost:4173"
     data_backend: str = "mock"
     database_url: str = "postgresql+psycopg://worldcup:worldcup@127.0.0.1:5432/worldcup_prediction"
+    cache_enabled: bool = False
+    cache_ttl_seconds: int = 60
+    redis_url: str = "redis://127.0.0.1:6379/0"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
