@@ -52,6 +52,12 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
     ),
     "daily_12": (
         RefreshTask("venue_weather", ("scripts/enrich_foundation_data.py",), "Venue weather snapshots and foundation enrichment"),
+        RefreshTask(
+            "world_cup_48_national_team_matches",
+            ("scripts/export_world_cup_48_national_team_matches.py", "--refresh-source"),
+            "Refresh and export 48-team national-team match records",
+            1800,
+        ),
         RefreshTask("verified_injuries", ("scripts/collect_verified_injuries.py",), "Verified injury and suspension signals"),
         RefreshTask("public_news_rss", ("scripts/collect_public_news.py", "--mode", "daily"), "Public news RSS with roster keyword matching"),
         RefreshTask("ai_news_insights", ("scripts/build_ai_news_insights.py",), "Structured AI news insights"),
@@ -78,7 +84,12 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
     "weekly": (
         RefreshTask("world_cup_team_details", ("scripts/collect_dongqiudi_team_details.py",), "Roster, market values, coaches and team ranking metrics", 1800),
         RefreshTask("fifa_mens_world_ranking", ("scripts/collect_fifa_rankings.py",), "FIFA rankings"),
-        RefreshTask("historical_international_results", ("scripts/collect_historical_international_results.py",), "Historical national-team results", 1800),
+        RefreshTask(
+            "world_cup_48_national_team_matches",
+            ("scripts/export_world_cup_48_national_team_matches.py", "--refresh-source"),
+            "Refresh and export 48-team national-team match records",
+            1800,
+        ),
         RefreshTask("missing_market_values_export", ("scripts/export_missing_market_values.py",), "Market-value coverage export"),
         RefreshTask("prediction_recompute", ("scripts/recompute_predictions.py", "--scope", "matchday"), "Recompute matchday predictions"),
         RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),

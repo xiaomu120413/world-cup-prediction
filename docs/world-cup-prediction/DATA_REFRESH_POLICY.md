@@ -9,11 +9,11 @@ This project is a low-frequency World Cup prediction product. It does not need s
 | Cadence | Data domains | Sources | Commands or jobs |
 | --- | --- | --- | --- |
 | Daily 00:00 | Schedule, scores, standings, player ranking, team ranking, news, injury signals, prediction recompute | Dongqiudi, BBC, Guardian, ESPN, FOX Sports, FIFA injury news | `world_cup_schedule_lineups`, `group_standings`, `player_recent_form`, `world_cup_team_details`, `public_news_rss`, `ai_news_insights`, prediction recompute |
-| Daily 12:00 | Weather, news, injury signals, prediction recompute if feature data changed | Open-Meteo, BBC, Guardian, ESPN, FOX Sports, FIFA injury news | `venue_weather`, `public_news_rss`, `ai_news_insights`, prediction recompute |
+| Daily 12:00 | Weather, 48-team national-team match data, news, injury signals, prediction recompute if feature data changed | Open-Meteo, historical results provider, BBC, Guardian, ESPN, FOX Sports, FIFA injury news | `venue_weather`, `world_cup_48_national_team_matches`, `public_news_rss`, `ai_news_insights`, prediction recompute |
 | Post-match | Scores, standings, lineups, player ranking, team ranking, prediction review | Dongqiudi | `world_cup_schedule_lineups`, `group_standings`, `player_recent_form`, `world_cup_team_details`, prediction recompute/review |
-| Weekly | Team roster, player market value, coach records, FIFA rank check | Dongqiudi, FIFA | `world_cup_team_details`, `coach_records`, `fifa_mens_world_ranking` |
+| Weekly | Team roster, player market value, coach records, FIFA rank check, 48-team match-data export backstop | Dongqiudi, FIFA, historical results provider | `world_cup_team_details`, `coach_records`, `fifa_mens_world_ranking`, `world_cup_48_national_team_matches` |
 | On schedule change | Static fixtures and venues | TheStatsAPI, manual verified venue facts | `official_schedule_venues`, venue enrichment |
-| Offline batch | Historical national-team results and World Cup qualifier records | Stable historical provider or authorized/manual verified source | Historical import job, then audit |
+| Offline batch | One-off historical backfills or manual corrections | Stable historical provider or authorized/manual verified source | Manual import/export job, then audit |
 
 ## Weather Rule
 
@@ -98,9 +98,9 @@ Supported cadences:
 | Cadence | Intended trigger | Main work |
 | --- | --- | --- |
 | `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores, standings, player ranking, team detail data, FIFA ranks, verified injuries, news, AI news insights, prediction recompute, audit |
-| `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, verified injuries, news, AI news insights, prediction recompute, audit |
+| `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, 48-team national-team match data refresh/export, verified injuries, news, AI news insights, prediction recompute, audit |
 | `post_match` | 30-60 minutes after matches finish | Scores, standings, played lineups, player ranking, matchday news, AI news insights, prediction recompute, audit |
-| `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, historical results, market-value export, prediction recompute, audit |
+| `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, 48-team match data refresh/export, market-value export, prediction recompute, audit |
 | `auto` | Optional frequent runner | Chooses `daily_00`, `daily_12`, or `post_match` from local time and match context |
 
 The scheduler writes `collector_runs` rows with `source=scheduler` and `job_type=refresh:{cadence}`. It also uses PostgreSQL advisory locks and once-per-slot checks to avoid duplicate concurrent runs.

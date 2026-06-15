@@ -269,7 +269,7 @@ python scripts/audit_real_data.py
 The source-link audit should print `0` for every `*_without_source` check. The real-data audit must return `"status": "pass"` before data is used by the prediction pipeline or production mini program.
 
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
-The operational refresh cadence is documented in `docs/world-cup-prediction/DATA_REFRESH_POLICY.md`. Weather refresh is fixed at 00:00 and 12:00 local time for the MVP; matchday only raises news/injury/lineup priority and post-match refreshes.
+The operational refresh cadence is documented in `docs/world-cup-prediction/DATA_REFRESH_POLICY.md`. Weather refresh is fixed at 00:00 and 12:00 local time for the MVP; the 12:00 refresh also updates and exports the 48-team national-team match dataset. Matchday only raises news/injury/lineup priority and post-match refreshes.
 
 Run the executable refresh scheduler:
 

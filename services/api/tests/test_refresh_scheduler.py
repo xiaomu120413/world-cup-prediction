@@ -10,12 +10,17 @@ def task_ids(cadence: str) -> list[str]:
 
 def test_daily_12_plan_keeps_weather_low_frequency():
     ids = task_ids("daily_12")
+    tasks = plan_for_cadence("daily_12")
 
     assert "venue_weather" in ids
+    assert "world_cup_48_national_team_matches" in ids
+    assert ids.index("venue_weather") < ids.index("world_cup_48_national_team_matches")
     assert "world_cup_schedule_lineups" not in ids
     assert ids.index("public_news_rss") < ids.index("ai_news_insights") < ids.index("prediction_recompute")
     assert "prediction_recompute" in ids
     assert "real_data_audit" in ids
+    match_task = tasks[ids.index("world_cup_48_national_team_matches")]
+    assert match_task.args == ("scripts/export_world_cup_48_national_team_matches.py", "--refresh-source")
 
 
 def test_daily_00_plan_refreshes_core_match_data_and_news():
