@@ -23,6 +23,7 @@ from app.db.schema import (
     raw_snapshots,
     team_aliases,
     teams,
+    venues,
 )
 
 API_TZ = ZoneInfo("Asia/Shanghai")
@@ -105,10 +106,11 @@ class CollectorRunner:
 
     @staticmethod
     def count_records(snapshot: RawSnapshot) -> int:
+        total = 0
         for value in snapshot.payload.values():
             if isinstance(value, list):
-                return len(value)
-        return 1
+                total += len(value)
+        return total or 1
 
     @staticmethod
     def count_normalized_records(snapshot: RawSnapshot) -> int:
@@ -150,8 +152,9 @@ class CollectorRunner:
 
         team_ids = self.upsert_teams(canonical["teams"])
         written += self.upsert_team_aliases(canonical["team_aliases"], team_ids)
+        venue_ids = self.upsert_venues(canonical.get("venues", []))
         stage_ids = self.ensure_stages(canonical["matches"], canonical["standings"])
-        written += self.upsert_matches(canonical["matches"], team_ids, stage_ids)
+        written += self.upsert_matches(canonical["matches"], team_ids, stage_ids, venue_ids)
         written += self.replace_standings(canonical["standings"], team_ids, stage_ids, snapshot_id)
         player_ids = self.upsert_players(canonical["players"], team_ids)
         written += self.replace_player_forms(canonical["player_forms"], player_ids, team_ids)
@@ -169,6 +172,30 @@ class CollectorRunner:
             .returning(news_items.c.id)
         )
         return len(self.db.execute(statement).all())
+
+    def upsert_venues(self, values: list[dict]) -> dict[str, object]:
+        if not values:
+            return {}
+        statement = (
+            pg_insert(venues)
+            .values(values)
+            .on_conflict_do_update(
+                index_elements=["code"],
+                set_={
+                    "name": pg_insert(venues).excluded.name,
+                    "city": pg_insert(venues).excluded.city,
+                    "country": pg_insert(venues).excluded.country,
+                    "timezone": pg_insert(venues).excluded.timezone,
+                    "capacity": pg_insert(venues).excluded.capacity,
+                    "altitude_m": pg_insert(venues).excluded.altitude_m,
+                    "surface": pg_insert(venues).excluded.surface,
+                    "weather_profile": pg_insert(venues).excluded.weather_profile,
+                },
+            )
+            .returning(venues.c.code, venues.c.id)
+        )
+        rows = self.db.execute(statement).mappings().all()
+        return {row["code"]: row["id"] for row in rows}
 
     def upsert_teams(self, values: list[dict]) -> dict[str, object]:
         if not values:
@@ -303,9 +330,16 @@ class CollectorRunner:
         )
         return self.db.execute(statement).scalar_one()
 
-    def upsert_matches(self, values: list[dict], team_ids: dict[str, object], stage_ids: dict[str, object]) -> int:
+    def upsert_matches(
+        self,
+        values: list[dict],
+        team_ids: dict[str, object],
+        stage_ids: dict[str, object],
+        venue_ids: dict[str, object] | None = None,
+    ) -> int:
         rows = []
         competition_id = self.ensure_default_competition() if values else None
+        venue_ids = venue_ids or {}
         for value in values:
             home_team_id = team_ids.get(value["home_team_code"])
             away_team_id = team_ids.get(value["away_team_code"])
@@ -319,6 +353,7 @@ class CollectorRunner:
                     "stage_id": stage_id,
                     "home_team_id": home_team_id,
                     "away_team_id": away_team_id,
+                    "venue_id": venue_ids.get(value.get("venue_code")),
                     "kickoff_at": value["kickoff_at"],
                     "status": value["status"],
                     "home_score": value["home_score"],
@@ -338,6 +373,7 @@ class CollectorRunner:
                     "stage_id": pg_insert(matches).excluded.stage_id,
                     "home_team_id": pg_insert(matches).excluded.home_team_id,
                     "away_team_id": pg_insert(matches).excluded.away_team_id,
+                    "venue_id": pg_insert(matches).excluded.venue_id,
                     "kickoff_at": pg_insert(matches).excluded.kickoff_at,
                     "status": pg_insert(matches).excluded.status,
                     "home_score": pg_insert(matches).excluded.home_score,

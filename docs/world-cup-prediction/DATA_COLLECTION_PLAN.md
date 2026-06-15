@@ -13,6 +13,8 @@
 - 懂球帝首页低频采集：`https://pc.dongqiudi.com/`
 - 已能写入 `raw_snapshots`、`collector_runs`、`news_items`、`teams/team_aliases`、`matches`
 - 前端数据库模式已优先展示 `dongqiudi-` 开头的真实比赛
+- TheStatsAPI 2026 世界杯 fixtures：`https://www.thestatsapi.com/world-cup/data/fixtures.json`
+- 已能写入全量 104 场赛程、球队占位/参赛队、场地、城市、国家和时区
 
 当前还不能当成真实生产数据：
 
@@ -88,7 +90,7 @@
 
 | 需求 | 当前来源 | 当前状态 | 目标来源 | 标准表 | 更新频率 | 验收点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 赛程/比分/状态 | 懂球帝首页 | 部分真实 | 官方/授权赛程源 + 懂球帝校验 | `matches` | 每日，比赛日加密 | 覆盖全部世界杯比赛，时间/双方/状态可解析 |
+| 赛程/比分/状态 | TheStatsAPI fixtures + 懂球帝首页 | 赛程/场地真实，比分片段部分真实 | 官方/授权赛程源 + 懂球帝校验 | `matches` | 每日，比赛日加密 | 覆盖全部世界杯比赛，时间/双方/状态可解析 |
 | 中文新闻链接 | 懂球帝首页 | 部分真实 | 懂球帝/新闻源 | `news_items` | 每日 | 去重、保留 URL、可关联球队 |
 | 小组积分榜 | local sample/seed | 非真实 | 官方/授权积分源 | `group_standings` | 赛后 30 分钟 | 积分、净胜球、排名一致 |
 | 球员近期进球助攻 | local sample/seed | 非真实 | 授权球员数据或稳定页面 | `players`、`player_form_snapshots` | 每日 | 至少进球、助攻、分钟、评分、可用状态 |
@@ -97,7 +99,7 @@
 | 阵容稳定性 | 未接入 | 缺失 | 首发/出场分钟/大名单 | `team_form_snapshots.lineup_stability_score` | 每日 | 最近 N 场主力出勤率可计算 |
 | 球员/球队身价 | 未接入 | 缺失 | 授权身价源/人工核验 | `teams.market_value_eur`、`players.market_value_eur` | 每周 | 单位统一 EUR，更新时间可见 |
 | 主教练带队战绩 | 未接入 | schema 缺口 | 授权源/人工核验 | `coaches` | 每周 | 任期、场次、胜率、大赛成绩 |
-| 场地信息 | 未接入 | 部分 schema | 官方场馆源 | `venues` | 低频 | 城市、时区、容量、海拔、草皮 |
+| 场地信息 | TheStatsAPI fixtures | 部分真实 | 官方场馆源补容量/海拔/草皮 | `venues` | 低频 | 城市、时区、国家已入库；容量、海拔、草皮待补 |
 | 天气 | 未接入 | schema 缺口 | 天气 API | `weather_snapshots` | 赛前 24h/3h | 温度、湿度、风、降水概率 |
 | 伤停/停赛 | 未接入 | 缺失 | 新闻 + AI 抽取 + 人工确认 | `injuries` 或 `ai_insights` | 每日/赛前 | 置信度大于 0.65 才进模型 |
 
@@ -108,7 +110,7 @@
 | 顺序 | job | 目标 | 说明 |
 | --- | --- | --- | --- |
 | 1 | `dongqiudi_homepage` | 已有真实入口稳定化 | 保留 raw、比赛、新闻链接；继续做解析健壮性 |
-| 2 | `official_schedule_venues` | 全量赛程 + 场地 | 生产必需主数据，不能只靠首页抽取 |
+| 2 | `official_schedule_venues` | 全量赛程 + 场地 | 已用 TheStatsAPI fixtures 接入 104 场赛程和场地基础字段 |
 | 3 | `group_standings` | 小组积分榜 | 支撑小组页和出线模拟 |
 | 4 | `player_recent_form` | 球员进球、助攻、评分 | 支撑球队页、比赛模型特征 |
 | 5 | `team_form` | 球队近期状态 | 支撑模型主要特征 |
@@ -394,7 +396,7 @@ select source, count(*) from news_items group by 1;
 ## 11. 下一步执行顺序
 
 1. 保持现有懂球帝首页采集稳定，补解析测试样本。
-2. 接入或准备官方/授权赛程与场地数据源，补全 `venues`。
+2. TheStatsAPI fixtures 已接入；下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
 3. 接入真实积分榜，替换 seed/local sample。
 4. 接入球员近期榜单或球员详情数据，替换 `player_form_snapshots` 样例数据。
 5. 建 `team_form_snapshots` 的真实采集和计算任务。

@@ -284,6 +284,8 @@ class PublicDataRepository:
             "teams": self.count_rows(teams),
             "matches": self.count_rows(matches),
             "dongqiudi_matches": self.count_real_matches(),
+            "thestatsapi_matches": self.count_thestatsapi_matches(),
+            "venues": self.count_rows(venues),
             "players": self.count_rows(players),
             "player_form_snapshots": self.count_rows(player_form_snapshots),
             "group_standings": self.count_rows(group_standings),
@@ -336,6 +338,13 @@ class PublicDataRepository:
         return int(
             self.db.execute(
                 select(func.count()).select_from(matches).where(matches.c.public_id.like("dongqiudi-%"))
+            ).scalar_one()
+        )
+
+    def count_thestatsapi_matches(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count()).select_from(matches).where(matches.c.public_id.like("thestatsapi-%"))
             ).scalar_one()
         )
 

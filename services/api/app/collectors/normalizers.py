@@ -90,6 +90,7 @@ def canonical_records_from_snapshot(snapshot: RawSnapshot) -> dict:
     records = {
         "teams": {},
         "team_aliases": [],
+        "venues": [],
         "matches": [],
         "standings": [],
         "players": [],
@@ -102,6 +103,7 @@ def canonical_records_from_snapshot(snapshot: RawSnapshot) -> dict:
     return {
         "teams": list(records["teams"].values()),
         "team_aliases": records["team_aliases"],
+        "venues": records["venues"],
         "matches": records["matches"],
         "standings": records["standings"],
         "players": records["players"],
@@ -135,6 +137,7 @@ def add_team(records: dict, source: str, raw_value: str | None) -> dict | None:
 
 
 def collect_schedule(snapshot: RawSnapshot, records: dict) -> None:
+    collect_venues(snapshot, records)
     for item in snapshot.payload.get("matches", []):
         home = add_team(records, snapshot.source, item.get("home"))
         away = add_team(records, snapshot.source, item.get("away"))
@@ -156,6 +159,28 @@ def collect_schedule(snapshot: RawSnapshot, records: dict) -> None:
                 "away_score": item.get("away_score"),
                 "neutral_site": item.get("neutral_site", True),
                 "source_confidence": item.get("source_confidence", 0.8),
+            }
+        )
+
+
+def collect_venues(snapshot: RawSnapshot, records: dict) -> None:
+    seen = set()
+    for item in snapshot.payload.get("venues", []):
+        code = item.get("code")
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        records["venues"].append(
+            {
+                "code": code,
+                "name": item.get("name") or code.replace("-", " ").title(),
+                "city": item.get("city") or "Unknown",
+                "country": item.get("country") or "Unknown",
+                "timezone": item.get("timezone") or "UTC",
+                "capacity": item.get("capacity"),
+                "altitude_m": item.get("altitude_m"),
+                "surface": item.get("surface"),
+                "weather_profile": item.get("weather_profile"),
             }
         )
 

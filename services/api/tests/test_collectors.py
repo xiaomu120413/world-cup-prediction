@@ -1,7 +1,13 @@
-from app.collectors.adapters import DongqiudiHomepageAdapter, LocalSampleAdapter, RawSnapshot, build_adapter
+from app.collectors.adapters import (
+    DongqiudiHomepageAdapter,
+    LocalSampleAdapter,
+    RawSnapshot,
+    TheStatsApiFixturesAdapter,
+    build_adapter,
+)
 from app.collectors.catalog import COLLECTOR_CATALOG, collection_catalog_summary
 from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
-from app.collectors.runner import snapshot_checksum
+from app.collectors.runner import CollectorRunner, snapshot_checksum
 
 
 def test_local_sample_adapter_fetches_schedule_snapshot():
@@ -16,6 +22,17 @@ def test_snapshot_checksum_is_stable():
     snapshot = LocalSampleAdapter("schedule").fetch()
 
     assert snapshot_checksum(snapshot) == snapshot_checksum(snapshot)
+
+
+def test_runner_counts_all_top_level_list_records():
+    snapshot = RawSnapshot(
+        source="test",
+        source_type="multi",
+        source_url=None,
+        payload={"venues": [{"id": 1}, {"id": 2}], "matches": [{"id": 1}, {"id": 2}, {"id": 3}]},
+    )
+
+    assert CollectorRunner.count_records(snapshot) == 5
 
 
 def test_dongqiudi_homepage_adapter_parses_static_html():
@@ -49,13 +66,91 @@ def test_build_adapter_supports_dongqiudi_source():
     assert adapter.source == "dongqiudi"
 
 
+def test_build_adapter_supports_thestatsapi_source():
+    adapter = build_adapter("thestatsapi", "fixtures")
+
+    assert adapter.source == "thestatsapi"
+
+
 def test_collection_catalog_tracks_required_data_domains():
-    summary = collection_catalog_summary({"dongqiudi_matches": 3, "news_items": 10})
+    summary = collection_catalog_summary({"dongqiudi_matches": 3, "thestatsapi_matches": 104, "news_items": 10})
 
     assert any(job["job_id"] == "dongqiudi_homepage" for job in COLLECTOR_CATALOG)
     assert summary["domains"][0]["domain"] == "matches"
     assert summary["domains"][0]["status"] == "partial_real"
+    assert "thestatsapi/fixtures" in summary["domains"][0]["current_source"]
     assert any(domain["domain"] == "player_form" for domain in summary["domains"])
+
+
+def test_thestatsapi_fixtures_adapter_parses_static_json():
+    snapshot = TheStatsApiFixturesAdapter("fixtures").parse(
+        {
+            "source": "TheStatsAPI",
+            "license": "fixture license",
+            "tournament": {"edition": "2026 FIFA World Cup"},
+            "fixtures": [
+                {
+                    "matchNumber": 1,
+                    "date": "2026-06-11",
+                    "kickoffUtc": "2026-06-11T19:00:00Z",
+                    "stage": "group-stage",
+                    "group": "A",
+                    "homeTeam": "Mexico",
+                    "awayTeam": "South Africa",
+                    "stadium": "Estadio Azteca",
+                    "hostCity": "mexico-city",
+                    "matchUrl": "https://www.thestatsapi.com/world-cup/matches/1",
+                }
+            ],
+        }
+    )
+
+    assert snapshot.source == "thestatsapi"
+    assert snapshot.source_type == "fixtures"
+    assert snapshot.payload["venues"][0]["code"] == "estadio-azteca"
+    assert snapshot.payload["venues"][0]["timezone"] == "America/Mexico_City"
+    assert snapshot.payload["matches"][0]["public_id"] == "thestatsapi-match-1"
+    assert snapshot.payload["matches"][0]["venue_code"] == "estadio-azteca"
+
+
+def test_canonical_records_from_thestatsapi_fixture_snapshot():
+    snapshot = RawSnapshot(
+        source="thestatsapi",
+        source_type="fixtures",
+        source_url="https://www.thestatsapi.com/world-cup/data/fixtures.json",
+        payload={
+            "venues": [
+                {
+                    "code": "estadio-azteca",
+                    "name": "Estadio Azteca",
+                    "city": "Mexico City",
+                    "country": "Mexico",
+                    "timezone": "America/Mexico_City",
+                }
+            ],
+            "matches": [
+                {
+                    "public_id": "thestatsapi-match-1",
+                    "competition_code": "world_cup_2026",
+                    "stage_code": "group-a",
+                    "stage_name": "Group A",
+                    "stage_type": "group",
+                    "home": "Mexico",
+                    "away": "South Africa",
+                    "kickoff_at": "2026-06-11T19:00:00Z",
+                    "status": "scheduled",
+                    "venue_code": "estadio-azteca",
+                    "source_confidence": 0.95,
+                }
+            ],
+        },
+    )
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert records["venues"][0]["name"] == "Estadio Azteca"
+    assert records["matches"][0]["venue_code"] == "estadio-azteca"
+    assert {team["name_zh"] for team in records["teams"]} == {"Mexico", "South Africa"}
 
 
 def test_news_items_from_dongqiudi_snapshot():

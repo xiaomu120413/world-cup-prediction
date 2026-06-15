@@ -252,6 +252,124 @@ class DongqiudiHomepageAdapter:
         return slug or "team"
 
 
+class TheStatsApiFixturesAdapter:
+    source = "thestatsapi"
+    source_type = "fixtures"
+    source_url = "https://www.thestatsapi.com/world-cup/data/fixtures.json"
+    parser_version = "thestatsapi_fixtures_v1"
+
+    HOST_CITIES = {
+        "atlanta": {"city": "Atlanta", "country": "United States", "timezone": "America/New_York"},
+        "boston": {"city": "Boston", "country": "United States", "timezone": "America/New_York"},
+        "dallas": {"city": "Dallas", "country": "United States", "timezone": "America/Chicago"},
+        "guadalajara": {"city": "Guadalajara", "country": "Mexico", "timezone": "America/Mexico_City"},
+        "houston": {"city": "Houston", "country": "United States", "timezone": "America/Chicago"},
+        "kansas-city": {"city": "Kansas City", "country": "United States", "timezone": "America/Chicago"},
+        "los-angeles": {"city": "Los Angeles", "country": "United States", "timezone": "America/Los_Angeles"},
+        "mexico-city": {"city": "Mexico City", "country": "Mexico", "timezone": "America/Mexico_City"},
+        "miami": {"city": "Miami", "country": "United States", "timezone": "America/New_York"},
+        "monterrey": {"city": "Monterrey", "country": "Mexico", "timezone": "America/Monterrey"},
+        "new-york": {"city": "New York/New Jersey", "country": "United States", "timezone": "America/New_York"},
+        "philadelphia": {"city": "Philadelphia", "country": "United States", "timezone": "America/New_York"},
+        "san-francisco": {"city": "San Francisco Bay Area", "country": "United States", "timezone": "America/Los_Angeles"},
+        "san-francisco-bay-area": {"city": "San Francisco Bay Area", "country": "United States", "timezone": "America/Los_Angeles"},
+        "seattle": {"city": "Seattle", "country": "United States", "timezone": "America/Los_Angeles"},
+        "toronto": {"city": "Toronto", "country": "Canada", "timezone": "America/Toronto"},
+        "vancouver": {"city": "Vancouver", "country": "Canada", "timezone": "America/Vancouver"},
+    }
+
+    def __init__(self, source_type: str = "fixtures", timeout_seconds: float = 20.0):
+        if source_type not in {"fixtures", "schedule"}:
+            raise ValueError(f"Unsupported thestatsapi source_type: {source_type}")
+        self.source_type = source_type
+        self.timeout_seconds = timeout_seconds
+
+    def fetch(self) -> RawSnapshot:
+        response = httpx.get(
+            self.source_url,
+            timeout=self.timeout_seconds,
+            headers={
+                "User-Agent": "world-cup-prediction-bot/0.1 (+low-frequency research collector)",
+                "Accept": "application/json",
+            },
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        return self.parse(response.json(), str(response.url))
+
+    def parse(self, data: dict, source_url: str | None = None) -> RawSnapshot:
+        fixtures = data.get("fixtures", [])
+        venues = {}
+        matches = []
+        for item in fixtures:
+            venue = self.venue_from_fixture(item)
+            if venue:
+                venues[venue["code"]] = venue
+            matches.append(self.match_from_fixture(item, venue))
+        return RawSnapshot(
+            source=self.source,
+            source_type=self.source_type,
+            source_url=source_url or self.source_url,
+            payload={
+                "source": data.get("source"),
+                "license": data.get("license"),
+                "tournament": data.get("tournament", {}),
+                "venues": list(venues.values()),
+                "matches": matches,
+                "items": [],
+            },
+            parser_version=self.parser_version,
+        )
+
+    @classmethod
+    def venue_from_fixture(cls, item: dict) -> dict | None:
+        stadium = item.get("stadium")
+        host_city = item.get("hostCity")
+        if not stadium or not host_city:
+            return None
+        metadata = cls.HOST_CITIES.get(host_city, {})
+        return {
+            "code": cls.slug(stadium),
+            "name": stadium,
+            "city": metadata.get("city", host_city.replace("-", " ").title()),
+            "country": metadata.get("country", "Unknown"),
+            "timezone": metadata.get("timezone", "UTC"),
+        }
+
+    @classmethod
+    def match_from_fixture(cls, item: dict, venue: dict | None) -> dict:
+        match_number = item.get("matchNumber")
+        group = item.get("group")
+        stage = item.get("stage") or "unknown-stage"
+        stage_code = f"group-{str(group).lower()}" if group else cls.slug(stage)
+        stage_name = f"Group {group}" if group else stage.replace("-", " ").title()
+        home = item.get("homeTeam") or f"Match {match_number} Home"
+        away = item.get("awayTeam") or f"Match {match_number} Away"
+        return {
+            "public_id": f"thestatsapi-match-{match_number}",
+            "source_match_url": item.get("matchUrl"),
+            "match_number": match_number,
+            "competition_code": "world_cup_2026",
+            "stage_code": stage_code,
+            "stage_name": stage_name,
+            "stage_type": "group" if stage == "group-stage" else "knockout",
+            "home": home,
+            "away": away,
+            "kickoff_at": item.get("kickoffUtc"),
+            "status": "scheduled",
+            "home_score": None,
+            "away_score": None,
+            "venue_code": venue["code"] if venue else None,
+            "neutral_site": True,
+            "source_confidence": 0.95,
+        }
+
+    @staticmethod
+    def slug(value: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+        return slug or "unknown"
+
+
 SAMPLE_PAYLOADS = {
     "schedule": {
         "matches": [
@@ -291,4 +409,6 @@ def build_adapter(source: str, source_type: str) -> CollectorAdapter:
         return LocalSampleAdapter(source_type)
     if source == "dongqiudi":
         return DongqiudiHomepageAdapter(source_type)
+    if source == "thestatsapi":
+        return TheStatsApiFixturesAdapter(source_type)
     raise ValueError(f"Unsupported collector source: {source}")

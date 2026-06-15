@@ -9,7 +9,7 @@ from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
-from app.db.schema import group_standings, matches, player_form_snapshots, players, team_aliases
+from app.db.schema import group_standings, matches, player_form_snapshots, players, team_aliases, teams, venues
 from app.main import app
 from app.predictions.service import BaselinePredictionService
 
@@ -219,3 +219,56 @@ def test_database_collector_normalizes_news_items_idempotently():
 
     assert first in (0, 1)
     assert second == 0
+
+
+def test_database_collector_writes_fixture_venues():
+    snapshot = RawSnapshot(
+        source="thestatsapi",
+        source_type="fixtures",
+        source_url="https://www.thestatsapi.com/world-cup/data/fixtures.json",
+        payload={
+            "venues": [
+                {
+                    "code": "test-venue",
+                    "name": "Test Venue",
+                    "city": "Test City",
+                    "country": "Test Country",
+                    "timezone": "UTC",
+                }
+            ],
+            "matches": [
+                {
+                    "public_id": "thestatsapi-match-test",
+                    "competition_code": "world_cup_2026",
+                    "stage_code": "group-test",
+                    "stage_name": "Group Test",
+                    "stage_type": "group",
+                    "home": "Test Home",
+                    "away": "Test Away",
+                    "kickoff_at": "2026-06-11T19:00:00Z",
+                    "status": "scheduled",
+                    "venue_code": "test-venue",
+                    "source_confidence": 0.95,
+                }
+            ],
+        },
+    )
+
+    with SessionLocal() as db:
+        runner = CollectorRunner(db)
+        runner.write_normalized_records(snapshot)
+        db.commit()
+        venue_exists = db.execute(
+            select(func.count()).select_from(venues).where(venues.c.code == "test-venue")
+        ).scalar_one()
+        match_row = db.execute(
+            select(matches.c.venue_id).where(matches.c.public_id == "thestatsapi-match-test")
+        ).first()
+        db.execute(matches.delete().where(matches.c.public_id == "thestatsapi-match-test"))
+        db.execute(teams.delete().where(teams.c.name_zh.in_(["Test Home", "Test Away"])))
+        db.execute(venues.delete().where(venues.c.code == "test-venue"))
+        db.commit()
+
+    assert venue_exists == 1
+    assert match_row is not None
+    assert match_row.venue_id is not None
