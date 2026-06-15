@@ -1,4 +1,4 @@
-from sqlalchemy import Select, and_, case, desc, func, select
+from sqlalchemy import Select, and_, case, desc, func, select, text
 from sqlalchemy.orm import Session
 
 from app.collectors.catalog import collection_catalog_summary
@@ -32,6 +32,41 @@ TEAM_PUBLIC_IDS = {
     "BRA": "brazil",
     "ENG": "england",
 }
+
+SOURCE_TRUST_POLICY = {
+    "fifa": {
+        "trust_level": "official",
+        "default_confidence": 0.95,
+        "label": "FIFA official source",
+    },
+    "thestatsapi": {
+        "trust_level": "public_dataset",
+        "default_confidence": 0.9,
+        "label": "Public fixture dataset",
+    },
+    "dongqiudi": {
+        "trust_level": "public_source",
+        "default_confidence": 0.8,
+        "label": "Dongqiudi public data/source pages",
+    },
+    "open_meteo": {
+        "trust_level": "public_api",
+        "default_confidence": 0.85,
+        "label": "Open-Meteo weather API",
+    },
+    "manual_verified": {
+        "trust_level": "manual_verified",
+        "default_confidence": 0.9,
+        "label": "Manually verified public venue facts",
+    },
+    "local_sample": {
+        "trust_level": "sample_for_tests_only",
+        "default_confidence": 0.0,
+        "label": "Local sample data, forbidden in real-data validation",
+    },
+}
+
+APPROVED_REAL_SOURCES = {"fifa", "thestatsapi", "dongqiudi", "open_meteo", "manual_verified"}
 
 
 def team_public_id(code: str, name_en: str | None = None) -> str:
@@ -332,6 +367,7 @@ class PublicDataRepository:
             "primary_source": "dongqiudi" if table_counts["dongqiudi_matches"] > 0 else "database",
             "table_counts": table_counts,
             "collection_catalog": collection_catalog_summary(table_counts),
+            "real_data_audit": self.get_real_data_audit(),
             "latest_collector_runs": [
                 {
                     "source": row.source,
@@ -349,6 +385,164 @@ class PublicDataRepository:
 
     def count_rows(self, table) -> int:
         return int(self.db.execute(select(func.count()).select_from(table)).scalar_one())
+
+    def get_real_data_audit(self) -> dict:
+        missing_source_checks = self.missing_source_checks()
+        source_quality = self.source_quality_summary()
+        local_sample_records = self.count_local_sample_records()
+        unapproved_source_links = sum(
+            item["records"] for item in source_quality if item["source"] not in APPROVED_REAL_SOURCES
+        )
+        missing_source_total = sum(missing_source_checks.values())
+        min_confidence = min((item["min_confidence"] for item in source_quality), default=None)
+
+        return {
+            "status": "pass"
+            if local_sample_records == 0 and missing_source_total == 0 and unapproved_source_links == 0
+            else "needs_attention",
+            "no_sample_data": local_sample_records == 0,
+            "local_sample_records": local_sample_records,
+            "all_canonical_data_has_source": missing_source_total == 0,
+            "missing_source_checks": missing_source_checks,
+            "approved_real_sources": sorted(APPROVED_REAL_SOURCES),
+            "unapproved_source_links": unapproved_source_links,
+            "min_source_confidence": min_confidence,
+            "source_quality": source_quality,
+            "policy": SOURCE_TRUST_POLICY,
+        }
+
+    def source_quality_summary(self) -> list[dict]:
+        rows = self.db.execute(
+            select(
+                data_source_links.c.source,
+                data_source_links.c.source_type,
+                func.count(data_source_links.c.id).label("records"),
+                func.min(data_source_links.c.confidence).label("min_confidence"),
+                func.avg(data_source_links.c.confidence).label("avg_confidence"),
+            )
+            .group_by(data_source_links.c.source, data_source_links.c.source_type)
+            .order_by(data_source_links.c.source.asc(), data_source_links.c.source_type.asc())
+        ).mappings().all()
+
+        return [
+            {
+                "source": row.source,
+                "source_type": row.source_type,
+                "records": int(row.records),
+                "trust_level": SOURCE_TRUST_POLICY.get(row.source, {}).get("trust_level", "unclassified"),
+                "label": SOURCE_TRUST_POLICY.get(row.source, {}).get("label", "Unclassified source"),
+                "min_confidence": float(row.min_confidence) if row.min_confidence is not None else None,
+                "avg_confidence": round(float(row.avg_confidence), 3) if row.avg_confidence is not None else None,
+                "is_approved_real_source": row.source in APPROVED_REAL_SOURCES,
+            }
+            for row in rows
+        ]
+
+    def count_local_sample_records(self) -> int:
+        return int(
+            self.db.execute(
+                text(
+                    """
+                    select
+                        (select count(*) from raw_snapshots where source = 'local_sample') +
+                        (select count(*) from collector_runs where source = 'local_sample') +
+                        (select count(*) from data_source_links where source = 'local_sample')
+                    """
+                )
+            ).scalar_one()
+        )
+
+    def missing_source_checks(self) -> dict:
+        rows = self.db.execute(
+            text(
+                """
+                select 'matches_without_source' as check_name, count(*) as missing_count
+                from matches m
+                where not exists (
+                    select 1 from data_source_links l where l.entity_type = 'match' and l.entity_key = m.public_id
+                )
+                union all
+                select 'venues_without_source', count(*)
+                from venues v
+                where not exists (
+                    select 1 from data_source_links l where l.entity_type = 'venue' and l.entity_key = v.code
+                )
+                union all
+                select 'players_without_source', count(*)
+                from players p
+                where not exists (
+                    select 1 from data_source_links l where l.entity_type = 'player' and l.entity_key = p.code
+                )
+                union all
+                select 'news_without_source', count(*)
+                from news_items n
+                where not exists (
+                    select 1 from data_source_links l where l.entity_type = 'news_item' and l.entity_key = n.source_url
+                )
+                union all
+                select 'group_standings_without_source', count(*)
+                from group_standings gs
+                join competition_stages s on s.id = gs.stage_id
+                join teams t on t.id = gs.team_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'group_standing' and l.entity_key = s.code || ':' || t.code
+                )
+                union all
+                select 'team_forms_without_source', count(*)
+                from team_form_snapshots tf
+                join teams t on t.id = tf.team_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'team_form'
+                      and l.entity_key = t.code || ':' || to_char(tf.as_of_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD"T"HH24:MI:SS') || '+08:00'
+                )
+                union all
+                select 'player_forms_without_source', count(*)
+                from player_form_snapshots pf
+                join players p on p.id = pf.player_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'player_form'
+                      and l.entity_key = p.code || ':' || to_char(pf.as_of_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD"T"HH24:MI:SS') || '+08:00'
+                )
+                union all
+                select 'team_market_values_without_source', count(*)
+                from teams t
+                where t.market_value_eur is not null
+                  and not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'team_market_value' and l.entity_key = t.code
+                  )
+                union all
+                select 'weather_snapshots_without_source', count(*)
+                from weather_snapshots ws
+                join venues v on v.id = ws.venue_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'weather_snapshot'
+                      and l.entity_key = v.code || ':' || to_char(ws.observed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') || '+00:00'
+                )
+                union all
+                select 'coaches_without_source', count(*)
+                from coaches c
+                join teams t on t.id = c.team_id
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'coach' and l.entity_key = t.code || ':' || c.name_zh
+                )
+                union all
+                select 'injury_reports_without_source', count(*)
+                from injury_reports ir
+                where not exists (
+                    select 1 from data_source_links l
+                    where l.entity_type = 'injury_report' and l.entity_key = ir.id::text
+                )
+                order by check_name
+                """
+            )
+        ).mappings().all()
+        return {row.check_name: int(row.missing_count) for row in rows}
 
     def count_real_matches(self) -> int:
         return int(

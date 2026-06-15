@@ -36,6 +36,7 @@ def test_data_status_contract():
     assert body["mode"] == "mock"
     assert body["canonical_ready"] is False
     assert body["latest_collector_runs"] == []
+    assert body["real_data_audit"]["status"] == "mock_mode"
 
 
 def test_matches_today_contract():

@@ -94,6 +94,8 @@ def test_database_data_status_contract(database_client):
     assert body["table_counts"]["matches"] >= 1
     assert body["table_counts"]["player_form_snapshots"] >= 2
     assert body["table_counts"]["data_source_links"] >= 1
+    assert "real_data_audit" in body
+    assert "source_quality" in body["real_data_audit"]
     assert len(body["latest_collector_runs"]) >= 1
 
 

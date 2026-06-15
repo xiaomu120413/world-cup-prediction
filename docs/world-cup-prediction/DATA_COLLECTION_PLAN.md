@@ -440,3 +440,30 @@ select source, count(*) from news_items group by 1;
 - 伤停/停赛：`injury_reports` schema 已有，但真实可信源未接入，当前 `injury_reports=0`。
 - 教练战绩：主教练身份已来自 FIFA 官方名单，但 `matches_count/win_rate/major_tournament_record` 仍缺授权或可验证来源。
 - 阵容稳定性：官方名单已入库，但首发、出场分钟、最近 N 场主力使用率仍未接入。
+
+## 2026-06-15 Real Data Trust Gate
+
+发布和模型训练前必须执行：
+
+```powershell
+python services/api/scripts/backfill_data_source_links.py
+python services/api/scripts/audit_real_data.py
+```
+
+`audit_real_data.py` 必须返回 `"status": "pass"`，否则不能把数据当作真实生产数据使用。
+
+可信来源等级：
+
+- `official`：FIFA 官方名单、官方赛事实体，默认置信度约 `0.95`。
+- `public_dataset`：TheStatsAPI fixture 等公开结构化数据集，默认置信度约 `0.90`。
+- `public_api`：Open-Meteo 等公开 API，默认置信度约 `0.85`。
+- `public_source`：懂球帝页面或 sport-data，默认置信度约 `0.80`，适合中文补充和状态榜单。
+- `manual_verified`：人工核验后的场馆静态信息，默认置信度约 `0.90`。
+- `sample_for_tests_only`：`local_sample` 只能用于自动化测试，真实库中必须为 `0`。
+
+当前硬性约束：
+
+- `local_sample` 在真实库中的 raw/source links/collector runs 必须为 `0`。
+- 所有 canonical 数据必须能在 `data_source_links` 查到来源。
+- `data_source_links.confidence` 必须随来源写入，接口 `/api/v1/data-status` 返回 `real_data_audit.source_quality`。
+- 伤停/停赛只有在可信新闻或授权源达到阈值后才写入 `injury_reports`，不能用猜测补齐。

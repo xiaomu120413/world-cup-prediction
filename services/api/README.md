@@ -209,9 +209,10 @@ Backfill and audit source links after migrations or historical imports:
 ```powershell
 $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
 python scripts/backfill_data_source_links.py
+python scripts/audit_real_data.py
 ```
 
-The audit should print `0` for every `*_without_source` check before data is used by the prediction pipeline.
+The source-link audit should print `0` for every `*_without_source` check. The real-data audit must return `"status": "pass"` before data is used by the prediction pipeline or production mini program.
 
 The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
 
