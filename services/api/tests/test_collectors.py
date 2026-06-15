@@ -1,4 +1,5 @@
 from app.collectors.adapters import DongqiudiHomepageAdapter, LocalSampleAdapter, RawSnapshot, build_adapter
+from app.collectors.catalog import COLLECTOR_CATALOG, collection_catalog_summary
 from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
 from app.collectors.runner import snapshot_checksum
 
@@ -46,6 +47,15 @@ def test_build_adapter_supports_dongqiudi_source():
     adapter = build_adapter("dongqiudi", "homepage")
 
     assert adapter.source == "dongqiudi"
+
+
+def test_collection_catalog_tracks_required_data_domains():
+    summary = collection_catalog_summary({"dongqiudi_matches": 3, "news_items": 10})
+
+    assert any(job["job_id"] == "dongqiudi_homepage" for job in COLLECTOR_CATALOG)
+    assert summary["domains"][0]["domain"] == "matches"
+    assert summary["domains"][0]["status"] == "partial_real"
+    assert any(domain["domain"] == "player_form" for domain in summary["domains"])
 
 
 def test_news_items_from_dongqiudi_snapshot():

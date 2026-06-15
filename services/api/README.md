@@ -174,6 +174,8 @@ Each adapter should emit the same canonical payload shape before normalization:
 
 Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, market value, lineup stability and coach records still need dedicated adapters or an authorized data source before they should be treated as production-grade.
 
+The executable collection matrix, source readiness, payload contracts, quality gates and acceptance tests are documented in `docs/world-cup-prediction/DATA_COLLECTION_PLAN.md`.
+
 Admin API trigger:
 
 ```powershell

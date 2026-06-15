@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Header, Query
 
+from app.collectors.catalog import collection_catalog_summary
 from app.collectors.runner import CollectorRunner
 from app.core.cache import cached_json
 from app.core.config import Settings, get_settings
@@ -68,6 +69,7 @@ def data_status(settings: Settings = Depends(get_settings)):
             "player_form_ready": False,
             "primary_source": "mock",
             "table_counts": {},
+            "collection_catalog": collection_catalog_summary({}),
             "latest_collector_runs": [],
         },
         updated_at=UPDATED_AT,

@@ -1,6 +1,7 @@
 from sqlalchemy import Select, and_, case, desc, func, select
 from sqlalchemy.orm import Session
 
+from app.collectors.catalog import collection_catalog_summary
 from app.db.schema import (
     competition_stages,
     collector_runs,
@@ -312,6 +313,7 @@ class PublicDataRepository:
             "player_form_ready": table_counts["players"] > 0 and table_counts["player_form_snapshots"] > 0,
             "primary_source": "dongqiudi" if table_counts["dongqiudi_matches"] > 0 else "database",
             "table_counts": table_counts,
+            "collection_catalog": collection_catalog_summary(table_counts),
             "latest_collector_runs": [
                 {
                     "source": row.source,
