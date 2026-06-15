@@ -42,6 +42,16 @@ COLLECTOR_CATALOG = [
         "notes": "World Cup 2026 player rankings from Dongqiudi sport-data API: goals, assists, shots, shots on target and key passes.",
     },
     {
+        "job_id": "fifa_mens_world_ranking",
+        "source": "fifa",
+        "source_type": "mens_world_ranking",
+        "domains": ["teams", "rankings"],
+        "target_tables": ["raw_snapshots", "data_source_links", "teams.fifa_rank"],
+        "status": "implemented_official",
+        "frequency": "after_fifa_ranking_update",
+        "notes": "FIFA official rankings from api.fifa.com. Used to populate FIFA rank for roster teams.",
+    },
+    {
         "job_id": "team_form",
         "source": "dongqiudi",
         "source_type": "team_form",
@@ -111,6 +121,16 @@ COLLECTOR_CATALOG = [
         "frequency": "after_news_collection",
         "notes": "LLM extraction for injuries, suspensions, lineup, coach comments and tactical signals.",
     },
+    {
+        "job_id": "public_news_rss",
+        "source": "guardian_bbc_espn",
+        "source_type": "football_rss",
+        "domains": ["news"],
+        "target_tables": ["raw_snapshots", "data_source_links", "news_items"],
+        "status": "implemented_partial_real",
+        "frequency": "manual_now_hourly_later",
+        "notes": "Public English football RSS feeds used to avoid Dongqiudi-only news coverage.",
+    },
 ]
 
 
@@ -134,6 +154,7 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
     news = counts.get("news_items", 0)
     dongqiudi_standings = counts.get("dongqiudi_standings_snapshots", 0)
     dongqiudi_player_rankings = counts.get("dongqiudi_player_ranking_snapshots", 0)
+    fifa_ranking_source_links = counts.get("fifa_ranking_source_links", 0)
 
     return {
         "domains": [
@@ -154,7 +175,7 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             {
                 "domain": "news",
                 "status": "partial_real" if news > 0 else "missing_real_source",
-                "current_source": "dongqiudi/homepage_links" if news > 0 else None,
+                "current_source": "dongqiudi/homepage_links + guardian/bbc/espn rss" if news > 0 else None,
                 "target_tables": ["news_items", "ai_insights"],
             },
             {
@@ -181,6 +202,12 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 if dongqiudi_player_rankings > 0 or fifa_official_players > 0
                 else ("local_sample_or_seed" if players > 0 and player_forms > 0 else None),
                 "target_tables": ["players", "player_form_snapshots"],
+            },
+            {
+                "domain": "fifa_rankings",
+                "status": "official_real" if fifa_ranking_source_links > 0 else "missing_real_source",
+                "current_source": "fifa/mens_world_ranking" if fifa_ranking_source_links > 0 else None,
+                "target_tables": ["teams.fifa_rank"],
             },
             {
                 "domain": "market_value",

@@ -61,6 +61,21 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.9,
         "label": "Manually verified public venue facts",
     },
+    "guardian": {
+        "trust_level": "public_news",
+        "default_confidence": 0.82,
+        "label": "The Guardian football RSS",
+    },
+    "bbc": {
+        "trust_level": "public_news",
+        "default_confidence": 0.84,
+        "label": "BBC football RSS",
+    },
+    "espn": {
+        "trust_level": "public_news",
+        "default_confidence": 0.82,
+        "label": "ESPN soccer RSS",
+    },
     "local_sample": {
         "trust_level": "sample_for_tests_only",
         "default_confidence": 0.0,
@@ -68,7 +83,7 @@ SOURCE_TRUST_POLICY = {
     },
 }
 
-APPROVED_REAL_SOURCES = {"fifa", "thestatsapi", "dongqiudi", "open_meteo", "manual_verified"}
+APPROVED_REAL_SOURCES = {"fifa", "thestatsapi", "dongqiudi", "open_meteo", "manual_verified", "guardian", "bbc", "espn"}
 
 
 def team_public_id(code: str, name_en: str | None = None) -> str:
@@ -345,6 +360,7 @@ class PublicDataRepository:
             "data_source_links": self.count_rows(data_source_links),
             "dongqiudi_standings_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_standings"),
             "dongqiudi_player_ranking_snapshots": self.count_raw_snapshots("dongqiudi", "world_cup_player_rankings"),
+            "fifa_ranking_source_links": self.count_source_links("fifa", "mens_world_ranking"),
             "collector_runs": self.count_rows(collector_runs),
             "news_items": self.count_rows(news_items),
             "match_predictions": self.count_rows(match_predictions),
@@ -372,6 +388,7 @@ class PublicDataRepository:
             "table_counts": table_counts,
             "collection_catalog": collection_catalog_summary(table_counts),
             "real_data_audit": self.get_real_data_audit(),
+            "coverage_audit": self.get_coverage_audit(table_counts),
             "latest_collector_runs": [
                 {
                     "source": row.source,
@@ -414,6 +431,73 @@ class PublicDataRepository:
             "source_quality": source_quality,
             "policy": SOURCE_TRUST_POLICY,
         }
+
+    def get_coverage_audit(self, table_counts: dict[str, int]) -> dict:
+        player_total = table_counts["players"]
+        player_market_values = table_counts["player_market_values"]
+        team_market_values = table_counts["team_market_values"]
+        venue_total = table_counts["venues"]
+        venue_enriched = table_counts["venue_enriched"]
+        news_sources = self.count_distinct_news_sources()
+        official_roster_teams = self.count_official_roster_teams()
+        ranked_roster_teams = self.count_ranked_roster_teams()
+        schedule_context_matches = self.count_world_cup_schedule_context_matches()
+        roster_team_rank_coverage = ranked_roster_teams / official_roster_teams if official_roster_teams else 0
+        player_market_coverage = player_market_values / player_total if player_total else 0
+        finished_matches = self.count_finished_world_cup_schedule_context_matches()
+        lineup_match_coverage = self.count_lineup_matches() / finished_matches if finished_matches else 0
+        checks = {
+            "official_rosters": {
+                "status": "pass" if table_counts["fifa_official_players"] >= 48 * 26 else "needs_attention",
+                "value": table_counts["fifa_official_players"],
+                "target": 48 * 26,
+                "note": "FIFA official squad list should cover 48 teams x 26 players.",
+            },
+            "fifa_rank_roster_coverage": {
+                "status": "pass" if roster_team_rank_coverage >= 0.9 else "needs_attention",
+                "value": round(roster_team_rank_coverage, 3),
+                "target": 0.9,
+                "note": "Official roster teams should have FIFA rank from FIFA source.",
+            },
+            "player_market_value_coverage": {
+                "status": "pass" if player_market_coverage >= 0.8 else "needs_attention",
+                "value": round(player_market_coverage, 3),
+                "target": 0.8,
+                "note": "Current public coverage is partial; full player market values need an authorized source or import.",
+            },
+            "team_market_value_coverage": {
+                "status": "pass" if team_market_values >= 48 else "needs_attention",
+                "value": team_market_values,
+                "target": 48,
+                "note": "Team market value should cover all 48 participating teams.",
+            },
+            "venue_enrichment": {
+                "status": "pass" if venue_total > 0 and venue_enriched == venue_total else "needs_attention",
+                "value": venue_enriched,
+                "target": venue_total,
+                "note": "All venues should have capacity, surface, and weather coordinates.",
+            },
+            "lineup_finished_match_coverage": {
+                "status": "pass" if lineup_match_coverage >= 0.95 else "needs_attention",
+                "value": round(lineup_match_coverage, 3),
+                "target": 0.95,
+                "note": "Lineups are expected only for played matches.",
+            },
+            "multi_source_news": {
+                "status": "pass" if news_sources >= 3 else "needs_attention",
+                "value": news_sources,
+                "target": 3,
+                "note": "News should not rely on Dongqiudi only.",
+            },
+            "team_match_results": {
+                "status": "pass" if schedule_context_matches > 0 and table_counts["team_match_results"] >= schedule_context_matches * 2 else "needs_attention",
+                "value": table_counts["team_match_results"],
+                "target": schedule_context_matches * 2,
+                "note": "Team perspective result rows should cover the normalized Dongqiudi World Cup schedule.",
+            },
+        }
+        status = "pass" if all(item["status"] == "pass" for item in checks.values()) else "needs_attention"
+        return {"status": status, "checks": checks}
 
     def source_quality_summary(self) -> list[dict]:
         rows = self.db.execute(
@@ -594,6 +678,15 @@ class PublicDataRepository:
             ).scalar_one()
         )
 
+    def count_source_links(self, source: str, source_type: str) -> int:
+        return int(
+            self.db.execute(
+                select(func.count()).select_from(data_source_links).where(
+                    and_(data_source_links.c.source == source, data_source_links.c.source_type == source_type)
+                )
+            ).scalar_one()
+        )
+
     def count_player_market_values(self) -> int:
         return int(
             self.db.execute(
@@ -612,6 +705,71 @@ class PublicDataRepository:
         return int(
             self.db.execute(
                 select(func.count()).select_from(teams).where(teams.c.market_value_eur.is_not(None))
+            ).scalar_one()
+        )
+
+    def count_distinct_news_sources(self) -> int:
+        return int(self.db.execute(select(func.count(func.distinct(news_items.c.source))).select_from(news_items)).scalar_one())
+
+    def count_official_roster_teams(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count(func.distinct(players.c.team_id)))
+                .select_from(players)
+                .where(players.c.code.like("FIFA-%"))
+            ).scalar_one()
+        )
+
+    def count_ranked_roster_teams(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count(func.distinct(players.c.team_id)))
+                .select_from(players.join(teams, players.c.team_id == teams.c.id))
+                .where(players.c.code.like("FIFA-%"), teams.c.fifa_rank.is_not(None))
+            ).scalar_one()
+        )
+
+    def count_lineup_matches(self) -> int:
+        return int(
+            self.db.execute(select(func.count(func.distinct(lineup_snapshots.c.match_id))).select_from(lineup_snapshots)).scalar_one()
+        )
+
+    def count_finished_world_cup_schedule_context_matches(self) -> int:
+        return int(
+            self.db.execute(
+                text(
+                    """
+                    select count(*)
+                    from matches m
+                    where m.status = 'finished'
+                      and exists (
+                          select 1 from data_source_links l
+                          where l.entity_type = 'match'
+                            and l.entity_key = m.public_id
+                            and l.source = 'dongqiudi'
+                            and l.source_type = 'world_cup_schedule'
+                      )
+                    """
+                )
+            ).scalar_one()
+        )
+
+    def count_world_cup_schedule_context_matches(self) -> int:
+        return int(
+            self.db.execute(
+                text(
+                    """
+                    select count(*)
+                    from matches m
+                    where exists (
+                        select 1 from data_source_links l
+                        where l.entity_type = 'match'
+                          and l.entity_key = m.public_id
+                          and l.source = 'dongqiudi'
+                          and l.source_type = 'world_cup_schedule'
+                    )
+                    """
+                )
             ).scalar_one()
         )
 
