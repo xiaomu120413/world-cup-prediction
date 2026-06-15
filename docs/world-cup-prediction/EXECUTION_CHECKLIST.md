@@ -759,3 +759,11 @@ MVP v0.1 完成必须同时满足：
 11. 核心接口有测试
 12. 发布检查表全部通过
 ```
+## Backend Database Route Coverage Update
+
+Update date: 2026-06-15
+
+- `DATA_BACKEND=database` now covers home, matches today, match detail, match prediction, teams, team detail, team profile, team matches, prediction rankings, groups, group detail, and group simulation.
+- PostgreSQL seed data now includes ranking predictions, group standings, and group simulation rows for the local baseline.
+- Routes keep mock fallback for API areas where detailed content has not been collected yet.
+- Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 33 tests.

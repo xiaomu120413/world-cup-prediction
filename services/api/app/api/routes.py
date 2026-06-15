@@ -51,7 +51,16 @@ def version(settings: Settings = Depends(get_settings)):
 
 
 @router.get("/home")
-def home(date: str | None = Query(default=None), timezone: str = Query(default="Asia/Shanghai")):
+def home(
+    date: str | None = Query(default=None),
+    timezone: str = Query(default="Asia/Shanghai"),
+    settings: Settings = Depends(get_settings),
+):
+    if use_database(settings):
+        home_data = with_public_repository(lambda repo: repo.get_home_data(date, timezone))
+        if home_data and home_data["champion_rankings"]:
+            return envelope(home_data, updated_at=now_iso())
+
     match = MATCHES[MATCH_ID]
     prediction = MATCH_PREDICTIONS[MATCH_ID]
     featured_match = {
@@ -78,7 +87,16 @@ def home(date: str | None = Query(default=None), timezone: str = Query(default="
 
 
 @router.get("/matches/today")
-def matches_today(date: str | None = None, include_prediction: bool = True):
+def matches_today(
+    date: str | None = None,
+    include_prediction: bool = True,
+    settings: Settings = Depends(get_settings),
+):
+    if use_database(settings):
+        matches = with_public_repository(lambda repo: repo.list_matches(include_prediction=include_prediction))
+        if matches:
+            return list_envelope(matches, updated_at=now_iso(), date=date)
+
     matches = [
         {
             **MATCHES[MATCH_ID],
@@ -101,12 +119,12 @@ def match_detail(match_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
         match = with_public_repository(lambda repo: repo.get_match(match_id))
         if not match:
-            raise not_found("MATCH_NOT_FOUND", "比赛不存在")
+            raise not_found("MATCH_NOT_FOUND", "Match not found")
         return envelope(match, updated_at=now_iso())
 
     match = MATCHES.get(match_id)
     if not match:
-        raise not_found("MATCH_NOT_FOUND", "比赛不存在")
+        raise not_found("MATCH_NOT_FOUND", "Match not found")
     return envelope(match, updated_at=UPDATED_AT)
 
 
@@ -115,12 +133,12 @@ def match_prediction(match_id: str, settings: Settings = Depends(get_settings)):
     if use_database(settings):
         prediction = with_public_repository(lambda repo: repo.get_match_prediction(match_id))
         if not prediction:
-            raise not_found("PREDICTION_NOT_FOUND", "预测未生成")
+            raise not_found("PREDICTION_NOT_FOUND", "Prediction not found")
         return envelope(prediction, updated_at=prediction["generated_at"])
 
     prediction = MATCH_PREDICTIONS.get(match_id)
     if not prediction:
-        raise not_found("PREDICTION_NOT_FOUND", "预测未生成")
+        raise not_found("PREDICTION_NOT_FOUND", "Prediction not found")
     return envelope(prediction, updated_at=UPDATED_AT)
 
 
@@ -128,36 +146,60 @@ def match_prediction(match_id: str, settings: Settings = Depends(get_settings)):
 def match_ai_report(match_id: str):
     report = AI_REPORTS.get(match_id)
     if not report:
-        raise not_found("AI_REPORT_NOT_FOUND", "AI 报告未生成")
+        raise not_found("AI_REPORT_NOT_FOUND", "AI report not found")
     return envelope(report, updated_at=UPDATED_AT)
 
 
 @router.get("/groups")
-def groups():
+def groups(settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        values = with_public_repository(lambda repo: repo.list_groups())
+        if values:
+            return list_envelope(values, updated_at=now_iso())
+
     return list_envelope(GROUPS, updated_at=UPDATED_AT)
 
 
 @router.get("/groups/{group_id}")
-def group_detail(group_id: str):
+def group_detail(group_id: str, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        group = with_public_repository(lambda repo: repo.get_group_detail(group_id))
+        if group:
+            return envelope(group, updated_at=now_iso())
+
     group = GROUP_DETAILS.get(group_id)
     if not group:
-        raise not_found("GROUP_NOT_FOUND", "小组不存在")
+        raise not_found("GROUP_NOT_FOUND", "Group not found")
     return envelope(group, updated_at=UPDATED_AT)
 
 
 @router.get("/groups/{group_id}/simulation")
-def group_simulation(group_id: str):
+def group_simulation(group_id: str, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        simulation = with_public_repository(lambda repo: repo.get_group_simulation(group_id))
+        if simulation:
+            return envelope(simulation, updated_at=now_iso())
+
     simulation = GROUP_SIMULATIONS.get(group_id)
     if not simulation:
-        raise not_found("SIMULATION_NOT_FOUND", "小组模拟未生成")
+        raise not_found("SIMULATION_NOT_FOUND", "Simulation not found")
     return envelope(simulation, updated_at=UPDATED_AT)
 
 
 @router.get("/predictions/rankings")
-def prediction_rankings(type: str = Query(default="champion"), limit: int = Query(default=20, ge=1, le=100)):
+def prediction_rankings(
+    type: str = Query(default="champion"),
+    limit: int = Query(default=20, ge=1, le=100),
+    settings: Settings = Depends(get_settings),
+):
+    if use_database(settings):
+        ranking = with_public_repository(lambda repo: repo.list_rankings(type, limit))
+        if ranking:
+            return envelope(ranking, ranking_type=type, updated_at=now_iso())
+
     ranking = RANKINGS.get(type)
     if ranking is None:
-        raise not_found("RANKING_NOT_FOUND", "预测榜不存在")
+        raise not_found("RANKING_NOT_FOUND", "Ranking not found")
     return envelope(ranking[:limit], ranking_type=type, updated_at=UPDATED_AT)
 
 
@@ -177,10 +219,10 @@ def teams(q: str | None = None, group_id: str | None = None, settings: Settings 
 
 
 @router.get("/teams/{team_id}")
-def team_detail(team_id: str):
-    team = TEAMS.get(team_id)
+def team_detail(team_id: str, settings: Settings = Depends(get_settings)):
+    team = with_public_repository(lambda repo: repo.get_team(team_id)) if use_database(settings) else TEAMS.get(team_id)
     if not team:
-        raise not_found("TEAM_NOT_FOUND", "球队不存在")
+        raise not_found("TEAM_NOT_FOUND", "Team not found")
     return envelope(
         {
             **team,
@@ -193,18 +235,41 @@ def team_detail(team_id: str):
 
 
 @router.get("/teams/{team_id}/profile")
-def team_profile(team_id: str):
+def team_profile(team_id: str, settings: Settings = Depends(get_settings)):
     profile = TEAM_PROFILES.get(team_id)
+    if use_database(settings):
+        team = with_public_repository(lambda repo: repo.get_team(team_id))
+        if team and profile:
+            return envelope({**profile, "team": team}, updated_at=now_iso())
+        if team:
+            return envelope(
+                {
+                    "team": team,
+                    "summary": "Team profile generated from current database baseline.",
+                    "probabilities": [],
+                    "ratings": [],
+                    "form": {"headline": "Database profile pending", "stats": []},
+                    "key_players": [],
+                    "risks": [],
+                },
+                updated_at=now_iso(),
+            )
     if not profile:
-        raise not_found("TEAM_PROFILE_NOT_FOUND", "球队分析不存在")
+        raise not_found("TEAM_PROFILE_NOT_FOUND", "Team profile not found")
     return envelope(profile, updated_at=UPDATED_AT)
 
 
 @router.get("/teams/{team_id}/matches")
-def team_matches(team_id: str):
+def team_matches(team_id: str, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        matches = with_public_repository(lambda repo: repo.list_team_matches(team_id))
+        if matches is None:
+            raise not_found("TEAM_NOT_FOUND", "Team not found")
+        return list_envelope(matches, updated_at=now_iso(), team_id=team_id)
+
     team = TEAMS.get(team_id)
     if not team:
-        raise not_found("TEAM_NOT_FOUND", "球队不存在")
+        raise not_found("TEAM_NOT_FOUND", "Team not found")
     matches = [
         match
         for match in MATCHES.values()
@@ -217,7 +282,7 @@ def team_matches(team_id: str):
 def player_detail(player_id: str):
     player = PLAYERS.get(player_id)
     if not player:
-        raise not_found("PLAYER_NOT_FOUND", "球员不存在")
+        raise not_found("PLAYER_NOT_FOUND", "Player not found")
     return envelope(player, updated_at=UPDATED_AT)
 
 

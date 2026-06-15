@@ -34,8 +34,8 @@ def test_database_match_detail_contract(database_client):
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13")
     assert response.status_code == 200
     body = response.json()["data"]
-    assert body["home_team"]["name"] == "美国"
-    assert body["away_team"]["name"] == "巴拉圭"
+    assert body["home_team"]["id"] == "usa"
+    assert body["away_team"]["id"] == "paraguay"
 
 
 def test_database_prediction_contract(database_client):
@@ -50,4 +50,28 @@ def test_database_teams_contract(database_client):
     response = database_client.get("/api/v1/teams")
     assert response.status_code == 200
     teams = response.json()["data"]
-    assert any(team["id"] == "france" and team["name"] == "法国" for team in teams)
+    assert any(team["id"] == "france" and team["abbr"] == "FRA" for team in teams)
+
+
+def test_database_home_contract(database_client):
+    response = database_client.get("/api/v1/home")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["featured_match"]["id"] == "usa-paraguay-2026-06-13"
+    assert len(body["champion_rankings"]) == 3
+
+
+def test_database_group_contract(database_client):
+    response = database_client.get("/api/v1/groups/group-a")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["id"] == "group-a"
+    assert len(body["standings"]) == 4
+
+
+def test_database_rankings_contract(database_client):
+    response = database_client.get("/api/v1/predictions/rankings?type=champion")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body[0]["team"]["id"] == "france"
+    assert body[0]["probability"] == 0.158

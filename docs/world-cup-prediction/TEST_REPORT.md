@@ -144,3 +144,14 @@ H5 预览地址：`http://127.0.0.1:4173`
 - 接入 Redis 缓存降级测试。
 - 补接口失败、空状态、超时状态自动化测试。
 - 微信开发者工具真机预览。
+
+## Backend Database Route Coverage Retest
+
+Test date: 2026-06-15
+
+| Test item | Result |
+| --- | --- |
+| `python scripts/init_db.py` with PostgreSQL on `127.0.0.1:54321` | Passed |
+| `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 33 tests |
+| Database route coverage | Home, matches, rankings, groups, teams |
+| Seed repeatability | Ranking, group standing, and group simulation seed rows are idempotent |
