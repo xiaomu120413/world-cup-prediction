@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.collectors.normalizers import normalize_team_ref, slugify
+from app.collectors.normalizers import TEAM_LOOKUP, normalize_team_ref, slugify
 from app.db.schema import (
     collector_runs,
     data_source_links,
@@ -119,6 +119,13 @@ def team_code_from_name(name: str) -> str:
     return slugify(name).upper()[:32] or hashlib.sha256(name.encode("utf-8")).hexdigest()[:12].upper()
 
 
+def preferred_team_ref(name: str) -> dict | None:
+    key = name.strip()
+    if not key:
+        return None
+    return TEAM_LOOKUP.get(key.upper()) or TEAM_LOOKUP.get(key)
+
+
 def load_team_index(db) -> dict[str, Any]:
     by_alias: dict[str, Any] = {}
     for row in db.execute(select(teams.c.id, teams.c.code, teams.c.name_zh, teams.c.name_en)).mappings().all():
@@ -138,6 +145,13 @@ def load_team_index(db) -> dict[str, Any]:
 
 
 def ensure_team(db, index: dict[str, Any], name: str) -> dict:
+    preferred = preferred_team_ref(name)
+    if preferred:
+        for value in [preferred["code"], preferred.get("name_en"), preferred.get("name_zh"), *(preferred.get("aliases") or [])]:
+            existing = index["by_alias"].get(normalize_alias(value))
+            if existing and existing.code == preferred["code"]:
+                return {"id": existing.id, "code": existing.code}
+
     key = normalize_alias(name)
     existing = index["by_alias"].get(key)
     if existing:

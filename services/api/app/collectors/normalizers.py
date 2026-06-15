@@ -29,6 +29,59 @@ TEAM_LOOKUP = {
     "英格兰": {"code": "ENG", "name_zh": "England", "name_en": "England", "aliases": ["ENG", "England", "英格兰"]},
 }
 
+TEAM_LOOKUP.update(
+    {
+        "DR CONGO": {
+            "code": "CONGO-DR",
+            "name_zh": "Congo DR",
+            "name_en": "Congo DR",
+            "aliases": ["CONGO-DR", "Congo DR", "DR Congo", "Democratic Republic of the Congo", "COD"],
+        },
+        "CONGO DR": {
+            "code": "CONGO-DR",
+            "name_zh": "Congo DR",
+            "name_en": "Congo DR",
+            "aliases": ["CONGO-DR", "Congo DR", "DR Congo", "Democratic Republic of the Congo", "COD"],
+        },
+        "DEMOCRATIC REPUBLIC OF THE CONGO": {
+            "code": "CONGO-DR",
+            "name_zh": "Congo DR",
+            "name_en": "Congo DR",
+            "aliases": ["CONGO-DR", "Congo DR", "DR Congo", "Democratic Republic of the Congo", "COD"],
+        },
+        "CURA\u00c7AO": {
+            "code": "CURACAO",
+            "name_zh": "Curacao",
+            "name_en": "Curacao",
+            "aliases": ["CURACAO", "Curacao", "Cura\u00e7ao", "CUW"],
+        },
+        "CURACAO": {
+            "code": "CURACAO",
+            "name_zh": "Curacao",
+            "name_en": "Curacao",
+            "aliases": ["CURACAO", "Curacao", "Cura\u00e7ao", "CUW"],
+        },
+        "CZECH REPUBLIC": {
+            "code": "CZECHIA",
+            "name_zh": "Czechia",
+            "name_en": "Czechia",
+            "aliases": ["CZECHIA", "Czechia", "Czech", "Czech Republic", "CZE"],
+        },
+        "CZECHIA": {
+            "code": "CZECHIA",
+            "name_zh": "Czechia",
+            "name_en": "Czechia",
+            "aliases": ["CZECHIA", "Czechia", "Czech", "Czech Republic", "CZE"],
+        },
+        "CZECH": {
+            "code": "CZECHIA",
+            "name_zh": "Czechia",
+            "name_en": "Czechia",
+            "aliases": ["CZECHIA", "Czechia", "Czech", "Czech Republic", "CZE"],
+        },
+    }
+)
+
 
 def stable_checksum(*parts: str) -> str:
     value = "|".join(parts)
