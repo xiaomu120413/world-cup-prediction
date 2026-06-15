@@ -54,6 +54,25 @@ def version(settings: Settings = Depends(get_settings)):
     )
 
 
+@router.get("/data-status")
+def data_status(settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        status = with_public_repository(lambda repo: repo.get_data_status())
+        return envelope({"backend": settings.data_backend, **status}, updated_at=now_iso())
+
+    return envelope(
+        {
+            "backend": settings.data_backend,
+            "mode": "mock",
+            "canonical_ready": False,
+            "player_form_ready": False,
+            "table_counts": {},
+            "latest_collector_runs": [],
+        },
+        updated_at=UPDATED_AT,
+    )
+
+
 @router.get("/home")
 def home(
     date: str | None = Query(default=None),
@@ -252,40 +271,29 @@ def teams(q: str | None = None, group_id: str | None = None, settings: Settings 
 
 @router.get("/teams/{team_id}")
 def team_detail(team_id: str, settings: Settings = Depends(get_settings)):
-    team = with_public_repository(lambda repo: repo.get_team(team_id)) if use_database(settings) else TEAMS.get(team_id)
+    profile = with_public_repository(lambda repo: repo.get_team_profile(team_id)) if use_database(settings) else None
+    team = profile["team"] if profile else (TEAMS.get(team_id) if not use_database(settings) else None)
     if not team:
         raise not_found("TEAM_NOT_FOUND", "Team not found")
     return envelope(
         {
             **team,
             "subtitle": f"FIFA排名 {team.get('fifa_rank')} · Elo {team.get('elo_rating')}",
-            "ratings": TEAM_PROFILES.get(team_id, {}).get("ratings", []),
-            "form": TEAM_PROFILES.get(team_id, {}).get("form", {}),
+            "ratings": profile["ratings"] if profile else TEAM_PROFILES.get(team_id, {}).get("ratings", []),
+            "form": profile["form"] if profile else TEAM_PROFILES.get(team_id, {}).get("form", {}),
         },
-        updated_at=UPDATED_AT,
+        updated_at=now_iso() if profile else UPDATED_AT,
     )
 
 
 @router.get("/teams/{team_id}/profile")
 def team_profile(team_id: str, settings: Settings = Depends(get_settings)):
-    profile = TEAM_PROFILES.get(team_id)
     if use_database(settings):
-        team = with_public_repository(lambda repo: repo.get_team(team_id))
-        if team and profile:
-            return envelope({**profile, "team": team}, updated_at=now_iso())
-        if team:
-            return envelope(
-                {
-                    "team": team,
-                    "summary": "Team profile generated from current database baseline.",
-                    "probabilities": [],
-                    "ratings": [],
-                    "form": {"headline": "Database profile pending", "stats": []},
-                    "key_players": [],
-                    "risks": [],
-                },
-                updated_at=now_iso(),
-            )
+        database_profile = with_public_repository(lambda repo: repo.get_team_profile(team_id))
+        if database_profile:
+            return envelope(database_profile, updated_at=now_iso())
+
+    profile = TEAM_PROFILES.get(team_id)
     if not profile:
         raise not_found("TEAM_PROFILE_NOT_FOUND", "Team profile not found")
     return envelope(profile, updated_at=UPDATED_AT)

@@ -83,13 +83,24 @@ type ApiRanking = {
 type ApiTeamProfile = {
   team: ApiTeam
   summary: string
-  probabilities: Array<{ label: string; value: number; delta?: number }>
+  probabilities: Array<{ label: string; value?: number | null; delta?: number | null }>
   ratings: Array<{ label: string; value: number }>
   form: {
     headline: string
-    stats: string[]
+    stats: Array<string | { label: string; value?: string | number | null }>
   }
-  key_players: Array<{ name: string; role: string; form: number }>
+  key_players: Array<{
+    name: string
+    role?: string
+    position?: string
+    form?: number
+    recent_form?: {
+      goals?: number
+      assists?: number
+      rating?: number | null
+      form_score?: number | null
+    }
+  }>
   risks: Array<{ label: string; value: number }>
 }
 
@@ -112,13 +123,29 @@ type ApiGroupSimulation = {
   }>
 }
 
+type ApiDataStatus = {
+  backend: string
+  mode: 'mock' | 'database'
+  canonical_ready: boolean
+  player_form_ready: boolean
+  table_counts: Record<string, number>
+  latest_collector_runs: Array<{ source: string; job_type: string; status: string }>
+}
+
 export type LoadState = 'idle' | 'loading' | 'ready' | 'error'
+
+export type DataSourceStatus = {
+  label: string
+  detail: string
+  isDatabase: boolean
+}
 
 export type HomeData = {
   featuredMatch: Match
   upcomingMatches: typeof upcomingMatches
   championTop: typeof championTop
   updatedAt: string
+  dataSourceStatus: DataSourceStatus
 }
 
 export type GroupData = {
@@ -131,6 +158,11 @@ export type GroupData = {
 
 const apiBaseUrl = __API_BASE_URL__.replace(/\/$/, '')
 const defaultMatchId = 'usa-paraguay-2026-06-13'
+const mockDataSourceStatus: DataSourceStatus = {
+  label: 'Mock',
+  detail: 'Local fallback',
+  isDatabase: false
+}
 
 function shouldUseApi() {
   return Boolean(apiBaseUrl)
@@ -175,6 +207,26 @@ function formatConfidence(value?: string) {
     high: '高信心'
   }
   return confidenceMap[value] || value
+}
+
+function formatOptionalPercent(value?: number | null) {
+  return value === undefined || value === null ? '-' : `${percent(value)}%`
+}
+
+function formatProfileStat(stat: string | { label: string; value?: string | number | null }) {
+  if (typeof stat === 'string') {
+    return stat
+  }
+  return `${stat.label}: ${stat.value ?? '-'}`
+}
+
+function mapDataStatus(status: ApiDataStatus): DataSourceStatus {
+  const latestRun = status.latest_collector_runs[0]
+  return {
+    label: status.mode === 'database' ? 'DB' : 'Mock',
+    detail: latestRun ? `${latestRun.source}/${latestRun.job_type}` : status.backend,
+    isDatabase: status.mode === 'database' && status.canonical_ready
+  }
 }
 
 async function requestData<T>(path: string): Promise<Envelope<T>> {
@@ -226,21 +278,34 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
   }
 }
 
+export async function getDataStatus(): Promise<DataSourceStatus> {
+  if (!shouldUseApi()) {
+    return mockDataSourceStatus
+  }
+
+  const response = await requestData<ApiDataStatus>('/api/v1/data-status')
+  return mapDataStatus(response.data)
+}
+
 export async function getHomeData(): Promise<HomeData> {
   if (!shouldUseApi()) {
     return {
       featuredMatch,
       upcomingMatches,
       championTop,
+      dataSourceStatus: mockDataSourceStatus,
       updatedAt: '更新于 18:00'
     }
   }
 
-  const response = await requestData<{
-    featured_match: ApiMatch
-    upcoming_matches: ApiMatch[]
-    champion_rankings: ApiRanking[]
-  }>('/api/v1/home')
+  const [response, status] = await Promise.all([
+    requestData<{
+      featured_match: ApiMatch
+      upcoming_matches: ApiMatch[]
+      champion_rankings: ApiRanking[]
+    }>('/api/v1/home'),
+    getDataStatus()
+  ])
 
   return {
     featuredMatch: mapMatch(response.data.featured_match),
@@ -255,7 +320,8 @@ export async function getHomeData(): Promise<HomeData> {
       name: item.team.name,
       probability: percent(item.probability)
     })),
-    updatedAt: formatUpdatedAt(response.meta?.updated_at)
+    updatedAt: formatUpdatedAt(response.meta?.updated_at),
+    dataSourceStatus: status
   }
 }
 
@@ -310,12 +376,19 @@ export async function getTeamProfile(teamId = 'france'): Promise<TeamProfile> {
     summary: response.data.summary,
     probabilities: response.data.probabilities.map(item => ({
       label: item.label,
-      value: `${percent(item.value)}%`,
-      delta: item.delta === undefined ? undefined : `${item.delta >= 0 ? '+' : '-'}${Math.abs(percent(item.delta))}%`
+      value: formatOptionalPercent(item.value),
+      delta: item.delta === undefined || item.delta === null ? undefined : `${item.delta >= 0 ? '+' : '-'}${Math.abs(percent(item.delta))}%`
     })),
     ratings: response.data.ratings,
-    form: response.data.form,
-    players: response.data.key_players,
+    form: {
+      headline: response.data.form.headline,
+      stats: response.data.form.stats.map(formatProfileStat)
+    },
+    players: response.data.key_players.map(player => ({
+      name: player.name,
+      role: player.role || player.position || '-',
+      form: player.form || player.recent_form?.form_score || player.recent_form?.rating || 0
+    })),
     risks: response.data.risks
   }
 }

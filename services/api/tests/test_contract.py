@@ -29,6 +29,15 @@ def test_version_contract():
     assert body["data"]["minimum_miniapp_version"] == "0.1.0"
 
 
+def test_data_status_contract():
+    response = client.get("/api/v1/data-status")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["mode"] == "mock"
+    assert body["canonical_ready"] is False
+    assert body["latest_collector_runs"] == []
+
+
 def test_matches_today_contract():
     response = client.get("/api/v1/matches/today")
     assert response.status_code == 200

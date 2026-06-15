@@ -135,10 +135,27 @@
 .updated-line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8rpx;
   margin: 14rpx 0 20rpx;
   color: #94a3b8;
   font-size: 22rpx;
+}
+
+.source-pill {
+  padding: 4rpx 10rpx;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 999rpx;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+.source-pill--db {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
 }
 
 .page-head {

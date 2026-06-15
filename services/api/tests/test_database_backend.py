@@ -68,6 +68,22 @@ def test_database_home_contract(database_client):
     assert len(body["champion_rankings"]) == 3
 
 
+def test_database_data_status_contract(database_client):
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "schedule")
+        CollectorRunner(db).run("local_sample", "player_ranking")
+
+    response = database_client.get("/api/v1/data-status")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["mode"] == "database"
+    assert body["canonical_ready"] is True
+    assert body["player_form_ready"] is True
+    assert body["table_counts"]["matches"] >= 1
+    assert body["table_counts"]["player_form_snapshots"] >= 2
+    assert len(body["latest_collector_runs"]) >= 1
+
+
 def test_database_group_contract(database_client):
     response = database_client.get("/api/v1/groups/group-a")
     assert response.status_code == 200
@@ -83,6 +99,19 @@ def test_database_rankings_contract(database_client):
     assert body[0]["team"]["id"] == "france"
     assert body[0]["rank"] == 1
     assert 0 < body[0]["probability"] < 1
+
+
+def test_database_team_profile_uses_player_form(database_client):
+    with SessionLocal() as db:
+        CollectorRunner(db).run("local_sample", "player_ranking")
+
+    response = database_client.get("/api/v1/teams/france/profile")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["team"]["id"] == "france"
+    assert body["data_sources"]["players"] == "players"
+    assert len(body["key_players"]) >= 1
+    assert body["form"]["stats"][1]["value"] >= 1
 
 
 def test_database_baseline_recompute_writes_outputs():

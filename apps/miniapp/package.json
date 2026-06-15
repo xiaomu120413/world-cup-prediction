@@ -6,8 +6,10 @@
   "scripts": {
     "build:weapp": "taro build --type weapp",
     "build:h5": "taro build --type h5",
+    "build:h5:api": "set TARO_APP_API_BASE_URL=http://127.0.0.1:8001&& taro build --type h5",
     "dev:weapp": "npm run build:weapp -- --watch",
     "dev:h5": "npm run build:h5 -- --watch",
+    "dev:h5:api": "set TARO_APP_API_BASE_URL=http://127.0.0.1:8001&& taro build --type h5 --watch",
     "typecheck": "tsc --noEmit"
   },
   "browserslist": [
@@ -49,4 +51,3 @@
     "webpack": "5.91.0"
   }
 }
-

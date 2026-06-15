@@ -17,6 +17,11 @@ const fallbackHome: HomeData = {
   featuredMatch,
   upcomingMatches,
   championTop,
+  dataSourceStatus: {
+    label: 'Mock',
+    detail: 'Local fallback',
+    isDatabase: false
+  },
   updatedAt: '更新于 18:00'
 }
 
@@ -65,6 +70,10 @@ export default function MatchesPage() {
       <View className='updated-line'>
         <Icon name='clock' color='#94a3b8' size={26} />
         <Text>{homeData.updatedAt}</Text>
+        <Text className={homeData.dataSourceStatus.isDatabase ? 'source-pill source-pill--db' : 'source-pill'}>
+          {homeData.dataSourceStatus.label}
+        </Text>
+        <Text>{homeData.dataSourceStatus.detail}</Text>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新赛前数据' detail='稍后显示最新预测快照' />}
