@@ -1,7 +1,7 @@
 # 世界杯预测小程序执行清单
 
 版本：v0.1  
-更新时间：2026-06-13  
+更新时间：2026-06-15
 用途：用于正式执行、排期、验收和测试。
 
 ## 1. 执行原则
@@ -75,7 +75,7 @@ AI 解读任务
 
 ### 3.1 当前执行状态
 
-截至 2026-06-13：
+截至 2026-06-15：
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
@@ -84,7 +84,7 @@ AI 解读任务
 | M1 视觉 QA | 已通过 | 390 x 844 视口下检查首页、比赛详情、小组、预测榜、球队页，无横向溢出。 |
 | M2 设计 | 已完成 | `DATA_MODEL.md`、`API_CONTRACT.md`、`FUNCTIONAL_DESIGN.md` 已定义数据表、接口合约和功能闭环。 |
 | M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、mock 数据接口、OpenAPI 文档和契约测试。 |
-| M2 数据库 | 已开始 | `services/api/db` 已提供初始 PostgreSQL schema 和 mock seed，下一步接入 Alembic/SQLAlchemy。 |
+| M2 数据库 | 进行中 | `services/api/db` 已提供初始 PostgreSQL schema 和 mock seed；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本已接入。`matches`、`predictions`、`teams` 已具备 repository 读库路径，默认仍使用 mock。 |
 
 ## 4. M0 基础设施
 

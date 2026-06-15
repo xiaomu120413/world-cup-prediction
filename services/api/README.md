@@ -8,6 +8,7 @@ Current scope:
 - Health/version endpoints.
 - Match, group, ranking, team and AI report endpoints.
 - Admin task trigger placeholders.
+- PostgreSQL schema, Alembic migration entrypoint and local seed script.
 
 ## Local Run
 
@@ -36,6 +37,25 @@ uvicorn app.main:app --reload --port 8001
 python -m pytest
 ```
 
+## Database
+
+Create a local `.env` from `.env.example`, then set `DATABASE_URL`.
+
+Run migrations:
+
+```bash
+alembic upgrade head
+```
+
+Or initialize schema and mock seed data directly:
+
+```bash
+python scripts/init_db.py
+```
+
+The first migration reuses `db/migrations/001_initial_schema.sql`, and mock data lives in `db/seeds/001_mock_data.sql`.
+
 ## Notes
 
-This M2 skeleton intentionally uses mock data. Database models, Alembic migrations, collectors and prediction jobs will be added after the API contract is stable.
+Public routes still read mock data while the database layer is being wired in. The next step is replacing route reads with repository queries and keeping the same response contract.
+Set `DATA_BACKEND=database` to read supported routes from PostgreSQL after schema and seed data are initialized.

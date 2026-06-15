@@ -1,0 +1,374 @@
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    Numeric,
+    Table,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID, VARCHAR
+
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def uuid_pk() -> Column:
+    return Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+
+
+competitions = Table(
+    "competitions",
+    metadata,
+    uuid_pk(),
+    Column("code", VARCHAR(64), nullable=False, unique=True),
+    Column("name", VARCHAR(128), nullable=False),
+    Column("host_countries", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("start_date", Date, nullable=False),
+    Column("end_date", Date, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+
+competition_stages = Table(
+    "competition_stages",
+    metadata,
+    uuid_pk(),
+    Column("competition_id", UUID(as_uuid=True), ForeignKey("competitions.id", ondelete="CASCADE"), nullable=False),
+    Column("code", VARCHAR(64), nullable=False),
+    Column("name", VARCHAR(128), nullable=False),
+    Column("stage_type", VARCHAR(32), nullable=False),
+    Column("sort_order", Integer, nullable=False, server_default=text("0")),
+    CheckConstraint("stage_type in ('group', 'knockout')", name="stage_type_valid"),
+    UniqueConstraint("competition_id", "code", name="uq_competition_stages_competition_code"),
+)
+
+teams = Table(
+    "teams",
+    metadata,
+    uuid_pk(),
+    Column("code", VARCHAR(32), nullable=False, unique=True),
+    Column("name_zh", VARCHAR(128), nullable=False),
+    Column("name_en", VARCHAR(128)),
+    Column("confederation", VARCHAR(32)),
+    Column("fifa_rank", Integer),
+    Column("elo_rating", Numeric(8, 2)),
+    Column("market_value_eur", Numeric(14, 2)),
+    Column("quality_status", VARCHAR(32), nullable=False, server_default=text("'estimated'")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+Index("idx_teams_rank", teams.c.fifa_rank)
+Index("idx_teams_elo", teams.c.elo_rating)
+
+team_aliases = Table(
+    "team_aliases",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_team_id", VARCHAR(128)),
+    Column("alias", VARCHAR(128), nullable=False),
+    Column("confidence", Numeric(4, 3), nullable=False, server_default=text("1.0")),
+    Column("is_primary", Boolean, nullable=False, server_default=text("false")),
+    UniqueConstraint("source", "source_team_id", name="uq_team_aliases_source_team_id"),
+    UniqueConstraint("source", "alias", name="uq_team_aliases_source_alias"),
+)
+
+players = Table(
+    "players",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("code", VARCHAR(64), nullable=False, unique=True),
+    Column("name_zh", VARCHAR(128), nullable=False),
+    Column("name_en", VARCHAR(128)),
+    Column("position", VARCHAR(32)),
+    Column("shirt_number", Integer),
+    Column("birth_date", Date),
+    Column("club_name", VARCHAR(128)),
+    Column("market_value_eur", Numeric(14, 2)),
+    Column("is_key_player", Boolean, nullable=False, server_default=text("false")),
+    Column("quality_status", VARCHAR(32), nullable=False, server_default=text("'estimated'")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+Index("idx_players_team_position", players.c.team_id, players.c.position)
+
+venues = Table(
+    "venues",
+    metadata,
+    uuid_pk(),
+    Column("code", VARCHAR(64), nullable=False, unique=True),
+    Column("name", VARCHAR(128), nullable=False),
+    Column("city", VARCHAR(128), nullable=False),
+    Column("country", VARCHAR(128), nullable=False),
+    Column("timezone", VARCHAR(64), nullable=False),
+    Column("capacity", Integer),
+    Column("altitude_m", Integer),
+    Column("surface", VARCHAR(64)),
+    Column("weather_profile", JSONB),
+)
+
+matches = Table(
+    "matches",
+    metadata,
+    uuid_pk(),
+    Column("public_id", VARCHAR(128), nullable=False, unique=True),
+    Column("competition_id", UUID(as_uuid=True), ForeignKey("competitions.id", ondelete="CASCADE"), nullable=False),
+    Column("stage_id", UUID(as_uuid=True), ForeignKey("competition_stages.id", ondelete="CASCADE"), nullable=False),
+    Column("home_team_id", UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False),
+    Column("away_team_id", UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False),
+    Column("venue_id", UUID(as_uuid=True), ForeignKey("venues.id")),
+    Column("kickoff_at", DateTime(timezone=True), nullable=False),
+    Column("status", VARCHAR(32), nullable=False, server_default=text("'scheduled'")),
+    Column("home_score", Integer),
+    Column("away_score", Integer),
+    Column("neutral_site", Boolean, nullable=False, server_default=text("true")),
+    Column("source_confidence", Numeric(4, 3), nullable=False, server_default=text("1.0")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("home_team_id <> away_team_id", name="different_teams"),
+    CheckConstraint("status in ('scheduled', 'live', 'finished', 'postponed')", name="status_valid"),
+)
+Index("idx_matches_kickoff", matches.c.kickoff_at)
+Index("idx_matches_status", matches.c.status)
+Index("idx_matches_stage", matches.c.stage_id)
+
+raw_snapshots = Table(
+    "raw_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_url", Text),
+    Column("source_type", VARCHAR(64), nullable=False),
+    Column("fetched_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("checksum", VARCHAR(128), nullable=False),
+    Column("payload", JSONB, nullable=False),
+    Column("parser_version", VARCHAR(64), nullable=False),
+    UniqueConstraint("source", "source_type", "checksum", name="uq_raw_snapshots_source_type_checksum"),
+)
+
+collector_runs = Table(
+    "collector_runs",
+    metadata,
+    uuid_pk(),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("job_type", VARCHAR(64), nullable=False),
+    Column("status", VARCHAR(32), nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("finished_at", DateTime(timezone=True)),
+    Column("records_read", Integer, nullable=False, server_default=text("0")),
+    Column("records_written", Integer, nullable=False, server_default=text("0")),
+    Column("error_message", Text),
+    Column("snapshot_ids", ARRAY(UUID(as_uuid=True))),
+    CheckConstraint("status in ('success', 'failed', 'partial')", name="status_valid"),
+)
+
+team_form_snapshots = Table(
+    "team_form_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("as_of_at", DateTime(timezone=True), nullable=False),
+    Column("recent_matches", Integer, nullable=False, server_default=text("10")),
+    Column("points_per_match", Numeric(5, 2)),
+    Column("goals_for_per_match", Numeric(5, 2)),
+    Column("goals_against_per_match", Numeric(5, 2)),
+    Column("lineup_stability_score", Numeric(5, 2)),
+    Column("injury_impact_score", Numeric(5, 2)),
+    Column("data_quality", VARCHAR(32), nullable=False, server_default=text("'partial'")),
+)
+Index("idx_team_form_team_time", team_form_snapshots.c.team_id, team_form_snapshots.c.as_of_at.desc())
+
+player_form_snapshots = Table(
+    "player_form_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("player_id", UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("as_of_at", DateTime(timezone=True), nullable=False),
+    Column("recent_matches", Integer, nullable=False, server_default=text("10")),
+    Column("minutes", Integer),
+    Column("goals", Integer),
+    Column("assists", Integer),
+    Column("shots", Integer),
+    Column("key_passes", Integer),
+    Column("rating", Numeric(4, 2)),
+    Column("availability_status", VARCHAR(32), nullable=False, server_default=text("'available'")),
+    Column("form_score", Numeric(5, 2)),
+    Column("source_count", Integer, nullable=False, server_default=text("1")),
+)
+Index("idx_player_form_player_time", player_form_snapshots.c.player_id, player_form_snapshots.c.as_of_at.desc())
+
+model_versions = Table(
+    "model_versions",
+    metadata,
+    uuid_pk(),
+    Column("name", VARCHAR(128), nullable=False),
+    Column("version", VARCHAR(64), nullable=False),
+    Column("model_type", VARCHAR(64), nullable=False),
+    Column("training_data_start", Date),
+    Column("training_data_end", Date),
+    Column("feature_schema", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("metrics", JSONB),
+    Column("is_active", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("name", "version", name="uq_model_versions_name_version"),
+)
+
+prediction_snapshots = Table(
+    "prediction_snapshots",
+    metadata,
+    uuid_pk(),
+    Column("model_version_id", UUID(as_uuid=True), ForeignKey("model_versions.id"), nullable=False),
+    Column("data_snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id")),
+    Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("scope", VARCHAR(64), nullable=False),
+    Column("status", VARCHAR(32), nullable=False),
+    Column("seed", Integer),
+    Column("notes", Text),
+    CheckConstraint("status in ('success', 'failed')", name="status_valid"),
+)
+
+match_predictions = Table(
+    "match_predictions",
+    metadata,
+    uuid_pk(),
+    Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False),
+    Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id", ondelete="CASCADE"), nullable=False),
+    Column("model_version_id", UUID(as_uuid=True), ForeignKey("model_versions.id"), nullable=False),
+    Column("home_win_prob", Numeric(6, 5), nullable=False),
+    Column("draw_prob", Numeric(6, 5), nullable=False),
+    Column("away_win_prob", Numeric(6, 5), nullable=False),
+    Column("home_expected_goals", Numeric(5, 2), nullable=False),
+    Column("away_expected_goals", Numeric(5, 2), nullable=False),
+    Column("confidence", VARCHAR(32), nullable=False),
+    Column("key_factors", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("home_win_prob >= 0 and home_win_prob <= 1", name="home_win_prob_range"),
+    CheckConstraint("draw_prob >= 0 and draw_prob <= 1", name="draw_prob_range"),
+    CheckConstraint("away_win_prob >= 0 and away_win_prob <= 1", name="away_win_prob_range"),
+    CheckConstraint("abs((home_win_prob + draw_prob + away_win_prob) - 1) < 0.001", name="probability_sum"),
+)
+Index("idx_match_predictions_match", match_predictions.c.match_id, match_predictions.c.generated_at.desc())
+
+scoreline_predictions = Table(
+    "scoreline_predictions",
+    metadata,
+    uuid_pk(),
+    Column("match_prediction_id", UUID(as_uuid=True), ForeignKey("match_predictions.id", ondelete="CASCADE"), nullable=False),
+    Column("home_goals", Integer, nullable=False),
+    Column("away_goals", Integer, nullable=False),
+    Column("probability", Numeric(6, 5), nullable=False),
+    Column("rank", Integer, nullable=False),
+    UniqueConstraint("match_prediction_id", "home_goals", "away_goals", name="uq_scoreline_predictions_match_score"),
+)
+
+group_standings = Table(
+    "group_standings",
+    metadata,
+    uuid_pk(),
+    Column("stage_id", UUID(as_uuid=True), ForeignKey("competition_stages.id", ondelete="CASCADE"), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False),
+    Column("played", Integer, nullable=False, server_default=text("0")),
+    Column("wins", Integer, nullable=False, server_default=text("0")),
+    Column("draws", Integer, nullable=False, server_default=text("0")),
+    Column("losses", Integer, nullable=False, server_default=text("0")),
+    Column("goals_for", Integer, nullable=False, server_default=text("0")),
+    Column("goals_against", Integer, nullable=False, server_default=text("0")),
+    Column("goal_diff", Integer, nullable=False, server_default=text("0")),
+    Column("points", Integer, nullable=False, server_default=text("0")),
+    Column("rank", Integer, nullable=False),
+    Column("snapshot_id", UUID(as_uuid=True), ForeignKey("raw_snapshots.id")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+
+group_simulations = Table(
+    "group_simulations",
+    metadata,
+    uuid_pk(),
+    Column("stage_id", UUID(as_uuid=True), ForeignKey("competition_stages.id", ondelete="CASCADE"), nullable=False),
+    Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id", ondelete="CASCADE"), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False),
+    Column("rank_1_prob", Numeric(6, 5), nullable=False),
+    Column("rank_2_prob", Numeric(6, 5), nullable=False),
+    Column("qualify_prob", Numeric(6, 5), nullable=False),
+    Column("expected_points", Numeric(5, 2), nullable=False),
+    UniqueConstraint("stage_id", "prediction_snapshot_id", "team_id", name="uq_group_simulations_stage_snapshot_team"),
+)
+
+ranking_predictions = Table(
+    "ranking_predictions",
+    metadata,
+    uuid_pk(),
+    Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id", ondelete="CASCADE"), nullable=False),
+    Column("ranking_type", VARCHAR(32), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False),
+    Column("probability", Numeric(6, 5), nullable=False),
+    Column("delta", Numeric(6, 5)),
+    Column("rank", Integer, nullable=False),
+    Column("reason", VARCHAR(128)),
+    CheckConstraint("ranking_type in ('champion', 'semifinal', 'darkhorse')", name="ranking_type_valid"),
+)
+
+news_items = Table(
+    "news_items",
+    metadata,
+    uuid_pk(),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_url", Text, nullable=False, unique=True),
+    Column("title", Text, nullable=False),
+    Column("summary", Text),
+    Column("language", VARCHAR(16), nullable=False, server_default=text("'zh'")),
+    Column("published_at", DateTime(timezone=True)),
+    Column("fetched_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("related_team_ids", ARRAY(UUID(as_uuid=True))),
+    Column("related_player_ids", ARRAY(UUID(as_uuid=True))),
+    Column("checksum", VARCHAR(128), nullable=False, unique=True),
+)
+
+ai_insights = Table(
+    "ai_insights",
+    metadata,
+    uuid_pk(),
+    Column("news_item_id", UUID(as_uuid=True), ForeignKey("news_items.id", ondelete="SET NULL")),
+    Column("event_type", VARCHAR(64), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id")),
+    Column("player_id", UUID(as_uuid=True), ForeignKey("players.id")),
+    Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id")),
+    Column("impact_area", VARCHAR(64), nullable=False),
+    Column("impact_score", Numeric(5, 2), nullable=False),
+    Column("confidence", Numeric(4, 3), nullable=False),
+    Column("evidence_text", Text, nullable=False),
+    Column("source_url", Text),
+    Column("is_model_eligible", Boolean, nullable=False, server_default=text("false")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)
+
+ai_explanations = Table(
+    "ai_explanations",
+    metadata,
+    uuid_pk(),
+    Column("target_type", VARCHAR(32), nullable=False),
+    Column("target_id", UUID(as_uuid=True), nullable=False),
+    Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id")),
+    Column("title", VARCHAR(128), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("confidence_label", VARCHAR(32), nullable=False),
+    Column("evidence_refs", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+)

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     environment: str = "local"
     admin_token: str = "change-me"
     allowed_origins: str = "http://127.0.0.1:4173,http://localhost:4173"
+    data_backend: str = "mock"
+    database_url: str = "postgresql+psycopg://worldcup:worldcup@127.0.0.1:5432/worldcup_prediction"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -21,4 +23,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
