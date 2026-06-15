@@ -64,16 +64,16 @@ export type TeamProfile = {
 }
 
 export const featuredMatch: Match = {
-  id: 'usa-paraguay',
+  id: 'usa-paraguay-2026-06-13',
   home: '美国',
   away: '巴拉圭',
   time: '6月13日 01:00',
   stage: '小组赛',
-  venue: '洛杉矶',
+  venue: '洛杉矶玫瑰碗',
   status: '最终赛前版',
   confidence: '中等信心',
   tendency: '美国略占优',
-  insight: '美国整体评分略高，但巴拉圭反击效率让平局和小比分概率上升。',
+  insight: '美国整体评分略高，但巴拉圭反击效率让平局和小比分概率上升。本场更像是控球优势与转换效率之间的对抗。',
   probabilities: [
     { label: '美国胜', value: 44 },
     { label: '平', value: 27 },
@@ -106,17 +106,17 @@ export const championTop = [
 ]
 
 export const groupATeams: GroupTeam[] = [
-  { rank: 1, name: '墨西哥', record: '1胜0平0负', points: 3, goals: '进2失0', qualification: 98.5 },
-  { rank: 2, name: '韩国', record: '1胜0平0负', points: 3, goals: '进2失1', qualification: 97.7 },
-  { rank: 3, name: '捷克', record: '0胜0平1负', points: 0, goals: '进1失2', qualification: 51.2 },
-  { rank: 4, name: '南非', record: '0胜0平1负', points: 0, goals: '进0失2', qualification: 22.4 }
+  { rank: 1, name: '墨西哥', record: '1胜 0平 0负', points: 3, goals: '进2失0', qualification: 98.5 },
+  { rank: 2, name: '韩国', record: '1胜 0平 0负', points: 3, goals: '进2失1', qualification: 97.7 },
+  { rank: 3, name: '捷克', record: '0胜 0平 1负', points: 0, goals: '进1失2', qualification: 51.2 },
+  { rank: 4, name: '南非', record: '0胜 0平 1负', points: 0, goals: '进0失2', qualification: 22.4 }
 ]
 
 export const championRankings: RankingTeam[] = [
   { rank: 1, name: '法国', probability: 15.8, delta: 1.2, reason: '阵容深度' },
   { rank: 2, name: '巴西', probability: 13.6, delta: 0.8, reason: '进攻状态' },
   { rank: 3, name: '英格兰', probability: 12.9, delta: -0.3, reason: '路径难度' },
-  { rank: 4, name: '西班牙', probability: 11.4, delta: 0.4, reason: '防守稳定' },
+  { rank: 4, name: '西班牙', probability: 11.4, delta: 0.4, reason: '控球稳定' },
   { rank: 5, name: '阿根廷', probability: 10.7, delta: -0.6, reason: '伤停影响' }
 ]
 
@@ -124,7 +124,7 @@ export const semiFinalRankings: RankingTeam[] = [
   { rank: 1, name: '法国', probability: 42.6, delta: 2.3, reason: '阵容深度' },
   { rank: 2, name: '巴西', probability: 39.4, delta: 1.1, reason: '进攻状态' },
   { rank: 3, name: '英格兰', probability: 37.9, delta: -0.7, reason: '路径难度' },
-  { rank: 4, name: '西班牙', probability: 35.2, delta: 1.0, reason: '控球稳定' },
+  { rank: 4, name: '西班牙', probability: 35.2, delta: 1.0, reason: '中场控制' },
   { rank: 5, name: '阿根廷', probability: 32.8, delta: -1.2, reason: '淘汰赛路径' }
 ]
 
@@ -139,11 +139,11 @@ export const darkHorseRankings: RankingTeam[] = [
 export const franceProfile: TeamProfile = {
   id: 'france',
   name: '法国',
-  subtitle: 'FIFA排名 2 · Elo 2104 · A组',
+  subtitle: 'FIFA 排名 2 · Elo 2104 · D 组',
   updatedAt: '数据更新于 18:00',
-  summary: '法国阵容深度和进攻创造力领先，但后防伤停让淘汰赛稳定性略受影响。',
+  summary: '法国阵容深度和进攻创造力领先，冠军概率保持第一档。主要变量是后防伤停与淘汰赛潜在路径。',
   probabilities: [
-    { label: '冠军概率', value: '15.8%', delta: '▲1.2%' },
+    { label: '冠军概率', value: '15.8%', delta: '+1.2%' },
     { label: '四强概率', value: '42.6%' },
     { label: '小组第一', value: '71.4%' }
   ],
@@ -154,8 +154,8 @@ export const franceProfile: TeamProfile = {
     { label: '稳定性', value: 8.3 }
   ],
   form: {
-    headline: '近10场 7胜2平1负 · 进21失8',
-    stats: ['对Top30 3胜1平1负', '零封率 40%', '场均进球 2.1']
+    headline: '近 10 场 7 胜 2 平 1 负 · 进 21 球',
+    stats: ['对 Top30：3胜 1平 1负', '零封率：40%', '场均进球：2.1']
   },
   players: [
     { name: '姆巴佩', role: '前锋', form: 9.2 },
@@ -167,4 +167,3 @@ export const franceProfile: TeamProfile = {
     { label: '淘汰赛路径偏难', value: -1.1 }
   ]
 }
-

@@ -305,13 +305,13 @@ export async function getTeamProfile(teamId = 'france'): Promise<TeamProfile> {
   return {
     id: response.data.team.id,
     name: response.data.team.name,
-    subtitle: `FIFA排名 ${response.data.team.fifa_rank || '-'} · Elo ${response.data.team.elo_rating || '-'}`,
+    subtitle: `FIFA 排名 ${response.data.team.fifa_rank || '-'} · Elo ${response.data.team.elo_rating || '-'}`,
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
     summary: response.data.summary,
     probabilities: response.data.probabilities.map(item => ({
       label: item.label,
       value: `${percent(item.value)}%`,
-      delta: item.delta === undefined ? undefined : `${item.delta >= 0 ? '▲' : '▼'}${Math.abs(percent(item.delta))}%`
+      delta: item.delta === undefined ? undefined : `${item.delta >= 0 ? '+' : '-'}${Math.abs(percent(item.delta))}%`
     })),
     ratings: response.data.ratings,
     form: response.data.form,
@@ -325,7 +325,7 @@ export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
     return {
       title: 'A组形势',
       subtitle: '小组赛 · 已完成 2/6 场',
-      summary: '墨西哥和韩国出线优势明显，捷克仍保留第三名晋级机会。',
+      summary: '墨西哥和韩国出线优势明显，捷克仍保留第三名晋级机会。南非需要下一场拿分才能避免提前进入低概率区。',
       teams: groupATeams,
       updatedAt: '模拟更新于 18:00'
     }
@@ -342,7 +342,7 @@ export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
   return {
     title: `${detailResponse.data.name}形势`,
     subtitle: `小组赛 · 已完成 ${detailResponse.data.standings.filter(item => item.points > 0).length}/6 场`,
-    summary: '墨西哥和韩国出线优势明显，捷克仍保留第三名晋级机会。',
+    summary: '小组前两名优势扩大，但第三名路径仍取决于末轮净胜球和交叉区排名。',
     teams: detailResponse.data.standings.map(item => ({
       rank: item.rank,
       name: item.team.name,

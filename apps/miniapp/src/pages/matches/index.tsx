@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
+import { Flag } from '@/components/Flag'
+import { Icon } from '@/components/Icon'
 import { ProbabilitySummary } from '@/components/ProbabilitySummary'
 import { ProgressRow } from '@/components/ProgressRow'
 import { Section } from '@/components/Section'
@@ -45,89 +47,98 @@ export default function MatchesPage() {
 
   return (
     <View className='page page--matchday'>
-      <View className='matchday-hero' onClick={() => goTo(routes.matchDetail)}>
-        <View className='matchday-hero__top'>
-          <View>
-            <Text className='matchday-hero__eyebrow'>WORLD CUP AI BOARD</Text>
-            <Text className='matchday-hero__title'>今日预测</Text>
-          </View>
-          <Text className='matchday-hero__status'>{match.status}</Text>
-        </View>
-
-        <View className='matchday-hero__fixture'>
-          <View className='team-badge'>
-            <Text className='team-badge__abbr'>USA</Text>
-            <Text className='team-badge__name'>{match.home}</Text>
-          </View>
-          <View className='matchday-hero__center'>
-            <Text className='matchday-hero__time'>{match.time}</Text>
-            <Text className='matchday-hero__versus'>VS</Text>
-            <Text className='matchday-hero__venue'>{match.venue}</Text>
-          </View>
-          <View className='team-badge team-badge--away'>
-            <Text className='team-badge__abbr'>PAR</Text>
-            <Text className='team-badge__name'>{match.away}</Text>
+      <View className='app-header app-header--home'>
+        <View>
+          <Text className='app-title'>世界杯预测</Text>
+          <View className='subline'>
+            <View className='subline__bar' />
+            <Text>今日赛程 · 6月13日</Text>
           </View>
         </View>
-
-        <View className='prediction-strip'>
-          <Text className='prediction-strip__label'>AI 倾向</Text>
-          <Text className='prediction-strip__value'>{match.tendency}</Text>
-          <Text className='prediction-strip__confidence'>{match.confidence}</Text>
+        <View className='header-ai' onClick={() => goTo(routes.matchDetail)}>
+          <Icon name='ai' color='#2563eb' size={30} />
+          <Text>AI 赛前报告</Text>
         </View>
+      </View>
 
-        <ProbabilitySummary probabilities={match.probabilities} />
-
-        <View className='hero-insight'>
-          <Text className='hero-insight__label'>赛前信号</Text>
-          <Text className='hero-insight__text'>{match.insight}</Text>
-        </View>
+      <View className='updated-line'>
+        <Icon name='clock' color='#94a3b8' size={26} />
+        <Text>{homeData.updatedAt}</Text>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新赛前数据' detail='稍后显示最新预测快照' />}
       {loadState === 'error' && <StatusView title='赛前数据暂未更新' detail='当前显示本地预测快照' />}
 
-      <View className='quick-grid'>
-        <View className='quick-card'>
-          <Text className='quick-card__value'>50k</Text>
-          <Text className='quick-card__label'>模拟次数</Text>
+      <View className='focus-card' onClick={() => goTo(routes.matchDetail)}>
+        <View className='focus-card__top'>
+          <View>
+            <Text className='card-eyebrow'>今日重点</Text>
+            <Text className='card-title'>{match.stage}</Text>
+          </View>
+          <Text className='status-pill'>{match.status}</Text>
         </View>
-        <View className='quick-card'>
-          <Text className='quick-card__value'>1.42</Text>
-          <Text className='quick-card__label'>美国 xG</Text>
+
+        <View className='fixture'>
+          <View className='fixture__team'>
+            <Flag team={match.home} size='lg' />
+            <Text className='fixture__name'>{match.home}</Text>
+          </View>
+          <View className='fixture__middle'>
+            <Text className='fixture__time'>{match.time}</Text>
+            <Text className='fixture__vs'>VS</Text>
+            <Text className='fixture__venue'>{match.venue}</Text>
+          </View>
+          <View className='fixture__team fixture__team--away'>
+            <Flag team={match.away} size='lg' />
+            <Text className='fixture__name'>{match.away}</Text>
+          </View>
         </View>
-        <View className='quick-card'>
-          <Text className='quick-card__value'>1-1</Text>
-          <Text className='quick-card__label'>最高比分</Text>
+
+        <ProbabilitySummary probabilities={match.probabilities} />
+
+        <View className='ai-summary-inline'>
+          <AIReportCard title='AI 判断' status={match.confidence}>
+            {match.insight}
+          </AIReportCard>
+          <View className='report-link'>
+            <Text>查看 AI 赛前报告</Text>
+            <Icon name='chevron' color='#2563eb' size={30} />
+          </View>
         </View>
       </View>
 
-      <Section title='AI 简报'>
-        <View onClick={() => goTo(routes.matchDetail)}>
-          <AIReportCard title='模型结论' status='可解释预测'>
-            美国胜率只领先 15 个百分点，真正的风险在巴拉圭反击效率和低比分平局。
-          </AIReportCard>
-          <View className='primary-link'>
-            <Text>查看 AI 赛前报告</Text>
-          </View>
-        </View>
-      </Section>
-
       <Section title='即将开始'>
         {homeData.upcomingMatches.map(item => (
-          <View className='list-row' key={item.id} onClick={() => goTo(routes.matchDetail)}>
-            <View>
-              <Text className='list-row__title'>{item.home} vs {item.away}</Text>
-              <Text className='list-row__meta'>{item.time} · 小组赛</Text>
+          <View className='list-row match-row' key={item.id} onClick={() => goTo(routes.matchDetail)}>
+            <View className='match-row__teams'>
+              <Flag team={item.home} size='sm' />
+              <Text className='list-row__title'>{item.home}</Text>
+              <Text className='muted-inline'>vs</Text>
+              <Flag team={item.away} size='sm' />
+              <Text className='list-row__title'>{item.away}</Text>
             </View>
-            <Text className='list-row__right'>{item.tendency}</Text>
+            <View className='list-row__right'>
+              <Text>{item.time}</Text>
+              <Text className='trend-pill'>{item.tendency}</Text>
+            </View>
           </View>
         ))}
       </Section>
 
-      <Section title='冠军概率' action='查看全部'>
-        {homeData.championTop.map(team => (
-          <ProgressRow key={team.name} label={team.name} value={team.probability} />
+      <Section title='冠军概率' action='全部'>
+        {homeData.championTop.map((team, index) => (
+          <View className='champion-row' key={team.name} onClick={() => goTo(routes.predictions)}>
+            <View className='rank-medal'>
+              <Icon name='medal' color={index === 0 ? '#f59e0b' : '#94a3b8'} size={30} />
+              <Text>{index + 1}</Text>
+            </View>
+            <Flag team={team.name} size='sm' />
+            <Text className='champion-row__name'>{team.name}</Text>
+            <View className='champion-row__bar'>
+              <ProgressRow label='' value={team.probability} />
+            </View>
+            <Text className='champion-row__value'>{team.probability}%</Text>
+          </View>
         ))}
       </Section>
 
