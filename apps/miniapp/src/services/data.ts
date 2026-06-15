@@ -128,6 +128,7 @@ type ApiDataStatus = {
   mode: 'mock' | 'database'
   canonical_ready: boolean
   player_form_ready: boolean
+  primary_source?: string
   table_counts: Record<string, number>
   latest_collector_runs: Array<{ source: string; job_type: string; status: string }>
 }
@@ -222,9 +223,10 @@ function formatProfileStat(stat: string | { label: string; value?: string | numb
 
 function mapDataStatus(status: ApiDataStatus): DataSourceStatus {
   const latestRun = status.latest_collector_runs[0]
+  const primarySource = status.primary_source || latestRun?.source || status.backend
   return {
     label: status.mode === 'database' ? 'DB' : 'Mock',
-    detail: latestRun ? `${latestRun.source}/${latestRun.job_type}` : status.backend,
+    detail: primarySource === 'dongqiudi' ? 'dongqiudi/homepage' : latestRun ? `${latestRun.source}/${latestRun.job_type}` : status.backend,
     isDatabase: status.mode === 'database' && status.canonical_ready
   }
 }
@@ -245,13 +247,14 @@ async function requestData<T>(path: string): Promise<Envelope<T>> {
 
 function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiReport): Match {
   const probabilities = prediction?.probabilities
-  const homeWin = probabilities?.home_win ?? apiMatch.prediction?.home_win_prob ?? featuredMatch.probabilities[0].value / 100
-  const draw = probabilities?.draw ?? apiMatch.prediction?.draw_prob ?? featuredMatch.probabilities[1].value / 100
-  const awayWin = probabilities?.away_win ?? apiMatch.prediction?.away_win_prob ?? featuredMatch.probabilities[2].value / 100
+  const hasPrediction = Boolean(probabilities || apiMatch.prediction)
+  const homeWin = probabilities?.home_win ?? apiMatch.prediction?.home_win_prob ?? 0
+  const draw = probabilities?.draw ?? apiMatch.prediction?.draw_prob ?? 0
+  const awayWin = probabilities?.away_win ?? apiMatch.prediction?.away_win_prob ?? 0
   const scorelines = prediction?.scorelines?.map(item => ({
     score: item.score || `${item.home_goals}-${item.away_goals}`,
     probability: item.probability > 1 ? item.probability : percent(item.probability)
-  })) || featuredMatch.scorelines
+  })) || []
 
   return {
     id: apiMatch.id,
@@ -259,11 +262,11 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     away: apiMatch.away_team.name,
     time: formatKickoff(apiMatch.kickoff_at),
     stage: apiMatch.stage || featuredMatch.stage,
-    venue: apiMatch.venue?.name || apiMatch.venue?.city || featuredMatch.venue,
+    venue: apiMatch.venue?.name || apiMatch.venue?.city || '场地待同步',
     status: apiMatch.status === 'scheduled' ? '最终赛前版' : apiMatch.status,
-    confidence: report?.confidence_label || formatConfidence(prediction?.confidence || apiMatch.prediction?.confidence),
-    tendency: apiMatch.prediction?.tendency || featuredMatch.tendency,
-    insight: report?.content || apiMatch.ai_summary || featuredMatch.insight,
+    confidence: hasPrediction ? report?.confidence_label || formatConfidence(prediction?.confidence || apiMatch.prediction?.confidence) : '预测待重算',
+    tendency: apiMatch.prediction?.tendency || (hasPrediction ? '模型已重算' : '真实赛程已同步'),
+    insight: report?.content || apiMatch.ai_summary || (hasPrediction ? `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已基于当前标准表完成 baseline 预测，后续会接入更多球员与球队状态特征。` : `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已从真实数据源同步，等待模型重算。`),
     probabilities: [
       { label: `${apiMatch.home_team.name}胜`, value: percent(homeWin) },
       { label: '平', value: percent(draw) },
@@ -274,7 +277,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
       label: item.label,
       value: item.value || 0,
       note: item.note || '来自 AI 情报'
-    })) || featuredMatch.evidence
+    })) || []
   }
 }
 

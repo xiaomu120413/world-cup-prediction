@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from html.parser import HTMLParser
+import re
 from typing import Protocol
 from urllib.parse import urljoin
 
@@ -87,6 +89,7 @@ class DongqiudiHomepageAdapter:
     source = "dongqiudi"
     source_url = "https://pc.dongqiudi.com/"
     parser_version = "dongqiudi_homepage_v1"
+    football_competitions = {"世界杯"}
 
     def __init__(self, source_type: str = "homepage", timeout_seconds: float = 10.0):
         if source_type not in {"homepage", "schedule", "news", "league_data"}:
@@ -114,6 +117,7 @@ class DongqiudiHomepageAdapter:
         links = extractor.links[:120]
         payload = {
             "items": self.extract_items(text_blocks, links),
+            "matches": self.extract_matches(text_blocks),
             "title": extractor.title,
             "source_url": source_url or self.source_url,
             "text_blocks": text_blocks,
@@ -135,19 +139,117 @@ class DongqiudiHomepageAdapter:
             for item in links
             if any(keyword in item["text"] for keyword in football_keywords)
         ]
-        match_blocks = []
-        for index, text in enumerate(text_blocks):
-            if text in {"世界杯", "友谊赛"} and index + 3 < len(text_blocks):
-                match_blocks.append(
-                    {
-                        "type": "match_block",
-                        "competition": text,
-                        "home": text_blocks[index + 1],
-                        "time_or_score": text_blocks[index + 2],
-                        "away": text_blocks[index + 3],
-                    }
-                )
+        match_blocks = [
+            {
+                "type": "match_block",
+                "competition": item["competition"],
+                "home": item["home"],
+                "time_or_score": item.get("score_text") or item.get("time_text"),
+                "away": item["away"],
+            }
+            for item in DongqiudiHomepageAdapter.extract_matches(text_blocks)
+        ]
         return [*match_blocks[:20], *news_items[:80]]
+
+    @classmethod
+    def extract_matches(cls, text_blocks: list[str]) -> list[dict]:
+        match_date = cls.extract_match_date(text_blocks)
+        values = []
+        for index, text in enumerate(text_blocks):
+            if text not in cls.football_competitions:
+                continue
+            parsed = cls.parse_match_at(text_blocks, index, match_date)
+            if parsed:
+                values.append(parsed)
+        return values[:20]
+
+    @staticmethod
+    def extract_match_date(text_blocks: list[str]) -> str:
+        current_year = datetime.now().year
+        for text in text_blocks:
+            match = re.search(r"(\d{1,2})月(\d{1,2})日", text)
+            if match:
+                return f"{current_year:04d}-{int(match.group(1)):02d}-{int(match.group(2)):02d}"
+        now = datetime.now()
+        return f"{current_year:04d}-{now.month:02d}-{now.day:02d}"
+
+    @classmethod
+    def parse_match_at(cls, text_blocks: list[str], index: int, match_date: str) -> dict | None:
+        if index + 3 >= len(text_blocks):
+            return None
+        competition = text_blocks[index]
+        cursor = index + 1
+        status_token = None
+        if cls.is_status_token(text_blocks[cursor]):
+            status_token = text_blocks[cursor]
+            cursor += 1
+        if cursor + 2 >= len(text_blocks):
+            return None
+
+        home = text_blocks[cursor]
+        center = text_blocks[cursor + 1]
+        away = text_blocks[cursor + 2]
+        if not cls.looks_like_team(home) or not cls.looks_like_team(away):
+            return None
+        if not (cls.is_score(center) or cls.is_time(center)):
+            return None
+
+        home_score = None
+        away_score = None
+        status = "scheduled"
+        kickoff_time = center if cls.is_time(center) else "00:00"
+        if cls.is_score(center):
+            score_parts = [int(value) for value in re.findall(r"\d+", center)[:2]]
+            if len(score_parts) == 2:
+                home_score, away_score = score_parts
+            status = "finished" if status_token == "FT" else "live"
+        if status_token and re.fullmatch(r"\d+'", status_token):
+            status = "live"
+
+        return {
+            "public_id": f"dongqiudi-{cls.slug(home)}-{cls.slug(away)}-{match_date}",
+            "competition": competition,
+            "competition_code": "world_cup_2026",
+            "stage_code": "world-cup-homepage" if competition == "世界杯" else f"{cls.slug(competition)}-homepage",
+            "stage_name": competition,
+            "stage_type": "group",
+            "home": home,
+            "away": away,
+            "kickoff_at": f"{match_date}T{kickoff_time}:00+08:00",
+            "status": status,
+            "home_score": home_score,
+            "away_score": away_score,
+            "neutral_site": True,
+            "source_confidence": 0.7,
+            "status_text": status_token,
+            "score_text": center if cls.is_score(center) else None,
+            "time_text": center if cls.is_time(center) else None,
+        }
+
+    @staticmethod
+    def is_status_token(value: str) -> bool:
+        return value in {"FT", "HT"} or bool(re.fullmatch(r"\d+'", value))
+
+    @staticmethod
+    def is_score(value: str) -> bool:
+        return bool(re.fullmatch(r"\d+\s*-\s*\d+", value))
+
+    @staticmethod
+    def is_time(value: str) -> bool:
+        return bool(re.fullmatch(r"\d{1,2}:\d{2}", value))
+
+    @staticmethod
+    def looks_like_team(value: str) -> bool:
+        if not value or len(value) > 20:
+            return False
+        if re.search(r"\d{1,2}-\d{1,2}|\d{1,2}:\d{2}|评论|评|播放|：|，|。|·", value):
+            return False
+        return True
+
+    @staticmethod
+    def slug(value: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff]+", "-", value.strip().lower()).strip("-")
+        return slug or "team"
 
 
 SAMPLE_PAYLOADS = {

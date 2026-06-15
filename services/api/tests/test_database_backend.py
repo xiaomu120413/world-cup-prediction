@@ -64,7 +64,7 @@ def test_database_home_contract(database_client):
     response = database_client.get("/api/v1/home")
     assert response.status_code == 200
     body = response.json()["data"]
-    assert body["featured_match"]["id"] == "usa-paraguay-2026-06-13"
+    assert body["featured_match"]["id"].startswith(("dongqiudi-", "usa-paraguay-2026-06-13"))
     assert len(body["champion_rankings"]) == 3
 
 

@@ -234,6 +234,13 @@ class CollectorRunner:
         stage_codes.update(item["stage_code"] for item in standing_values)
         if not stage_codes:
             return {}
+        stage_metadata = {
+            item["stage_code"]: {
+                "name": item.get("stage_name") or item["stage_code"].replace("-", " ").title(),
+                "stage_type": item.get("stage_type") or ("group" if item["stage_code"].startswith("group") else "knockout"),
+            }
+            for item in [*match_values, *standing_values]
+        }
 
         competition_id = self.ensure_default_competition()
         existing = self.db.execute(
@@ -245,14 +252,25 @@ class CollectorRunner:
             )
         ).mappings().all()
         stage_ids = {row["code"]: row["id"] for row in existing}
+        for row in existing:
+            metadata = stage_metadata.get(row["code"])
+            if metadata:
+                self.db.execute(
+                    competition_stages.update()
+                    .where(competition_stages.c.id == row["id"])
+                    .values(name=metadata["name"], stage_type=metadata["stage_type"])
+                )
         missing = [code for code in stage_codes if code not in stage_ids]
         if missing:
             rows = [
                 {
                     "competition_id": competition_id,
                     "code": code,
-                    "name": code.replace("-", " ").title(),
-                    "stage_type": "group" if code.startswith("group") else "knockout",
+                    "name": stage_metadata.get(code, {}).get("name", code.replace("-", " ").title()),
+                    "stage_type": stage_metadata.get(code, {}).get(
+                        "stage_type",
+                        "group" if code.startswith("group") else "knockout",
+                    ),
                     "sort_order": 1,
                 }
                 for code in missing

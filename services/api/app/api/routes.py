@@ -66,6 +66,7 @@ def data_status(settings: Settings = Depends(get_settings)):
             "mode": "mock",
             "canonical_ready": False,
             "player_form_ready": False,
+            "primary_source": "mock",
             "table_counts": {},
             "latest_collector_runs": [],
         },
@@ -123,7 +124,12 @@ def matches_today(
         matches = cached_json(
             settings,
             f"public:matches:today:{date or 'default'}:{include_prediction}",
-            lambda: with_public_repository(lambda repo: repo.list_matches(include_prediction=include_prediction)),
+            lambda: with_public_repository(
+                lambda repo: repo.list_matches(
+                    include_prediction=include_prediction,
+                    real_only=repo.has_real_matches(),
+                )
+            ),
         )
         if matches:
             return list_envelope(matches, updated_at=now_iso(), date=date)

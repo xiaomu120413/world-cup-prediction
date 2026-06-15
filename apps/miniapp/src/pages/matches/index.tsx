@@ -58,7 +58,7 @@ export default function MatchesPage() {
           <Text className='app-title'>世界杯预测</Text>
           <View className='subline'>
             <View className='subline__bar' />
-            <Text>今日赛程 · 6月13日</Text>
+            <Text>今日赛程</Text>
           </View>
         </View>
         <View className='header-ai' onClick={() => goTo(routes.matchDetail)}>

@@ -101,9 +101,16 @@ class PublicDataRepository:
         return PublicDataRepository.matches_query().where(matches.c.public_id == public_id)
 
     @staticmethod
-    def matches_query(limit: int | None = None) -> Select:
+    def matches_query(limit: int | None = None, real_only: bool = False) -> Select:
         home = teams.alias("home_team")
         away = teams.alias("away_team")
+        real_source_rank = case((matches.c.public_id.like("dongqiudi-%"), 0), else_=1)
+        status_rank = case(
+            (matches.c.status == "live", 0),
+            (matches.c.status == "scheduled", 1),
+            (matches.c.status == "finished", 2),
+            else_=3,
+        )
         query = (
             select(
                 matches.c.public_id,
@@ -133,8 +140,10 @@ class PublicDataRepository:
             .join(home, matches.c.home_team_id == home.c.id)
             .join(away, matches.c.away_team_id == away.c.id)
             .outerjoin(venues, matches.c.venue_id == venues.c.id)
-            .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+            .order_by(real_source_rank.asc(), status_rank.asc(), matches.c.kickoff_at.desc(), matches.c.public_id.asc())
         )
+        if real_only:
+            query = query.where(matches.c.public_id.like("dongqiudi-%"))
         if limit is not None:
             query = query.limit(limit)
         return query
@@ -273,6 +282,7 @@ class PublicDataRepository:
         table_counts = {
             "teams": self.count_rows(teams),
             "matches": self.count_rows(matches),
+            "dongqiudi_matches": self.count_real_matches(),
             "players": self.count_rows(players),
             "player_form_snapshots": self.count_rows(player_form_snapshots),
             "group_standings": self.count_rows(group_standings),
@@ -300,6 +310,7 @@ class PublicDataRepository:
             "mode": "database",
             "canonical_ready": table_counts["teams"] > 0 and table_counts["matches"] > 0,
             "player_form_ready": table_counts["players"] > 0 and table_counts["player_form_snapshots"] > 0,
+            "primary_source": "dongqiudi" if table_counts["dongqiudi_matches"] > 0 else "database",
             "table_counts": table_counts,
             "latest_collector_runs": [
                 {
@@ -319,6 +330,13 @@ class PublicDataRepository:
     def count_rows(self, table) -> int:
         return int(self.db.execute(select(func.count()).select_from(table)).scalar_one())
 
+    def count_real_matches(self) -> int:
+        return int(
+            self.db.execute(
+                select(func.count()).select_from(matches).where(matches.c.public_id.like("dongqiudi-%"))
+            ).scalar_one()
+        )
+
     def list_rankings(self, ranking_type: str, limit: int) -> list[dict]:
         rows = self.db.execute(self.rankings_query(ranking_type, limit)).mappings().all()
         return [
@@ -332,8 +350,20 @@ class PublicDataRepository:
             for row in rows
         ]
 
-    def list_matches(self, limit: int | None = None, include_prediction: bool = False) -> list[dict]:
-        rows = self.db.execute(self.matches_query(limit)).mappings().all()
+    def has_real_matches(self) -> bool:
+        return bool(
+            self.db.execute(
+                select(matches.c.id).where(matches.c.public_id.like("dongqiudi-%")).limit(1)
+            ).first()
+        )
+
+    def list_matches(
+        self,
+        limit: int | None = None,
+        include_prediction: bool = False,
+        real_only: bool = False,
+    ) -> list[dict]:
+        rows = self.db.execute(self.matches_query(limit, real_only=real_only)).mappings().all()
         values = [match_payload(row) for row in rows]
         if include_prediction:
             for value in values:
@@ -585,7 +615,7 @@ class PublicDataRepository:
         }
 
     def get_home_data(self, date: str | None, timezone: str) -> dict | None:
-        matches_value = self.list_matches(limit=10, include_prediction=True)
+        matches_value = self.list_matches(limit=10, include_prediction=True, real_only=self.has_real_matches())
         if not matches_value:
             return None
         featured_match = matches_value[0]

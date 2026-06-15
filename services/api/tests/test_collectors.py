@@ -22,8 +22,10 @@ def test_dongqiudi_homepage_adapter_parses_static_html():
     <html>
       <head><title>懂球帝</title></head>
       <body>
+        <div>今日重要赛事</div><div>06月15日 · 2场</div>
+        <div>世界杯</div><div>FT</div><div>科特迪瓦</div><div>1 - 0</div><div>厄瓜多尔</div>
+        <div>世界杯</div><div>瑞典</div><div>10:00</div><div>突尼斯</div>
         <a href="/articles/1">足球 世界杯 德国7-1大胜库拉索</a>
-        <div>世界杯</div><div>德国</div><div>7 - 1</div><div>库拉索</div>
       </body>
     </html>
     """
@@ -35,6 +37,9 @@ def test_dongqiudi_homepage_adapter_parses_static_html():
     assert snapshot.payload["title"] == "懂球帝"
     assert any(item["type"] == "link" for item in snapshot.payload["items"])
     assert any(item["type"] == "match_block" for item in snapshot.payload["items"])
+    assert snapshot.payload["matches"][0]["home"] == "科特迪瓦"
+    assert snapshot.payload["matches"][0]["away"] == "厄瓜多尔"
+    assert snapshot.payload["matches"][0]["status"] == "finished"
 
 
 def test_build_adapter_supports_dongqiudi_source():
@@ -76,6 +81,39 @@ def test_canonical_records_from_schedule_snapshot():
     assert records["matches"][0]["public_id"] == "usa-paraguay-2026-06-13"
     assert records["matches"][0]["home_team_code"] == "USA"
     assert any(alias["alias"] == "United States" for alias in records["team_aliases"])
+
+
+def test_canonical_records_from_dongqiudi_homepage_matches():
+    snapshot = RawSnapshot(
+        source="dongqiudi",
+        source_type="homepage",
+        source_url="https://pc.dongqiudi.com/",
+        payload={
+            "matches": [
+                {
+                    "public_id": "dongqiudi-civ-ecuador-2026-06-15",
+                    "competition_code": "world_cup_2026",
+                    "stage_code": "world-cup-homepage",
+                    "stage_name": "世界杯",
+                    "stage_type": "group",
+                    "home": "科特迪瓦",
+                    "away": "厄瓜多尔",
+                    "kickoff_at": "2026-06-15T00:00:00+08:00",
+                    "status": "finished",
+                    "home_score": 1,
+                    "away_score": 0,
+                    "source_confidence": 0.7,
+                }
+            ]
+        },
+    )
+
+    records = canonical_records_from_snapshot(snapshot)
+
+    assert len(records["teams"]) == 2
+    assert records["teams"][0]["code"].startswith("DQD")
+    assert records["matches"][0]["stage_name"] == "世界杯"
+    assert records["matches"][0]["home_score"] == 1
 
 
 def test_canonical_records_from_standings_snapshot():

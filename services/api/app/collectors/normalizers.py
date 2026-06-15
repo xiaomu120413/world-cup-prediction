@@ -45,9 +45,12 @@ def normalize_team_ref(value: str | None) -> dict | None:
     if team:
         return team
 
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", key))
     code = re.sub(r"[^A-Za-z0-9]+", "-", key).strip("-").upper()[:32]
+    if has_cjk:
+        code = f"DQD{stable_checksum(key)[:10].upper()}"
     if not code:
-        return None
+        code = f"DQD{stable_checksum(key)[:10].upper()}"
     return {"code": code, "name_zh": key, "name_en": key, "aliases": [key, code]}
 
 
