@@ -161,6 +161,18 @@ python scripts/enrich_foundation_data.py
 python scripts/backfill_data_source_links.py
 ```
 
+Normalize generated Dongqiudi `DQD...` teams back to canonical roster teams after importing older snapshots or refreshing multiple Dongqiudi sources:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/merge_duplicate_roster_teams.py --dry-run
+python scripts/merge_duplicate_roster_teams.py
+python scripts/backfill_identity_mappings.py
+python scripts/backfill_data_source_links.py
+python scripts/audit_identity_mappings.py
+python scripts/audit_real_data.py
+```
+
 Collect Dongqiudi World Cup national-team pages and team ranking metrics. This is the canonical player dataset: teams are matched by country/team first, and players are keyed by `DQD-P{person_id}` from `team/member_v2`:
 
 ```powershell
@@ -215,6 +227,18 @@ The export writes only match data into `exports/world_cup_48_national_team_match
 `exports/world_cup_48_national_team_matches_summary.json`. Use `--refresh-source` when the upstream historical
 results CSV has changed; it imports the latest source first, then regenerates the 48-team match exports.
 
+Build model-ready match feature snapshots after data refreshes and before prediction recompute:
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/build_match_features.py --dry-run
+python scripts/build_match_features.py
+```
+
+By default this writes only matches where both teams have canonical Dongqiudi `DQD-P*` roster coverage. Use
+`--include-non-roster-matches` only for diagnostics, because non-roster matches are not training-ready.
+
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
 
 - `raw_snapshots`: immutable source payload and checksum.
@@ -250,7 +274,7 @@ Each adapter should emit the same canonical payload shape before normalization:
 }
 ```
 
-Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, public market value, lineup stability and coach records now have real coverage from public sources. Player rows use a single canonical source: Dongqiudi `team/member_v2` with code `DQD-P{person_id}`.
+Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, public market value, lineup stability and coach records now have real coverage from public sources. Player rows use a single canonical source: Dongqiudi `team/member_v2` with code `DQD-P{person_id}`. Source names and player ids map through `team_aliases` and `player_aliases`; exports should read canonical names from `teams` and `players`, not raw source-name columns.
 
 TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, country and timezone into `matches`, `teams`, `team_aliases` and `venues`. This source covers static schedule data only; it does not cover live scores, player form, standings or match stats.
 
@@ -263,6 +287,8 @@ Backfill and audit source links after migrations or historical imports:
 ```powershell
 $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
 python scripts/backfill_data_source_links.py
+python scripts/backfill_identity_mappings.py
+python scripts/audit_identity_mappings.py
 python scripts/audit_real_data.py
 ```
 

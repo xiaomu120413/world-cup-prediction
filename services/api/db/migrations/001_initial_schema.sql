@@ -69,6 +69,21 @@ create table if not exists players (
 
 create index if not exists idx_players_team_position on players(team_id, position);
 
+create table if not exists player_aliases (
+    id uuid primary key default gen_random_uuid(),
+    player_id uuid not null references players(id) on delete cascade,
+    team_id uuid not null references teams(id) on delete cascade,
+    source varchar(64) not null,
+    source_player_id varchar(128),
+    alias varchar(128) not null,
+    confidence numeric(4,3) not null default 1.0,
+    is_primary boolean not null default false,
+    unique (source, source_player_id)
+);
+
+create index if not exists idx_player_aliases_source_team_alias on player_aliases(source, team_id, alias);
+create index if not exists idx_player_aliases_player on player_aliases(player_id);
+
 create table if not exists venues (
     id uuid primary key default gen_random_uuid(),
     code varchar(64) not null unique,
@@ -352,6 +367,24 @@ create table if not exists model_versions (
     created_at timestamptz not null default now(),
     unique (name, version)
 );
+
+create table if not exists model_features (
+    id uuid primary key default gen_random_uuid(),
+    entity_type varchar(32) not null check (entity_type in ('match', 'team', 'player')),
+    entity_key varchar(128) not null,
+    feature_set varchar(64) not null,
+    feature_schema_version varchar(64) not null,
+    as_of_at timestamptz not null,
+    features jsonb not null default '{}'::jsonb,
+    source_summary jsonb not null default '{}'::jsonb,
+    missing_features jsonb not null default '[]'::jsonb,
+    quality_status varchar(32) not null check (quality_status in ('complete', 'partial', 'insufficient')),
+    generated_at timestamptz not null default now(),
+    unique (entity_type, entity_key, feature_set)
+);
+
+create index if not exists idx_model_features_entity on model_features(entity_type, entity_key);
+create index if not exists idx_model_features_feature_set on model_features(feature_set);
 
 create table if not exists prediction_snapshots (
     id uuid primary key default gen_random_uuid(),

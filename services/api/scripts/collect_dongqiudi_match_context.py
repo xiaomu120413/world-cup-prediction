@@ -21,6 +21,7 @@ from app.db.schema import (
     data_source_links,
     lineup_snapshots,
     matches,
+    player_aliases,
     players,
     raw_snapshots,
     team_aliases,
@@ -171,6 +172,79 @@ def team_code_from_name(name: str) -> str:
     return normalized["code"]
 
 
+def normalize_match_name(value: str | None) -> str:
+    return "".join(ch.lower() for ch in (value or "").strip() if ch.isalnum())
+
+
+def team_has_roster(db, team_id) -> bool:
+    return (
+        db.execute(
+            select(players.c.id)
+            .where(players.c.team_id == team_id, players.c.code.like("DQD-P%"))
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
+def find_canonical_roster_team(db, name: str):
+    target = normalize_match_name(name)
+    if not target:
+        return None
+    rows = db.execute(
+        select(
+            teams.c.id,
+            teams.c.code,
+            teams.c.name_zh,
+            teams.c.name_en,
+            team_aliases.c.alias,
+        )
+        .select_from(teams.join(players, players.c.team_id == teams.c.id).outerjoin(team_aliases, team_aliases.c.team_id == teams.c.id))
+        .where(players.c.code.like("DQD-P%"))
+    ).mappings().all()
+    for row in rows:
+        candidates = {row.name_zh, row.name_en, row.alias}
+        if any(normalize_match_name(candidate) == target for candidate in candidates if candidate):
+            return {"id": row.id, "code": row.code}
+    return None
+
+
+def link_dongqiudi_team_id(db, team_id, code: str, name: str, source_team_id: str | None) -> None:
+    aliases = {name, code}
+    source_team_id_updated = 0
+    if source_team_id:
+        aliases.add(str(source_team_id))
+        result = db.execute(
+            update(team_aliases)
+            .where(team_aliases.c.source == "dongqiudi", team_aliases.c.source_team_id == str(source_team_id))
+            .values(team_id=team_id, confidence=1.0, is_primary=False)
+        )
+        source_team_id_updated = result.rowcount or 0
+    for alias in {item.strip() for item in aliases if item and str(item).strip()}:
+        if source_team_id and alias == str(source_team_id) and source_team_id_updated:
+            continue
+        db.execute(
+            pg_insert(team_aliases)
+            .values(
+                team_id=team_id,
+                source="dongqiudi",
+                source_team_id=str(source_team_id) if source_team_id and alias == str(source_team_id) else f"{code}:{alias}",
+                alias=alias,
+                confidence=1.0,
+                is_primary=alias == code,
+            )
+            .on_conflict_do_update(
+                index_elements=["source", "alias"],
+                set_={
+                    "team_id": pg_insert(team_aliases).excluded.team_id,
+                    "source_team_id": pg_insert(team_aliases).excluded.source_team_id,
+                    "confidence": pg_insert(team_aliases).excluded.confidence,
+                    "is_primary": pg_insert(team_aliases).excluded.is_primary,
+                },
+            )
+        )
+
+
 def ensure_team(db, name: str, source_team_id: str | None):
     if source_team_id:
         row = db.execute(
@@ -179,8 +253,13 @@ def ensure_team(db, name: str, source_team_id: str | None):
             .where(team_aliases.c.source == "dongqiudi", team_aliases.c.source_team_id == source_team_id)
             .limit(1)
         ).mappings().first()
-        if row:
+        if row and team_has_roster(db, row.id):
             return {"id": row.id, "code": row.code}
+
+    canonical_row = find_canonical_roster_team(db, name)
+    if canonical_row:
+        link_dongqiudi_team_id(db, canonical_row["id"], canonical_row["code"], name, source_team_id)
+        return canonical_row
 
     alias_row = db.execute(
         select(teams.c.id, teams.c.code)
@@ -471,12 +550,54 @@ def extract_lineup_rows(match_public_id: str, lineup_payload: dict, snapshot_id,
 
 
 def ensure_player(db, team_id, name: str, source_player_id: str | None, item: dict):
+    def link_aliases(player_id, code: str) -> None:
+        if not source_player_id:
+            return
+        aliases = []
+        for alias in (name, code):
+            if alias and alias not in aliases:
+                aliases.append(alias)
+        rows = []
+        for index, alias in enumerate(aliases):
+            is_primary = index == 0
+            alias_source_player_id = (
+                source_player_id
+                if is_primary
+                else f"{source_player_id}:{hashlib.sha256(alias.encode('utf-8')).hexdigest()[:12]}"
+            )
+            rows.append(
+                {
+                    "player_id": player_id,
+                    "team_id": team_id,
+                    "source": "dongqiudi",
+                    "source_player_id": alias_source_player_id,
+                    "alias": alias,
+                    "confidence": 0.9,
+                    "is_primary": is_primary,
+                }
+            )
+        db.execute(
+            pg_insert(player_aliases)
+            .values(rows)
+            .on_conflict_do_update(
+                index_elements=["source", "source_player_id"],
+                set_={
+                    "player_id": pg_insert(player_aliases).excluded.player_id,
+                    "team_id": pg_insert(player_aliases).excluded.team_id,
+                    "alias": pg_insert(player_aliases).excluded.alias,
+                    "confidence": pg_insert(player_aliases).excluded.confidence,
+                    "is_primary": pg_insert(player_aliases).excluded.is_primary,
+                },
+            )
+        )
+
     if source_player_id:
         existing = db.execute(select(players.c.id).where(players.c.code == f"DQD-P{source_player_id}")).scalar_one_or_none()
         if existing:
+            link_aliases(existing, f"DQD-P{source_player_id}")
             return existing
     code = f"DQD-P{source_player_id}" if source_player_id else f"DQD-LINEUP-{slugify(name)}"
-    return db.execute(
+    player_id = db.execute(
         pg_insert(players)
         .values(
             team_id=team_id,
@@ -500,6 +621,8 @@ def ensure_player(db, team_id, name: str, source_player_id: str | None, item: di
         )
         .returning(players.c.id)
     ).scalar_one()
+    link_aliases(player_id, code)
+    return player_id
 
 
 def upsert_lineups(db, schedule: list[dict]) -> dict:

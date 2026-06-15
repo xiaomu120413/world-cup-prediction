@@ -22,6 +22,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from app.db.schema import (
     coaches,
     data_source_links,
+    player_aliases,
     player_form_snapshots,
     players,
     raw_snapshots,
@@ -511,6 +512,7 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
     groups = ((member.get("data") or {}).get("list") or [])
     source_url = team_data["source_urls"]["member"]
     player_rows = []
+    player_alias_seed_rows = []
     form_rows = []
     links = []
 
@@ -546,6 +548,18 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
                     "market_value_eur": market_value,
                     "is_key_player": bool(item.get("captain_logo")),
                     "quality_status": "source",
+                }
+            )
+            aliases = []
+            for alias in (name, item.get("person_en_name"), code):
+                if alias and alias not in aliases:
+                    aliases.append(alias)
+            player_alias_seed_rows.append(
+                {
+                    "code": code,
+                    "team_id": team_row["id"],
+                    "source_player_id": person_id,
+                    "aliases": aliases,
                 }
             )
             links.append(
@@ -641,6 +655,54 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
                 },
             )
         )
+        player_ids = {
+            row.code: row.id
+            for row in db.execute(
+                select(players.c.code, players.c.id).where(players.c.code.in_([row["code"] for row in player_rows]))
+            ).mappings().all()
+        }
+        alias_rows = []
+        seen_alias_ids = set()
+        for seed in player_alias_seed_rows:
+            player_id = player_ids.get(seed["code"])
+            if not player_id:
+                continue
+            for index, alias in enumerate(seed["aliases"]):
+                is_primary = index == 0
+                source_player_id = (
+                    seed["source_player_id"]
+                    if is_primary
+                    else f"{seed['source_player_id']}:{hashlib.sha256(alias.encode('utf-8')).hexdigest()[:12]}"
+                )
+                if source_player_id in seen_alias_ids:
+                    continue
+                seen_alias_ids.add(source_player_id)
+                alias_rows.append(
+                    {
+                        "player_id": player_id,
+                        "team_id": seed["team_id"],
+                        "source": "dongqiudi",
+                        "source_player_id": source_player_id,
+                        "alias": alias,
+                        "confidence": 0.95,
+                        "is_primary": is_primary,
+                    }
+                )
+        if alias_rows:
+            db.execute(
+                pg_insert(player_aliases)
+                .values(alias_rows)
+                .on_conflict_do_update(
+                    index_elements=["source", "source_player_id"],
+                    set_={
+                        "player_id": pg_insert(player_aliases).excluded.player_id,
+                        "team_id": pg_insert(player_aliases).excluded.team_id,
+                        "alias": pg_insert(player_aliases).excluded.alias,
+                        "confidence": pg_insert(player_aliases).excluded.confidence,
+                        "is_primary": pg_insert(player_aliases).excluded.is_primary,
+                    },
+                )
+            )
 
     if form_rows:
         player_ids = {

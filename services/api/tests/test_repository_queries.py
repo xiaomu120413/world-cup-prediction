@@ -24,3 +24,10 @@ def test_rankings_query_filters_ranking_type():
     sql = compile_query(PublicDataRepository.rankings_query("champion", 20))
     assert "ranking_predictions.ranking_type = 'champion'" in sql
     assert "ORDER BY ranking_predictions.rank ASC" in sql
+
+
+def test_teams_query_filters_to_roster_teams():
+    sql = compile_query(PublicDataRepository.teams_query())
+    assert "EXISTS" in sql
+    assert "players.team_id = teams.id" in sql
+    assert "players.code LIKE 'DQD-P%%'" in sql

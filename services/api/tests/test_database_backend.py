@@ -9,7 +9,17 @@ from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
 from app.db.session import SessionLocal
-from app.db.schema import data_source_links, group_standings, matches, player_form_snapshots, players, team_aliases, teams, venues
+from app.db.schema import (
+    data_source_links,
+    group_standings,
+    matches,
+    player_aliases,
+    player_form_snapshots,
+    players,
+    team_aliases,
+    teams,
+    venues,
+)
 from app.main import app
 from app.predictions.service import BaselinePredictionService
 
@@ -346,3 +356,74 @@ def test_database_collector_writes_fixture_venues():
     assert venue_exists == 1
     assert match_row is not None
     assert match_row.venue_id is not None
+
+
+def test_database_collector_resolves_generated_team_to_roster_team():
+    canonical_code = "TEST-ROSTER-MATCH"
+    duplicate_code = "DQDTESTROSTER"
+    player_code = "DQD-PTEST-ROSTER-1"
+
+    def cleanup():
+        with SessionLocal() as db:
+            db.execute(players.delete().where(players.c.code == player_code))
+            db.execute(teams.delete().where(teams.c.code.in_([canonical_code, duplicate_code])))
+            db.commit()
+
+    cleanup()
+    try:
+        with SessionLocal() as db:
+            runner = CollectorRunner(db)
+            team_ids = runner.upsert_teams(
+                [
+                    {
+                        "code": canonical_code,
+                        "name_zh": "Testland",
+                        "name_en": "Testland",
+                        "quality_status": "source",
+                    }
+                ]
+            )
+            runner.upsert_players(
+                [
+                    {
+                        "team_code": canonical_code,
+                        "code": player_code,
+                        "name_zh": "Test Player",
+                        "name_en": "Test Player",
+                        "position": "FW",
+                        "shirt_number": 9,
+                        "club_name": "Test Club",
+                        "market_value_eur": 1_000_000,
+                        "is_key_player": False,
+                        "quality_status": "source",
+                    }
+                ],
+                team_ids,
+            )
+            db.commit()
+
+        with SessionLocal() as db:
+            runner = CollectorRunner(db)
+            resolved_ids = runner.upsert_teams(
+                [
+                    {
+                        "code": duplicate_code,
+                        "name_zh": "Testland",
+                        "name_en": "Testland",
+                        "quality_status": "source",
+                    }
+                ]
+            )
+            canonical_id = db.execute(select(teams.c.id).where(teams.c.code == canonical_code)).scalar_one()
+            duplicate_count = db.execute(
+                select(func.count()).select_from(teams).where(teams.c.code == duplicate_code)
+            ).scalar_one()
+            player_alias_count = db.execute(
+                select(func.count()).select_from(player_aliases).where(player_aliases.c.source_player_id == "TEST-ROSTER-1")
+            ).scalar_one()
+
+        assert resolved_ids[duplicate_code] == canonical_id
+        assert duplicate_count == 0
+        assert player_alias_count == 1
+    finally:
+        cleanup()

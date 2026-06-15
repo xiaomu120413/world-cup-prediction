@@ -109,6 +109,22 @@ players = Table(
 )
 Index("idx_players_team_position", players.c.team_id, players.c.position)
 
+player_aliases = Table(
+    "player_aliases",
+    metadata,
+    uuid_pk(),
+    Column("player_id", UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False),
+    Column("team_id", UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False),
+    Column("source", VARCHAR(64), nullable=False),
+    Column("source_player_id", VARCHAR(128)),
+    Column("alias", VARCHAR(128), nullable=False),
+    Column("confidence", Numeric(4, 3), nullable=False, server_default=text("1.0")),
+    Column("is_primary", Boolean, nullable=False, server_default=text("false")),
+    UniqueConstraint("source", "source_player_id", name="uq_player_aliases_source_player_id"),
+)
+Index("idx_player_aliases_source_team_alias", player_aliases.c.source, player_aliases.c.team_id, player_aliases.c.alias)
+Index("idx_player_aliases_player", player_aliases.c.player_id)
+
 venues = Table(
     "venues",
     metadata,
@@ -418,6 +434,27 @@ model_versions = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     UniqueConstraint("name", "version", name="uq_model_versions_name_version"),
 )
+
+model_features = Table(
+    "model_features",
+    metadata,
+    uuid_pk(),
+    Column("entity_type", VARCHAR(32), nullable=False),
+    Column("entity_key", VARCHAR(128), nullable=False),
+    Column("feature_set", VARCHAR(64), nullable=False),
+    Column("feature_schema_version", VARCHAR(64), nullable=False),
+    Column("as_of_at", DateTime(timezone=True), nullable=False),
+    Column("features", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("source_summary", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("missing_features", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("quality_status", VARCHAR(32), nullable=False),
+    Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("entity_type in ('match', 'team', 'player')", name="entity_type_valid"),
+    CheckConstraint("quality_status in ('complete', 'partial', 'insufficient')", name="quality_status_valid"),
+    UniqueConstraint("entity_type", "entity_key", "feature_set", name="uq_model_features_entity_feature_set"),
+)
+Index("idx_model_features_entity", model_features.c.entity_type, model_features.c.entity_key)
+Index("idx_model_features_feature_set", model_features.c.feature_set)
 
 prediction_snapshots = Table(
     "prediction_snapshots",

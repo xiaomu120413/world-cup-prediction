@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import data_source_links, injury_reports, raw_snapshots, teams
+from app.db.schema import data_source_links, injury_reports, player_aliases, players, raw_snapshots, teams
 from app.db.session import SessionLocal
 
 
@@ -108,29 +108,74 @@ def find_team_id(db, team_name: str):
     ).scalar_one_or_none()
 
 
+def normalize_name(value: str | None) -> str:
+    return "".join(ch.lower() for ch in (value or "").strip() if ch.isalnum())
+
+
+def find_player_id(db, team_id, player_name: str):
+    target = normalize_name(player_name)
+    if not target:
+        return None
+    rows = db.execute(
+        select(players.c.id, players.c.name_zh, players.c.name_en, player_aliases.c.alias)
+        .select_from(players.outerjoin(player_aliases, player_aliases.c.player_id == players.c.id))
+        .where(players.c.team_id == team_id)
+    ).mappings().all()
+    candidates = set()
+    for row in rows:
+        if any(normalize_name(value) == target for value in (row.name_zh, row.name_en, row.alias) if value):
+            candidates.add(row.id)
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
 def main() -> None:
     payload = {"items": VERIFIED_INJURY_ITEMS}
     with SessionLocal() as db:
         snapshot_id = write_raw_snapshot(db, payload)
-        db.execute(delete(injury_reports).where(injury_reports.c.source_url.in_([item["source_url"] for item in VERIFIED_INJURY_ITEMS])))
+        source_urls = [item["source_url"] for item in VERIFIED_INJURY_ITEMS]
+        db.execute(
+            text(
+                """
+                delete from data_source_links dsl
+                where dsl.entity_type = 'injury_report'
+                  and not exists (
+                    select 1 from injury_reports ir
+                    where ir.id::text = dsl.entity_key
+                  )
+                """
+            )
+        )
+        existing_report_ids = [
+            str(row.id)
+            for row in db.execute(select(injury_reports.c.id).where(injury_reports.c.source_url.in_(source_urls))).mappings()
+        ]
+        if existing_report_ids:
+            db.execute(
+                delete(data_source_links).where(
+                    data_source_links.c.entity_type == "injury_report",
+                    data_source_links.c.entity_key.in_(existing_report_ids),
+                )
+            )
+        db.execute(delete(injury_reports).where(injury_reports.c.source_url.in_(source_urls)))
         report_ids = []
         source_links = []
         for item in VERIFIED_INJURY_ITEMS:
             team_id = find_team_id(db, item["team"])
             if team_id is None:
                 continue
+            player_id = find_player_id(db, team_id, item["player_name"])
             report_id = db.execute(
                 pg_insert(injury_reports)
                 .values(
                     team_id=team_id,
-                    player_id=None,
+                    player_id=player_id,
                     report_type=item["report_type"],
                     status=item["status"],
                     impact_score=item["impact_score"],
                     source_url=item["source_url"],
                     confidence=item["confidence"],
                     evidence_text=item["evidence_text"],
-                    is_model_eligible=item["confidence"] >= 0.85,
+                    is_model_eligible=player_id is not None and item["confidence"] >= 0.85,
                 )
                 .returning(injury_reports.c.id)
             ).scalar_one()
@@ -145,7 +190,12 @@ def main() -> None:
                     "raw_snapshot_id": snapshot_id,
                     "source_record_id": f"{item['team']}:{item['player_name']}",
                     "confidence": item["confidence"],
-                    "metadata": {"team": item["team"], "player_name": item["player_name"], "status": item["status"]},
+                    "metadata": {
+                        "team": item["team"],
+                        "player_name": item["player_name"],
+                        "player_id": str(player_id) if player_id else None,
+                        "status": item["status"],
+                    },
                 }
             )
         if source_links:

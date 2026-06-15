@@ -11,6 +11,11 @@ from app.db.session import SessionLocal
 
 
 BACKFILL_SQL = """
+delete from data_source_links
+where entity_type = 'news_item'
+  and source in ('bbc', 'espn', 'foxsports', 'guardian')
+  and source_type = 'homepage';
+
 insert into data_source_links (
     entity_type,
     entity_key,
@@ -26,19 +31,30 @@ select
     'news_item',
     n.source_url,
     n.source,
-    'homepage',
+    n.source_type,
     n.source_url,
     (
         select r.id
         from raw_snapshots r
-        where r.source = n.source and r.source_type = 'homepage'
+        where r.source = n.source and r.source_type = n.source_type
         order by r.fetched_at desc
         limit 1
     ),
-    n.source_url,
+    left(n.source_url, 128),
     1.0,
     jsonb_build_object('title', n.title, 'backfilled', true)
-from news_items n
+from (
+    select
+        n.*,
+        case n.source
+            when 'bbc' then 'football_rss'
+            when 'guardian' then 'football_rss'
+            when 'espn' then 'soccer_rss'
+            when 'foxsports' then 'world_cup_rss'
+            else 'homepage'
+        end as source_type
+    from news_items n
+) n
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,
     raw_snapshot_id = excluded.raw_snapshot_id,
@@ -178,6 +194,88 @@ where not exists (
     select 1 from data_source_links l
     where l.entity_type = 'team' and l.entity_key = t.code
 )
+on conflict (entity_type, entity_key, source, source_type) do update set
+    source_url = excluded.source_url,
+    raw_snapshot_id = excluded.raw_snapshot_id,
+    source_record_id = excluded.source_record_id,
+    confidence = excluded.confidence,
+    fetched_at = now(),
+    metadata = excluded.metadata;
+
+insert into data_source_links (
+    entity_type,
+    entity_key,
+    source,
+    source_type,
+    source_url,
+    raw_snapshot_id,
+    source_record_id,
+    confidence,
+    metadata
+)
+select
+    'group_standing',
+    s.code || ':' || t.code,
+    'dongqiudi',
+    'world_cup_standings',
+    coalesce(snapshot.source_url, latest.source_url),
+    coalesce(snapshot.id, latest.id),
+    s.code || ':' || t.code,
+    1.0,
+    jsonb_build_object('rank', gs.rank, 'points', gs.points, 'backfilled', true)
+from group_standings gs
+join competition_stages s on s.id = gs.stage_id
+join teams t on t.id = gs.team_id
+left join raw_snapshots snapshot on snapshot.id = gs.snapshot_id
+join lateral (
+    select id, source_url
+    from raw_snapshots r
+    where r.source = 'dongqiudi' and r.source_type = 'world_cup_standings'
+    order by fetched_at desc
+    limit 1
+) latest on true
+on conflict (entity_type, entity_key, source, source_type) do update set
+    source_url = excluded.source_url,
+    raw_snapshot_id = excluded.raw_snapshot_id,
+    source_record_id = excluded.source_record_id,
+    confidence = excluded.confidence,
+    fetched_at = now(),
+    metadata = excluded.metadata;
+
+insert into data_source_links (
+    entity_type,
+    entity_key,
+    source,
+    source_type,
+    source_url,
+    raw_snapshot_id,
+    source_record_id,
+    confidence,
+    metadata
+)
+select
+    'team_form',
+    t.code || ':' || to_char(tf.as_of_at at time zone 'Asia/Shanghai', 'YYYY-MM-DD"T"HH24:MI:SS') || '+08:00',
+    'dongqiudi',
+    'world_cup_schedule',
+    latest.source_url,
+    latest.id,
+    t.code,
+    0.95,
+    jsonb_build_object(
+        'recent_matches', tf.recent_matches,
+        'data_quality', tf.data_quality,
+        'backfilled', true
+    )
+from team_form_snapshots tf
+join teams t on t.id = tf.team_id
+join lateral (
+    select id, source_url
+    from raw_snapshots r
+    where r.source = 'dongqiudi' and r.source_type = 'world_cup_schedule'
+    order by fetched_at desc
+    limit 1
+) latest on true
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,
     raw_snapshot_id = excluded.raw_snapshot_id,

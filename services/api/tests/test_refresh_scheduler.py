@@ -16,7 +16,14 @@ def test_daily_12_plan_keeps_weather_low_frequency():
     assert "world_cup_48_national_team_matches" in ids
     assert ids.index("venue_weather") < ids.index("world_cup_48_national_team_matches")
     assert "world_cup_schedule_lineups" not in ids
-    assert ids.index("public_news_rss") < ids.index("ai_news_insights") < ids.index("prediction_recompute")
+    assert (
+        ids.index("public_news_rss")
+        < ids.index("ai_news_insights")
+        < ids.index("identity_mapping_backfill")
+        < ids.index("identity_mapping_audit")
+        < ids.index("match_features")
+        < ids.index("prediction_recompute")
+    )
     assert "prediction_recompute" in ids
     assert "real_data_audit" in ids
     match_task = tasks[ids.index("world_cup_48_national_team_matches")]
@@ -30,7 +37,14 @@ def test_daily_00_plan_refreshes_core_match_data_and_news():
     assert "group_standings" in ids
     assert "player_recent_form" in ids
     assert "public_news_rss" in ids
-    assert ids.index("public_news_rss") < ids.index("ai_news_insights") < ids.index("prediction_recompute")
+    assert (
+        ids.index("public_news_rss")
+        < ids.index("ai_news_insights")
+        < ids.index("identity_mapping_backfill")
+        < ids.index("identity_mapping_audit")
+        < ids.index("match_features")
+        < ids.index("prediction_recompute")
+    )
     assert "venue_weather" not in ids
 
 

@@ -57,6 +57,8 @@ Acceptance requirement: `team_stat_metrics >= 45`, `team_stat_snapshots_without_
 | `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, historical results, missing-market-value export, prediction recompute, real-data audit |
 | `auto` | Optional frequent runner | Resolves to `daily_00`, `daily_12`, or `post_match`; otherwise skips |
 
+All cadences that can change model inputs must run `backfill_identity_mappings.py`, `audit_identity_mappings.py`, and `build_match_features.py` before prediction recompute. The feature builder writes `model_features` rows for matches where both teams have canonical Dongqiudi `DQD-P*` roster coverage.
+
 Command examples from repo root:
 
 ```powershell
@@ -122,6 +124,42 @@ Hard requirements before data can be treated as real production data:
 - Historical `FIFA-*` player rows must remain `0`; FIFA can be used for team ranking and injury news, not player roster identity.
 - Each source link must include entity type/key, source, source type, source URL or stable source reference, confidence, and raw snapshot when available.
 
+## Team Identity Matching
+
+Dongqiudi schedule/homepage payloads can emit generated `DQD...` team codes even when the same national team already exists from the roster collector. Those generated teams are not canonical model identities.
+
+The ingestion rule is:
+
+- Canonical roster teams are teams with at least one Dongqiudi roster player code matching `DQD-P%`.
+- Incoming teams are matched against canonical roster teams by normalized code, Chinese name, English name, and stored aliases.
+- If a name maps to exactly one canonical roster team, new matches, aliases, standings, and form rows use that canonical team.
+- If a name is ambiguous, it is not merged automatically.
+- Knockout placeholders such as `第1场1/16决赛胜者` remain non-roster teams until the actual team is known.
+
+- Player identity uses `players.code = DQD-P{person_id}` as the canonical key and `player_aliases` as the source/name mapping layer.
+- Player name-only mapping is allowed only when a team/name pair resolves to exactly one player. Same-name players stay warning-only and must use `source_player_id`.
+
+Use the repair script after importing older snapshots or restoring a database that may already contain generated teams:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python services/api/scripts/merge_duplicate_roster_teams.py --dry-run
+python services/api/scripts/merge_duplicate_roster_teams.py
+python services/api/scripts/backfill_identity_mappings.py
+python services/api/scripts/backfill_data_source_links.py
+python services/api/scripts/audit_identity_mappings.py
+python services/api/scripts/audit_real_data.py
+```
+
+Current local identity snapshot:
+
+- Canonical Dongqiudi roster teams: `48`.
+- Canonical Dongqiudi roster players: `1248`.
+- Player identity mappings: `3744`.
+- Roster-backed matches for feature generation: `147`.
+- Remaining non-roster matches: knockout placeholders only.
+- Warning-only same-name aliases: Austria `施拉格尔` and Croatia `苏契奇`; use `source_player_id` for these.
+
 Current confidence defaults:
 
 | Source class | Example | Default confidence |
@@ -164,6 +202,16 @@ Feature builder must not use:
 - Player rows outside the Dongqiudi canonical identity system.
 - Sample data.
 - Missing values silently filled as real facts.
+
+The first feature set is `match_pre_match_v1`, stored in `model_features` as JSONB:
+
+- `features.numeric`: flat numeric fields for training, including raw home/away values and diff fields.
+- `features.team_context`: structured home/away feature context for debugging and explainability.
+- `source_summary`: source tables and source families used to derive the feature row.
+- `missing_features`: explicit missing fields; nulls are not silently treated as facts.
+- `quality_status`: `complete`, `partial`, or `insufficient`.
+
+The current builder is feature transformation only. It does not assign model weights and does not generate win/draw/loss probabilities.
 
 ## Acceptance Checks
 

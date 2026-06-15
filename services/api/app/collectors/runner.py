@@ -20,6 +20,7 @@ from app.db.schema import (
     matches,
     news_items,
     player_form_snapshots,
+    player_aliases,
     players,
     raw_snapshots,
     team_aliases,
@@ -384,12 +385,64 @@ class CollectorRunner:
         rows = self.db.execute(statement).mappings().all()
         return {row["code"]: row["id"] for row in rows}
 
+    @staticmethod
+    def normalize_team_match_key(value: str | None) -> str:
+        return "".join(ch.lower() for ch in (value or "").strip() if ch.isalnum())
+
+    def resolve_roster_team_ids(self, values: list[dict]) -> dict[str, object]:
+        if not values:
+            return {}
+
+        roster_team_ids = select(players.c.team_id).where(players.c.code.like("DQD-P%")).distinct().subquery()
+        roster_rows = self.db.execute(
+            select(
+                teams.c.id,
+                teams.c.code,
+                teams.c.name_zh,
+                teams.c.name_en,
+                team_aliases.c.alias,
+            )
+            .select_from(
+                teams.join(roster_team_ids, roster_team_ids.c.team_id == teams.c.id).outerjoin(
+                    team_aliases, team_aliases.c.team_id == teams.c.id
+                )
+            )
+        ).mappings()
+
+        index: dict[str, object] = {}
+        ambiguous_keys: set[str] = set()
+        for row in roster_rows:
+            for candidate in (row["code"], row["name_zh"], row["name_en"], row["alias"]):
+                key = self.normalize_team_match_key(candidate)
+                if not key or key in ambiguous_keys:
+                    continue
+                if key not in index:
+                    index[key] = row["id"]
+                elif index[key] != row["id"]:
+                    index.pop(key, None)
+                    ambiguous_keys.add(key)
+
+        resolved = {}
+        for value in values:
+            for candidate in (value.get("code"), value.get("name_zh"), value.get("name_en")):
+                key = self.normalize_team_match_key(candidate)
+                if key in index:
+                    team_id = index[key]
+                    resolved[value["code"]] = team_id
+                    break
+        return resolved
+
     def upsert_teams(self, values: list[dict]) -> dict[str, object]:
         if not values:
             return {}
+        team_ids = self.resolve_roster_team_ids(values)
+        unresolved_values = [value for value in values if value["code"] not in team_ids]
+        if not unresolved_values:
+            return team_ids
+
         statement = (
             pg_insert(teams)
-            .values(values)
+            .values(unresolved_values)
             .on_conflict_do_update(
                 index_elements=["code"],
                 set_={
@@ -402,7 +455,8 @@ class CollectorRunner:
             .returning(teams.c.code, teams.c.id)
         )
         rows = self.db.execute(statement).mappings().all()
-        return {row["code"]: row["id"] for row in rows}
+        team_ids.update({row["code"]: row["id"] for row in rows})
+        return team_ids
 
     def upsert_team_aliases(self, values: list[dict], team_ids: dict[str, object]) -> int:
         if not values:
@@ -440,6 +494,68 @@ class CollectorRunner:
                 },
             )
             .returning(team_aliases.c.id)
+        )
+        return len(self.db.execute(statement).all())
+
+    @staticmethod
+    def source_player_id_from_code(code: str | None) -> str | None:
+        if code and code.startswith("DQD-P"):
+            return code.removeprefix("DQD-P")
+        return None
+
+    @staticmethod
+    def player_alias_source_id(source_player_id: str, alias: str, is_primary: bool) -> str:
+        if is_primary:
+            return source_player_id
+        return f"{source_player_id}:{hashlib.sha256(alias.encode('utf-8')).hexdigest()[:12]}"
+
+    def upsert_player_aliases(self, player_values: list[dict], player_ids: dict[str, object]) -> int:
+        rows = []
+        seen = set()
+        for value in player_values:
+            player_id = player_ids.get(value["code"])
+            source_player_id = self.source_player_id_from_code(value.get("code"))
+            if player_id is None or not source_player_id:
+                continue
+
+            candidates = []
+            for alias in (value.get("name_zh"), value.get("name_en"), value.get("code")):
+                if alias and alias not in candidates:
+                    candidates.append(alias)
+            for index, alias in enumerate(candidates):
+                is_primary = index == 0
+                source_alias_id = self.player_alias_source_id(source_player_id, alias, is_primary)
+                key = ("dongqiudi", source_alias_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(
+                    {
+                        "player_id": player_id,
+                        "team_id": value["team_id"],
+                        "source": "dongqiudi",
+                        "source_player_id": source_alias_id,
+                        "alias": alias,
+                        "confidence": 0.95,
+                        "is_primary": is_primary,
+                    }
+                )
+        if not rows:
+            return 0
+        statement = (
+            pg_insert(player_aliases)
+            .values(rows)
+            .on_conflict_do_update(
+                index_elements=["source", "source_player_id"],
+                set_={
+                    "player_id": pg_insert(player_aliases).excluded.player_id,
+                    "team_id": pg_insert(player_aliases).excluded.team_id,
+                    "alias": pg_insert(player_aliases).excluded.alias,
+                    "confidence": pg_insert(player_aliases).excluded.confidence,
+                    "is_primary": pg_insert(player_aliases).excluded.is_primary,
+                },
+            )
+            .returning(player_aliases.c.id)
         )
         return len(self.db.execute(statement).all())
 
@@ -686,8 +802,10 @@ class CollectorRunner:
             )
             .returning(players.c.code, players.c.id)
         )
-        rows = self.db.execute(statement).mappings().all()
-        return {row["code"]: row["id"] for row in rows}
+        player_rows = self.db.execute(statement).mappings().all()
+        player_ids = {row["code"]: row["id"] for row in player_rows}
+        self.upsert_player_aliases(rows, player_ids)
+        return player_ids
 
     def replace_player_forms(
         self,

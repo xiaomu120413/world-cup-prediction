@@ -182,7 +182,16 @@ class PublicDataRepository:
 
     @staticmethod
     def teams_query() -> Select:
-        return select(teams).order_by(teams.c.fifa_rank.asc().nulls_last(), teams.c.code.asc())
+        roster_exists = (
+            select(players.c.id)
+            .where(players.c.team_id == teams.c.id, players.c.code.like("DQD-P%"))
+            .exists()
+        )
+        return (
+            select(teams)
+            .where(roster_exists)
+            .order_by(teams.c.fifa_rank.asc().nulls_last(), teams.c.code.asc())
+        )
 
     @staticmethod
     def match_query(public_id: str) -> Select:
