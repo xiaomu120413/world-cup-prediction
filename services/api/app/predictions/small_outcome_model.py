@@ -48,6 +48,8 @@ class TrainingExample:
     away_team_code: str
     label: int
     features: dict[str, float]
+    home_team_id: str | None = None
+    away_team_id: str | None = None
 
 
 @dataclass
@@ -178,6 +180,8 @@ def build_examples(
                     away_team_code=match.away_team_code,
                     label=label_for(match.home_score, match.away_score),
                     features=feature_dict(home, away, match.played_at, match.neutral, match.tournament),
+                    home_team_id=match.home_team_id,
+                    away_team_id=match.away_team_id,
                 )
             )
         update_states(home, away, match)
@@ -188,21 +192,25 @@ def build_examples(
 class Standardizer:
     means: dict[str, float]
     stds: dict[str, float]
+    feature_names: tuple[str, ...] = FEATURE_NAMES
 
     @classmethod
-    def fit(cls, examples: list[TrainingExample]) -> "Standardizer":
+    def fit(cls, examples: list[TrainingExample], feature_names: tuple[str, ...] = FEATURE_NAMES) -> "Standardizer":
         means: dict[str, float] = {}
         stds: dict[str, float] = {}
-        for name in FEATURE_NAMES:
-            values = [example.features[name] for example in examples]
+        for name in feature_names:
+            values = [float(example.features.get(name, 0.0) or 0.0) for example in examples]
             mean = sum(values) / len(values)
             variance = sum((value - mean) ** 2 for value in values) / max(1, len(values) - 1)
             means[name] = mean
             stds[name] = sqrt(variance) or 1.0
-        return cls(means=means, stds=stds)
+        return cls(means=means, stds=stds, feature_names=feature_names)
 
     def transform(self, features: dict[str, float]) -> list[float]:
-        return [(features[name] - self.means[name]) / self.stds[name] for name in FEATURE_NAMES]
+        return [
+            (float(features.get(name, 0.0) or 0.0) - self.means[name]) / self.stds[name]
+            for name in self.feature_names
+        ]
 
 
 @dataclass
@@ -222,7 +230,11 @@ class SmallOutcomeModel:
             "model_type": "multinomial_logistic_regression_sgd",
             "labels": list(self.labels),
             "feature_names": list(self.feature_names),
-            "standardizer": {"means": self.standardizer.means, "stds": self.standardizer.stds},
+            "standardizer": {
+                "means": self.standardizer.means,
+                "stds": self.standardizer.stds,
+                "feature_names": list(self.standardizer.feature_names),
+            },
             "weights": self.weights,
         }
 
@@ -240,9 +252,10 @@ def train_multinomial_logistic(
     learning_rate: float = 0.025,
     l2: float = 0.0008,
     seed: int = 20260615,
+    feature_names: tuple[str, ...] = FEATURE_NAMES,
 ) -> SmallOutcomeModel:
-    standardizer = Standardizer.fit(train_examples)
-    feature_count = len(FEATURE_NAMES) + 1
+    standardizer = Standardizer.fit(train_examples, feature_names=feature_names)
+    feature_count = len(feature_names) + 1
     label_counts = [1, 1, 1]
     for example in train_examples:
         label_counts[example.label] += 1
@@ -266,7 +279,7 @@ def train_multinomial_logistic(
                 for feature_index, value in enumerate(x):
                     regularization = 0.0 if feature_index == 0 else l2 * weights[label_index][feature_index]
                     weights[label_index][feature_index] -= lr * (gradient_scale * value + regularization)
-    return SmallOutcomeModel(standardizer=standardizer, weights=weights)
+    return SmallOutcomeModel(standardizer=standardizer, weights=weights, feature_names=feature_names)
 
 
 def baseline_probabilities(example: TrainingExample) -> list[float]:

@@ -4,6 +4,7 @@ import pytest
 
 from app.predictions.small_outcome_model import (
     HistoricalMatch,
+    FEATURE_NAMES,
     build_examples,
     evaluate_baseline,
     evaluate_model,
@@ -58,3 +59,37 @@ def test_small_outcome_model_trains_and_scores_probabilities():
     assert model_metrics["examples"] == len(examples)
     assert baseline_metrics["examples"] == len(examples)
     assert "log_loss" in model_metrics
+
+
+def test_small_outcome_model_accepts_context_feature_names():
+    matches = [
+        make_match(1, "a", "b", 2, 0),
+        make_match(2, "c", "d", 1, 1),
+        make_match(3, "a", "c", 2, 1),
+        make_match(4, "b", "d", 0, 1),
+        make_match(5, "a", "d", 3, 1),
+        make_match(6, "b", "c", 1, 2),
+        make_match(7, "a", "b", 1, 0),
+        make_match(8, "c", "d", 2, 2),
+        make_match(9, "d", "a", 0, 2),
+        make_match(10, "c", "b", 2, 0),
+    ]
+    examples, _states = build_examples(matches, min_prior_matches=2)
+    enriched = [
+        type(example)(
+            **{
+                **example.__dict__,
+                "features": {
+                    **example.features,
+                    "ctx_roster_market_value_log": 1.0 if example.home_team_code in {"A", "C"} else -1.0,
+                },
+            }
+        )
+        for example in examples
+    ]
+
+    feature_names = (*FEATURE_NAMES, "ctx_roster_market_value_log")
+    model = train_multinomial_logistic(enriched, epochs=2, feature_names=feature_names)
+
+    assert model.feature_names == feature_names
+    assert "ctx_roster_market_value_log" in model.to_dict()["feature_names"]
