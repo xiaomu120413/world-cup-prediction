@@ -57,7 +57,7 @@ export default function MatchDetailPage() {
           </View>
           <View>
             <Text className='app-title app-title--sm'>AI 赛前报告</Text>
-            <Text className='page-head__subtitle'>{match.status} · {updatedAt}</Text>
+            <Text className='page-head__subtitle'>{match.versionLabel || match.status} · {updatedAt}</Text>
           </View>
         </View>
         <View className='icon-button'>
@@ -75,8 +75,8 @@ export default function MatchDetailPage() {
             <Text className='fixture__name'>{match.home}</Text>
           </View>
           <View className='fixture__middle'>
-            <Text className='fixture__time'>{match.time}</Text>
             <Text className={match.score ? 'fixture__score' : 'fixture__vs'}>{match.score || 'VS'}</Text>
+            <Text className='fixture__time'>{match.time}</Text>
             <Text className='fixture__venue'>{match.venue}</Text>
           </View>
           <View className='fixture__team fixture__team--away'>
@@ -113,9 +113,9 @@ export default function MatchDetailPage() {
           <Icon name='trophy' color='#16a34a' size={36} />
         </View>
         <View className='impact-card__content'>
-          <Text className='impact-card__title'>数据状态</Text>
+          <Text className='impact-card__title'>影响因素</Text>
           {match.sourceConfidence !== undefined ? (
-            <ProgressRow label='赛程来源可信度' value={match.sourceConfidence} meta={match.source} />
+            <ProgressRow label='数据可信度' value={match.sourceConfidence} meta={match.source} />
           ) : null}
           <View className='data-point-list'>
             {(match.dataPoints || []).map(item => (

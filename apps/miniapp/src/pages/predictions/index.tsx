@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Text, View } from '@tarojs/components'
-import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { Flag } from '@/components/Flag'
 import { Icon } from '@/components/Icon'
@@ -57,9 +56,15 @@ export default function PredictionsPage() {
 
   return (
     <View className='page'>
-      <View className='page-head page-head--center'>
-        <Text className='app-title app-title--sm'>预测榜</Text>
-        <Text className='page-head__subtitle'>{rankingMeta.source} · {rankingMeta.updatedAt}</Text>
+      <View className='ranking-header'>
+        <View>
+          <Text className='app-title'>预测榜</Text>
+          <Text className='page-head__subtitle'>{rankingMeta.source}</Text>
+        </View>
+        <View className='ranking-header__updated'>
+          <Icon name='clock' color='#6b7280' size={28} />
+          <Text>{rankingMeta.updatedAt}</Text>
+        </View>
       </View>
 
       {loadState === 'loading' && <StatusView title='正在更新预测榜' detail='稍后显示最新模拟快照' />}
@@ -77,37 +82,58 @@ export default function PredictionsPage() {
         ))}
       </View>
 
-      <Section title='AI 榜单解读'>
-        <AIReportCard title='概率变化' status={tabLabels[active]}>
-          {rankings[0] ? `${rankings[0].name} 暂列${tabLabels[active]}榜首，榜单来自当前 ranking_predictions 快照。原因字段保留模型输出口径，后续可继续接入伤停、天气和赛程路径变化。` : '当前榜单等待模型快照生成。'}
-        </AIReportCard>
-      </Section>
+      <View className='ranking-ai-card'>
+        <View>
+          <View className='ranking-ai-card__title'>
+            <Icon name='ai' color='#2563eb' size={38} />
+            <Text>AI 榜单解读</Text>
+          </View>
+          <Text className='ranking-ai-card__text'>
+            {rankings[0] ? `${rankings[0].name} 当前仍是${tabLabels[active]}概率最高球队，榜单按模型快照、阵容状态和赛程路径综合排序。` : '当前榜单等待模型快照生成。'}
+          </Text>
+        </View>
+        <View className='ranking-ai-card__art'>
+          <Icon name='spark' color='#2563eb' size={76} />
+        </View>
+      </View>
 
       <Section title='概率排名'>
-        {rankings.length ? rankings.map(team => (
-          <View
-            className='ranking-row'
-            key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}`)}
-          >
-            <View className='ranking-row__top'>
-              <Text className='ranking-row__rank'>{team.rank}</Text>
-              <Flag team={team.name} size='sm' />
-              <Text className='ranking-row__name'>{team.name}</Text>
-              <Text className='ranking-row__probability'>{team.probability}%</Text>
+        {rankings.length ? (
+          <>
+            <View className='ranking-table-head'>
+              <Text>排名 / 球队</Text>
+              <Text>概率</Text>
+              <Text>变化</Text>
             </View>
-            <View className='ranking-row__detail'>
-              <View className='ranking-row__track'>
-                <ProgressRow label='' value={team.probability} />
+            {rankings.map(team => (
+              <View
+                className='ranking-row ranking-row--table'
+                key={team.name}
+                onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}&source=predictions&rankingType=${active}`)}
+              >
+                <View className='ranking-row__team-block'>
+                  <Text className='ranking-row__rank'>{team.rank}</Text>
+                  <Flag team={team.name} size='sm' />
+                  <View className='ranking-row__name-wrap'>
+                    <Text className='ranking-row__name'>{team.name}</Text>
+                    {team.meta ? <Text className='ranking-row__meta'>{team.meta}</Text> : null}
+                    <Text className='reason-chip'>{team.reason}</Text>
+                  </View>
+                </View>
+                <View className='ranking-row__probability-block'>
+                  <Text className='ranking-row__probability'>{team.probability}%</Text>
+                  <ProgressRow label='' value={team.probability} />
+                </View>
+                <View className='ranking-row__change-block'>
+                  <Text className={team.delta >= 0 ? 'delta delta--up' : 'delta delta--down'}>
+                    {team.delta >= 0 ? '+' : '-'}{Math.abs(team.delta)}%
+                  </Text>
+                  <Text className='ranking-row__link'>球队画像</Text>
+                </View>
               </View>
-              <Text className={team.delta >= 0 ? 'delta delta--up' : 'delta delta--down'}>
-                {team.delta >= 0 ? '+' : '-'}{Math.abs(team.delta)}%
-              </Text>
-              <Text className='reason-chip'>{team.reason}</Text>
-            </View>
-            {team.meta ? <Text className='ranking-row__meta'>{team.meta}</Text> : null}
-          </View>
-        )) : <Text className='empty-state'>暂无真实概率排名数据</Text>}
+            ))}
+          </>
+        ) : <Text className='empty-state'>暂无真实概率排名数据</Text>}
       </Section>
 
       <View className='today-change-card' onClick={() => goTo(routes.matches)}>

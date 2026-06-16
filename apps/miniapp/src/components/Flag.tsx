@@ -1,16 +1,21 @@
-import { Image, Text, View } from '@tarojs/components'
+import { useEffect, useState } from 'react'
+import { Image, View } from '@tarojs/components'
+import { getLocalFlagAsset } from '@/assets/flags'
+import fallbackFlag from '@/assets/flags/fallback.svg'
 import { getFlagCodeByTeamName } from '@/services/teamResources'
 
 export function Flag({ team, size = 'md' }: { team: string; size?: 'sm' | 'md' | 'lg' }) {
   const code = getFlagCodeByTeamName(team)
+  const flagSrc = getLocalFlagAsset(code) || fallbackFlag
+  const [src, setSrc] = useState(flagSrc)
+
+  useEffect(() => {
+    setSrc(flagSrc)
+  }, [flagSrc])
 
   return (
     <View className={`flag flag--${size}`}>
-      {code ? (
-        <Image src={`https://flagcdn.com/w80/${code}.png`} mode='aspectFill' className='flag__image' />
-      ) : (
-        <Text className='flag__fallback'>{team.slice(0, 1)}</Text>
-      )}
+      <Image src={src} mode='aspectFit' className='flag__image' onError={() => setSrc(fallbackFlag)} />
     </View>
   )
 }
