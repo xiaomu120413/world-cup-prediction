@@ -1,9 +1,34 @@
 from fastapi.testclient import TestClient
 import pytest
 
+from app.api import routes as api_routes
+from app.core.config import Settings, get_settings
 from app.main import app
 
 client = TestClient(app)
+
+
+def mock_settings() -> Settings:
+    return Settings(data_backend="mock")
+
+
+def database_settings() -> Settings:
+    return Settings(data_backend="database")
+
+
+class EmptyDatabaseRepository:
+    def get_home_data(self, date, timezone):
+        return None
+
+    def list_rankings(self, ranking_type, limit):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def use_mock_backend_by_default():
+    app.dependency_overrides[get_settings] = mock_settings
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_health():
@@ -143,6 +168,43 @@ def test_player_detail_contract():
     response = client.get("/api/v1/players/mbappe")
     assert response.status_code == 200
     assert response.json()["data"]["recent_form"]["goals"] == 8
+
+
+def test_database_home_does_not_fallback_to_mock(monkeypatch):
+    app.dependency_overrides[get_settings] = database_settings
+    monkeypatch.setattr(api_routes, "cached_json", lambda settings, key, producer: producer())
+    monkeypatch.setattr(api_routes, "with_public_repository", lambda callback: callback(EmptyDatabaseRepository()))
+    try:
+        response = client.get("/api/v1/home")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "HOME_DATA_NOT_FOUND"
+
+
+def test_database_rankings_empty_result_does_not_fallback_to_mock(monkeypatch):
+    app.dependency_overrides[get_settings] = database_settings
+    monkeypatch.setattr(api_routes, "cached_json", lambda settings, key, producer: producer())
+    monkeypatch.setattr(api_routes, "with_public_repository", lambda callback: callback(EmptyDatabaseRepository()))
+    try:
+        response = client.get("/api/v1/predictions/rankings?type=champion")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"] == []
+
+
+def test_database_player_detail_does_not_expose_mock_player():
+    app.dependency_overrides[get_settings] = database_settings
+    try:
+        response = client.get("/api/v1/players/mbappe")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "PLAYER_NOT_FOUND"
 
 
 def test_admin_requires_token():

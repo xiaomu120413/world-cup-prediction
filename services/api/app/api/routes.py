@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, Header, Query
+from datetime import date as date_cls, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from app.collectors.catalog import collection_catalog_summary
 from app.collectors.runner import CollectorRunner
@@ -22,11 +25,25 @@ from app.data.mock_store import (
     UPDATED_AT,
 )
 from app.repositories.repository_provider import use_database, with_public_repository
-from app.predictions.service import BaselinePredictionService
+from app.predictions.service import DEFAULT_SMALL_MODEL_VERSION, BaselinePredictionService
 from app.scheduler.refresh import RefreshScheduler
 
 router = APIRouter()
 admin_router = APIRouter()
+
+
+def resolve_match_date(value: str | None, timezone_name: str) -> str:
+    if value:
+        try:
+            date_cls.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="date must use YYYY-MM-DD format") from exc
+        return value
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=400, detail="timezone is not supported") from exc
+    return datetime.now(zone).date().isoformat()
 
 
 def require_admin(
@@ -103,6 +120,7 @@ def home(
         )
         if home_data and home_data["champion_rankings"]:
             return envelope(home_data, updated_at=now_iso())
+        raise not_found("HOME_DATA_NOT_FOUND", "Home data not found")
 
     match = MATCHES[MATCH_ID]
     prediction = MATCH_PREDICTIONS[MATCH_ID]
@@ -132,22 +150,25 @@ def home(
 @router.get("/matches/today")
 def matches_today(
     date: str | None = None,
+    timezone: str = Query(default="Asia/Shanghai"),
     include_prediction: bool = True,
     settings: Settings = Depends(get_settings),
 ):
+    match_date = resolve_match_date(date, timezone)
     if use_database(settings):
         matches = cached_json(
             settings,
-            f"public:matches:today:{date or 'default'}:{include_prediction}",
+            f"public:matches:today:{match_date}:{timezone}:{include_prediction}",
             lambda: with_public_repository(
                 lambda repo: repo.list_matches(
                     include_prediction=include_prediction,
                     real_only=repo.has_real_matches(),
+                    match_date=match_date,
+                    timezone=timezone,
                 )
             ),
         )
-        if matches:
-            return list_envelope(matches, updated_at=now_iso(), date=date)
+        return list_envelope(matches, updated_at=now_iso(), date=match_date)
 
     matches = [
         {
@@ -195,7 +216,10 @@ def match_prediction(match_id: str, settings: Settings = Depends(get_settings)):
 
 
 @router.get("/matches/{match_id}/ai-report")
-def match_ai_report(match_id: str):
+def match_ai_report(match_id: str, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        raise not_found("AI_REPORT_NOT_FOUND", "AI report not found")
+
     report = AI_REPORTS.get(match_id)
     if not report:
         raise not_found("AI_REPORT_NOT_FOUND", "AI report not found")
@@ -210,8 +234,7 @@ def groups(settings: Settings = Depends(get_settings)):
             "public:groups",
             lambda: with_public_repository(lambda repo: repo.list_groups()),
         )
-        if values:
-            return list_envelope(values, updated_at=now_iso())
+        return list_envelope(values, updated_at=now_iso())
 
     return list_envelope(GROUPS, updated_at=UPDATED_AT)
 
@@ -226,6 +249,7 @@ def group_detail(group_id: str, settings: Settings = Depends(get_settings)):
         )
         if group:
             return envelope(group, updated_at=now_iso())
+        raise not_found("GROUP_NOT_FOUND", "Group not found")
 
     group = GROUP_DETAILS.get(group_id)
     if not group:
@@ -243,6 +267,7 @@ def group_simulation(group_id: str, settings: Settings = Depends(get_settings)):
         )
         if simulation:
             return envelope(simulation, updated_at=now_iso())
+        raise not_found("SIMULATION_NOT_FOUND", "Simulation not found")
 
     simulation = GROUP_SIMULATIONS.get(group_id)
     if not simulation:
@@ -262,8 +287,7 @@ def prediction_rankings(
             f"public:rankings:{type}:{limit}",
             lambda: with_public_repository(lambda repo: repo.list_rankings(type, limit)),
         )
-        if ranking:
-            return envelope(ranking, ranking_type=type, updated_at=now_iso())
+        return envelope(ranking, ranking_type=type, updated_at=now_iso())
 
     ranking = RANKINGS.get(type)
     if ranking is None:
@@ -313,6 +337,7 @@ def team_profile(team_id: str, settings: Settings = Depends(get_settings)):
         database_profile = with_public_repository(lambda repo: repo.get_team_profile(team_id))
         if database_profile:
             return envelope(database_profile, updated_at=now_iso())
+        raise not_found("TEAM_PROFILE_NOT_FOUND", "Team profile not found")
 
     profile = TEAM_PROFILES.get(team_id)
     if not profile:
@@ -340,7 +365,10 @@ def team_matches(team_id: str, settings: Settings = Depends(get_settings)):
 
 
 @router.get("/players/{player_id}")
-def player_detail(player_id: str):
+def player_detail(player_id: str, settings: Settings = Depends(get_settings)):
+    if use_database(settings):
+        raise not_found("PLAYER_NOT_FOUND", "Player not found")
+
     player = PLAYERS.get(player_id)
     if not player:
         raise not_found("PLAYER_NOT_FOUND", "Player not found")
@@ -376,7 +404,8 @@ def recompute_predictions(payload: dict, settings: Settings = Depends(get_settin
             result = BaselinePredictionService(db).recompute(
                 scope=payload.get("scope", "matchday"),
                 match_ids=payload.get("match_ids") or None,
-                model_version=payload.get("model_version", "baseline_2026_06_13"),
+                model_version=payload.get("model_version", DEFAULT_SMALL_MODEL_VERSION),
+                model_kind=payload.get("model_kind"),
                 seed=payload.get("seed"),
             )
         return envelope(result)
@@ -386,7 +415,8 @@ def recompute_predictions(payload: dict, settings: Settings = Depends(get_settin
             "status": "accepted",
             "scope": payload.get("scope", "matchday"),
             "match_ids": payload.get("match_ids", []),
-            "model_version": payload.get("model_version", "baseline_2026_06_13"),
+            "model_version": payload.get("model_version", DEFAULT_SMALL_MODEL_VERSION),
+            "model_kind": payload.get("model_kind", "small_outcome"),
             "queued_at": now_iso(),
         }
     )

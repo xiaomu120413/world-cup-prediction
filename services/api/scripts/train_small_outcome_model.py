@@ -10,7 +10,7 @@ from math import log, log1p
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, asc, or_, select, text
+from sqlalchemy import and_, asc, func, or_, select, text
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -402,6 +402,20 @@ def top_coefficients(model, limit: int = 8) -> dict[str, list[dict[str, Any]]]:
 def load_scheduled_matches(db, limit: int):
     home_team = teams.alias("home_team")
     away_team = teams.alias("away_team")
+    latest_features = (
+        select(
+            model_features.c.entity_key.label("entity_key"),
+            func.max(model_features.c.as_of_at).label("as_of_at"),
+        )
+        .where(
+            and_(
+                model_features.c.entity_type == "match",
+                model_features.c.feature_set == FEATURE_CONTEXT_SET,
+            )
+        )
+        .group_by(model_features.c.entity_key)
+        .subquery()
+    )
     statement = (
         select(
             matches.c.public_id,
@@ -420,12 +434,14 @@ def load_scheduled_matches(db, limit: int):
         .select_from(
             matches.join(home_team, matches.c.home_team_id == home_team.c.id)
             .join(away_team, matches.c.away_team_id == away_team.c.id)
+            .outerjoin(latest_features, latest_features.c.entity_key == matches.c.public_id)
             .outerjoin(
                 model_features,
                 and_(
                     model_features.c.entity_type == "match",
                     model_features.c.entity_key == matches.c.public_id,
                     model_features.c.feature_set == FEATURE_CONTEXT_SET,
+                    model_features.c.as_of_at == latest_features.c.as_of_at,
                 ),
             )
         )

@@ -1,4 +1,7 @@
-from sqlalchemy import Select, and_, case, desc, func, select, text
+from datetime import date as date_cls, datetime, time, timedelta, timezone as utc_timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import Select, and_, case, desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.collectors.catalog import collection_catalog_summary
@@ -115,6 +118,8 @@ APPROVED_REAL_SOURCES = {
     "martj42_international_results",
 }
 
+WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
+
 
 def team_public_id(code: str, name_en: str | None = None) -> str:
     if code in TEAM_PUBLIC_IDS:
@@ -176,6 +181,14 @@ def match_payload(row) -> dict:
     }
 
 
+def matchday_bounds_utc(match_date: str, timezone_name: str = "Asia/Shanghai") -> tuple[datetime, datetime]:
+    local_date = date_cls.fromisoformat(match_date)
+    local_zone = ZoneInfo(timezone_name)
+    start_local = datetime.combine(local_date, time.min, tzinfo=local_zone)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(utc_timezone.utc), end_local.astimezone(utc_timezone.utc)
+
+
 class PublicDataRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -198,7 +211,13 @@ class PublicDataRepository:
         return PublicDataRepository.matches_query().where(matches.c.public_id == public_id)
 
     @staticmethod
-    def matches_query(limit: int | None = None, real_only: bool = False) -> Select:
+    def matches_query(
+        limit: int | None = None,
+        real_only: bool = False,
+        match_date: str | None = None,
+        timezone_name: str = "Asia/Shanghai",
+        min_kickoff_at: datetime | None = None,
+    ) -> Select:
         home = teams.alias("home_team")
         away = teams.alias("away_team")
         real_source_rank = case((matches.c.public_id.like("dongqiudi-%"), 0), else_=1)
@@ -237,10 +256,15 @@ class PublicDataRepository:
             .join(home, matches.c.home_team_id == home.c.id)
             .join(away, matches.c.away_team_id == away.c.id)
             .outerjoin(venues, matches.c.venue_id == venues.c.id)
-            .order_by(real_source_rank.asc(), status_rank.asc(), matches.c.kickoff_at.desc(), matches.c.public_id.asc())
+            .order_by(real_source_rank.asc(), status_rank.asc(), matches.c.kickoff_at.asc(), matches.c.public_id.asc())
         )
         if real_only:
             query = query.where(matches.c.public_id.like("dongqiudi-%"))
+        if match_date:
+            start_utc, end_utc = matchday_bounds_utc(match_date, timezone_name)
+            query = query.where(matches.c.kickoff_at >= start_utc, matches.c.kickoff_at < end_utc)
+        if min_kickoff_at is not None:
+            query = query.where(or_(matches.c.status == "live", matches.c.kickoff_at >= min_kickoff_at))
         if limit is not None:
             query = query.limit(limit)
         return query
@@ -295,7 +319,10 @@ class PublicDataRepository:
                 ).label("matches_finished"),
             )
             .outerjoin(matches, matches.c.stage_id == competition_stages.c.id)
-            .where(competition_stages.c.stage_type == "group")
+            .where(
+                competition_stages.c.stage_type == "group",
+                competition_stages.c.code.in_(WORLD_CUP_GROUP_CODES),
+            )
             .group_by(competition_stages.c.id, competition_stages.c.code, competition_stages.c.name)
             .order_by(competition_stages.c.sort_order.asc(), competition_stages.c.code.asc())
         )
@@ -950,8 +977,19 @@ class PublicDataRepository:
         limit: int | None = None,
         include_prediction: bool = False,
         real_only: bool = False,
+        match_date: str | None = None,
+        timezone: str = "Asia/Shanghai",
+        min_kickoff_at: datetime | None = None,
     ) -> list[dict]:
-        rows = self.db.execute(self.matches_query(limit, real_only=real_only)).mappings().all()
+        rows = self.db.execute(
+            self.matches_query(
+                limit,
+                real_only=real_only,
+                match_date=match_date,
+                timezone_name=timezone,
+                min_kickoff_at=min_kickoff_at,
+            )
+        ).mappings().all()
         values = [match_payload(row) for row in rows]
         if include_prediction:
             for value in values:
@@ -976,12 +1014,20 @@ class PublicDataRepository:
                 "draw": float(prediction.draw_prob),
                 "away_win": float(prediction.away_win_prob),
             },
+            "inference_mode": prediction.inference_mode,
+            "calibration_applied": prediction.calibration_applied,
+            "fallback_reason": prediction.fallback_reason,
+            "base_probabilities": prediction.base_probabilities,
             "expected_goals": {
                 "home": float(prediction.home_expected_goals),
                 "away": float(prediction.away_expected_goals),
             },
             "confidence": prediction.confidence,
             "key_factors": prediction.key_factors,
+            "feature_snapshot": prediction.feature_snapshot or {},
+            "match_feature_quality_status": prediction.feature_quality_status,
+            "match_feature_missing_count": prediction.feature_missing_count or 0,
+            "match_feature_sources": prediction.feature_sources or [],
             "scorelines": [
                 {
                     "home_goals": item.home_goals,
@@ -1187,23 +1233,34 @@ class PublicDataRepository:
             return None
         probabilities = prediction["probabilities"]
         home = probabilities["home_win"]
+        draw = probabilities["draw"]
         away = probabilities["away_win"]
-        if home > away:
-            tendency = "home"
-        elif away > home:
-            tendency = "away"
-        else:
+        if draw >= home and draw >= away:
             tendency = "draw"
+        elif home > away:
+            tendency = "home"
+        else:
+            tendency = "away"
         return {
             "tendency": tendency,
             "home_win_prob": home,
-            "draw_prob": probabilities["draw"],
+            "draw_prob": draw,
             "away_win_prob": away,
             "confidence": prediction["confidence"],
         }
 
     def get_home_data(self, date: str | None, timezone: str) -> dict | None:
-        matches_value = self.list_matches(limit=10, include_prediction=True, real_only=self.has_real_matches())
+        min_kickoff_at = None
+        if date is None:
+            min_kickoff_at = datetime.now(ZoneInfo(timezone)).astimezone(utc_timezone.utc)
+        matches_value = self.list_matches(
+            limit=10,
+            include_prediction=True,
+            real_only=self.has_real_matches(),
+            match_date=date,
+            timezone=timezone,
+            min_kickoff_at=min_kickoff_at,
+        )
         if not matches_value:
             return None
         featured_match = matches_value[0]

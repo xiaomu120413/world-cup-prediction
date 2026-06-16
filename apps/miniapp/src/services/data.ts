@@ -323,7 +323,9 @@ function formatTeamMeta(team: ApiTeam) {
 
 function mapReason(value?: string) {
   const reasonMap: Record<string, string> = {
-    baseline_strength: '基准强度',
+    baseline_strength: '模型强度',
+    tournament_path_strength: '赛程路径强度',
+    darkhorse_upside: '黑马上限',
     model_update: '模型更新',
     player_form: '球员状态',
     schedule_path: '赛程路径'
@@ -336,7 +338,7 @@ function formatQuality(value?: string | null) {
     source: '真实源',
     derived: '派生',
     manual_verified: '人工核验',
-    mock: '模拟'
+    mock: '测试样本'
   }
   return value ? qualityMap[value] || value : '质量待标注'
 }
@@ -365,10 +367,10 @@ function mapDataStatus(status: ApiDataStatus): DataSourceStatus {
   const teamsCount = status.table_counts.dongqiudi_roster_teams || status.table_counts.teams || 0
   const matchesCount = status.table_counts.dongqiudi_matches || status.table_counts.matches || 0
   return {
-    label: status.mode === 'database' ? (auditPassed ? 'DB · 已核验' : 'DB · 待核验') : '后端 Mock',
+    label: status.mode === 'database' ? (auditPassed ? 'DB · 已核验' : 'DB · 待核验') : '后端离线模式',
     detail: primarySource === 'dongqiudi' ? 'dongqiudi/homepage' : latestRun ? `${latestRun.source}/${latestRun.job_type}` : status.backend,
     isDatabase: status.mode === 'database' && status.canonical_ready,
-    audit: status.mode === 'database' ? (auditPassed ? '真实数据审计通过' : '数据审计需关注') : '后端仍在 mock 模式',
+    audit: status.mode === 'database' ? (auditPassed ? '真实数据审计通过' : '数据审计需关注') : '后端未接真实库',
     counts: `${teamsCount}队 / ${matchesCount}场`,
     freshness: latestRun ? `${latestRun.source}/${latestRun.job_type} · ${latestRun.status}` : status.backend
   }
@@ -434,7 +436,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     sourceConfidence: sourceConfidence === undefined ? undefined : percentFromApi(sourceConfidence),
     modelStatus,
     expectedGoals,
-    insight: report?.content || apiMatch.ai_summary || (hasPrediction ? `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已基于当前标准表完成 baseline 预测。` : `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已从真实赛程源同步，预测、比分分布和 AI 证据等待后续任务生成。`),
+    insight: report?.content || apiMatch.ai_summary || (hasPrediction ? `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已基于历史赛果小模型和上下文特征校准生成预测。` : `${apiMatch.home_team.name} vs ${apiMatch.away_team.name} 已从真实赛程源同步，预测、比分分布和 AI 证据等待后续任务生成。`),
     dataPoints: [
       { label: '赛程状态', value: `${formatStatus(apiMatch.status, apiMatch.home_score, apiMatch.away_score)} · ${formatSourceConfidence(sourceConfidence)}` },
       { label: apiMatch.home_team.name, value: formatTeamMeta(apiMatch.home_team) },
@@ -477,7 +479,7 @@ export async function getHomeData(): Promise<HomeData> {
       upcoming_matches: ApiMatch[]
       champion_rankings: ApiRanking[]
     }>('/api/v1/home'),
-    getDataStatus().catch(() => mockDataSourceStatus)
+    getDataStatus()
   ])
 
   return {

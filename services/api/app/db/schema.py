@@ -451,10 +451,11 @@ model_features = Table(
     Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     CheckConstraint("entity_type in ('match', 'team', 'player')", name="entity_type_valid"),
     CheckConstraint("quality_status in ('complete', 'partial', 'insufficient')", name="quality_status_valid"),
-    UniqueConstraint("entity_type", "entity_key", "feature_set", name="uq_model_features_entity_feature_set"),
+    UniqueConstraint("entity_type", "entity_key", "feature_set", "as_of_at", name="uq_model_features_entity_feature_set_as_of"),
 )
 Index("idx_model_features_entity", model_features.c.entity_type, model_features.c.entity_key)
 Index("idx_model_features_feature_set", model_features.c.feature_set)
+Index("idx_model_features_latest", model_features.c.entity_type, model_features.c.entity_key, model_features.c.feature_set, model_features.c.as_of_at.desc())
 
 prediction_snapshots = Table(
     "prediction_snapshots",
@@ -477,6 +478,10 @@ match_predictions = Table(
     Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False),
     Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id", ondelete="CASCADE"), nullable=False),
     Column("model_version_id", UUID(as_uuid=True), ForeignKey("model_versions.id"), nullable=False),
+    Column("inference_mode", VARCHAR(64), nullable=False, server_default=text("'baseline'")),
+    Column("calibration_applied", Boolean, nullable=False, server_default=text("false")),
+    Column("fallback_reason", VARCHAR(128)),
+    Column("base_probabilities", JSONB),
     Column("home_win_prob", Numeric(6, 5), nullable=False),
     Column("draw_prob", Numeric(6, 5), nullable=False),
     Column("away_win_prob", Numeric(6, 5), nullable=False),
@@ -484,7 +489,12 @@ match_predictions = Table(
     Column("away_expected_goals", Numeric(5, 2), nullable=False),
     Column("confidence", VARCHAR(32), nullable=False),
     Column("key_factors", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("feature_snapshot", JSONB),
+    Column("feature_quality_status", VARCHAR(32)),
+    Column("feature_missing_count", Integer),
+    Column("feature_sources", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("inference_mode in ('baseline', 'context_calibrated', 'history_core_fallback', 'history_core')", name="inference_mode_valid"),
     CheckConstraint("home_win_prob >= 0 and home_win_prob <= 1", name="home_win_prob_range"),
     CheckConstraint("draw_prob >= 0 and draw_prob <= 1", name="draw_prob_range"),
     CheckConstraint("away_win_prob >= 0 and away_win_prob <= 1", name="away_win_prob_range"),

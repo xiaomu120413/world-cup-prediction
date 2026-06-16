@@ -380,11 +380,12 @@ create table if not exists model_features (
     missing_features jsonb not null default '[]'::jsonb,
     quality_status varchar(32) not null check (quality_status in ('complete', 'partial', 'insufficient')),
     generated_at timestamptz not null default now(),
-    unique (entity_type, entity_key, feature_set)
+    unique (entity_type, entity_key, feature_set, as_of_at)
 );
 
 create index if not exists idx_model_features_entity on model_features(entity_type, entity_key);
 create index if not exists idx_model_features_feature_set on model_features(feature_set);
+create index if not exists idx_model_features_latest on model_features(entity_type, entity_key, feature_set, as_of_at desc);
 
 create table if not exists prediction_snapshots (
     id uuid primary key default gen_random_uuid(),
@@ -403,6 +404,10 @@ create table if not exists match_predictions (
     match_id uuid not null references matches(id) on delete cascade,
     prediction_snapshot_id uuid not null references prediction_snapshots(id) on delete cascade,
     model_version_id uuid not null references model_versions(id),
+    inference_mode varchar(64) not null default 'baseline' check (inference_mode in ('baseline', 'context_calibrated', 'history_core_fallback', 'history_core')),
+    calibration_applied boolean not null default false,
+    fallback_reason varchar(128),
+    base_probabilities jsonb,
     home_win_prob numeric(6,5) not null,
     draw_prob numeric(6,5) not null,
     away_win_prob numeric(6,5) not null,
@@ -410,6 +415,10 @@ create table if not exists match_predictions (
     away_expected_goals numeric(5,2) not null,
     confidence varchar(32) not null,
     key_factors jsonb not null default '[]'::jsonb,
+    feature_snapshot jsonb,
+    feature_quality_status varchar(32),
+    feature_missing_count int,
+    feature_sources jsonb not null default '[]'::jsonb,
     generated_at timestamptz not null default now(),
     check (home_win_prob >= 0 and home_win_prob <= 1),
     check (draw_prob >= 0 and draw_prob <= 1),

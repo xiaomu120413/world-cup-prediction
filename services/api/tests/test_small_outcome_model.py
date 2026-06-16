@@ -97,6 +97,21 @@ def test_small_outcome_model_accepts_context_feature_names():
     assert "ctx_roster_market_value_log" in model.to_dict()["feature_names"]
 
 
+def test_small_outcome_model_round_trips_from_model_version_payload():
+    matches = [
+        make_match(1, "a", "b", 2, 0),
+        make_match(2, "a", "b", 1, 1),
+        make_match(3, "a", "b", 0, 1),
+        make_match(4, "a", "b", 3, 1),
+    ]
+    examples, _states = build_examples(matches, min_prior_matches=1)
+    model = train_multinomial_logistic(examples, epochs=2, learning_rate=0.01)
+    restored = type(model).from_dict(model.to_dict())
+
+    assert restored.feature_names == model.feature_names
+    assert restored.predict_proba(examples[0].features) == pytest.approx(model.predict_proba(examples[0].features))
+
+
 def test_prediction_uses_history_fallback_when_context_team_is_missing():
     class FixedModel:
         feature_names = ("elo_diff",)

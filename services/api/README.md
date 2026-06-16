@@ -4,11 +4,11 @@ FastAPI backend for the World Cup prediction mini program.
 
 Current scope:
 
-- Public API contract with in-memory mock data.
+- Public API in database mode by default.
 - Health/version endpoints.
 - Match, group, ranking, team and AI report endpoints.
 - Admin task trigger placeholders.
-- PostgreSQL schema, Alembic migration entrypoint and local seed script.
+- PostgreSQL schema, Alembic migration entrypoint, collectors, feature snapshots and prediction services.
 
 ## Local Run
 
@@ -16,20 +16,18 @@ Current scope:
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+$env:DATA_BACKEND="database"
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+uvicorn app.main:app --reload --port 8001
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:8000/docs
+http://127.0.0.1:8001/docs
 ```
 
-If port 8000 is occupied locally, use:
-
-```bash
-uvicorn app.main:app --reload --port 8001
-```
+Use port `8001` for the local frontend integration unless another port is explicitly configured in `TARO_APP_API_BASE_URL`.
 
 ## Smoke Test
 
@@ -59,13 +57,13 @@ Run migrations:
 alembic upgrade head
 ```
 
-Or initialize schema and mock seed data directly:
+Or initialize the schema directly:
 
 ```bash
-python scripts/init_db.py
+python scripts/init_db.py --no-seed
 ```
 
-The first migration reuses `db/migrations/001_initial_schema.sql`, and mock data lives in `db/seeds/001_mock_data.sql`.
+The first migration reuses `db/migrations/001_initial_schema.sql`. Mock seed data remains available only for isolated local experiments and contract-test fixtures.
 
 Run PostgreSQL-backed integration tests:
 
@@ -97,11 +95,17 @@ If Redis is unavailable, the API falls back to direct repository reads.
 
 ## Prediction Recompute
 
-Run the deterministic MVP baseline locally:
+Run the current formal prediction pipeline locally. By default this writes today's pre-match `model_features` snapshot, trains or reuses the `small_outcome` model version, and writes `match_predictions` with `inference_mode`, base probabilities, feature snapshot and feature-source metadata:
 
 ```powershell
 $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
-python scripts/recompute_predictions.py --scope matchday --match-id usa-paraguay-2026-06-13 --seed 20260615
+python scripts/recompute_predictions.py --scope matchday --match-id usa-paraguay-2026-06-13 --seed 20260616
+```
+
+Emergency baseline fallback remains available:
+
+```powershell
+python scripts/recompute_predictions.py --model-kind baseline --model-version baseline_2026_06_13 --scope matchday
 ```
 
 Or trigger it through the admin API when `DATA_BACKEND=database`:
@@ -110,7 +114,7 @@ Or trigger it through the admin API when `DATA_BACKEND=database`:
 curl -X POST http://127.0.0.1:8000/api/admin/predictions/recompute `
   -H "Authorization: Bearer change-me" `
   -H "Content-Type: application/json" `
-  -d '{"scope":"matchday","match_ids":["usa-paraguay-2026-06-13"],"seed":20260615}'
+  -d '{"scope":"matchday","match_ids":["usa-paraguay-2026-06-13"],"seed":20260616}'
 ```
 
 ## Collectors
@@ -236,8 +240,9 @@ python scripts/build_match_features.py --dry-run
 python scripts/build_match_features.py
 ```
 
-By default this writes only matches where both teams have canonical Dongqiudi `DQD-P*` roster coverage. Use
-`--include-non-roster-matches` only for diagnostics, because non-roster matches are not training-ready.
+By default this writes or updates one pre-match snapshot per local Asia/Shanghai day using `as_of_at=YYYY-MM-DDT00:00:00+08:00`. Re-running on the same day updates the same snapshot; passing `--as-of-at` stores a separate explicit snapshot for cases such as a T-90m lineup refresh.
+
+By default this writes only matches where both teams have canonical Dongqiudi `DQD-P*` roster coverage. Use `--include-non-roster-matches` only for diagnostics, because non-roster matches are not training-ready.
 
 The Dongqiudi homepage adapter stores a raw homepage snapshot, extracts World Cup match blocks and candidate football news, then normalizes them into canonical tables:
 

@@ -47,8 +47,9 @@ def test_model_features_declares_idempotent_feature_key():
     table = metadata.tables["model_features"]
     constraints = {constraint.name for constraint in table.constraints}
 
-    assert "uq_model_features_entity_feature_set" in constraints
+    assert "uq_model_features_entity_feature_set_as_of" in constraints
     assert "ck_model_features_quality_status_valid" in constraints
+    assert {"entity_type", "entity_key", "feature_set", "as_of_at"}.issubset(table.c.keys())
 
 
 def test_player_aliases_declares_source_identity_key():

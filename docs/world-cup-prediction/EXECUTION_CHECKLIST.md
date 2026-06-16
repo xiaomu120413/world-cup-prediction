@@ -43,7 +43,7 @@ AI 解读能生成
 PostgreSQL 数据库
 Redis 缓存
 数据采集任务
-Baseline 预测任务
+正式预测任务
 AI 解读任务
 小程序体验版
 ```
@@ -65,10 +65,10 @@ AI 解读任务
 | 阶段 | 名称 | 目标 | 验收结果 |
 | --- | --- | --- | --- |
 | M0 | 基础设施 | 服务器、域名、HTTPS、仓库、数据库准备完成 | 小程序可请求测试 API |
-| M1 | 前端原型 | 5 个核心页面用 mock 数据跑通 | 可在 H5 和微信开发者工具预览 |
+| M1 | 前端原型 | 5 个核心页面用离线 fixture 跑通 | 可在 H5 和微信开发者工具预览 |
 | M2 | 后端 API | 小程序所需 API 可返回稳定数据 | API 文档和接口测试通过 |
 | M3 | 数据采集 | 赛程、积分榜、球员榜可低频入库 | 采集任务可重复运行 |
-| M4 | 预测链路 | Baseline 预测、比分概率、出线模拟可生成 | 每场比赛有预测结果 |
+| M4 | 预测链路 | 双层小模型预测、比分概率、出线模拟可生成 | 每场比赛有预测结果 |
 | M5 | AI 情报 | 新闻抽取和 AI 解读可入库展示 | 比赛详情有 AI 报告 |
 | M6 | 小程序联调 | 小程序从后端读取真实数据 | 体验版可完整浏览 |
 | M7 | 上线准备 | 监控、备份、审核材料、验收完成 | 可提交微信审核 |
@@ -79,13 +79,13 @@ AI 解读任务
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| M1 | 已完成前端骨架 | `apps/miniapp` 已实现 5 个核心页面、mock 数据、通用组件和底部导航。 |
+| M1 | 已完成前端骨架 | `apps/miniapp` 已实现 5 个核心页面、离线 fixture、通用组件和底部导航。 |
 | M1 验证 | 已通过 | `npm run typecheck`、`npm run build:h5`、`npm run build:weapp` 已通过。 |
 | M1 视觉 QA | 已通过 | 390 x 844 视口下检查首页、比赛详情、小组、预测榜、球队页，无横向溢出。 |
 | M2 设计 | 已完成 | `DATA_MODEL.md`、`API_CONTRACT.md`、`FUNCTIONAL_DESIGN.md` 已定义数据表、接口合约和功能闭环。 |
-| M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、mock 数据接口、OpenAPI 文档和契约测试。 |
-| M2 数据库 | 进行中 | `services/api/db` 已提供初始 PostgreSQL schema 和 mock seed；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本、Docker Compose 已接入。`matches`、`predictions`、`teams` 已通过 PostgreSQL 读库集成测试，默认仍使用 mock。 |
-| M6 小程序联调 | 已开始 | `apps/miniapp/src/services/data.ts` 已接入 API service 层，支持 `TARO_APP_API_BASE_URL` 从 mock 切后端 API；H5 API 模式 smoke 已通过。 |
+| M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、数据库默认读取、OpenAPI 文档和契约测试。 |
+| M2 数据库 | 已切到数据库默认路径 | `services/api/db` 已提供 PostgreSQL schema；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本、Docker Compose 已接入。真实数据审计通过后，公共 API 默认从数据库读取，mock 仅保留给测试 fixture。 |
+| M6 小程序联调 | 已开始 | `apps/miniapp/src/services/data.ts` 已接入 API service 层，API 构建通过 `TARO_APP_API_BASE_URL` 直连后端真实数据；H5 API 模式 smoke 已通过。 |
 
 ## 4. M0 基础设施
 
@@ -145,7 +145,7 @@ SSL Labs / 浏览器证书检查
 | --- | --- | --- |
 | M1-01 | 初始化 Taro 项目 | `apps/miniapp` |
 | M1-02 | 配置 TypeScript 和基础样式 | 可编译 |
-| M1-03 | 建立 mock 数据 | `src/services/mock.ts` |
+| M1-03 | 建立离线 fixture 数据 | `src/services/mock.ts` |
 | M1-04 | 实现底部导航 | 比赛 / 小组 / 预测 / 球队 |
 | M1-05 | 实现首页 | 今日比赛、AI 简报、冠军概率 |
 | M1-06 | 实现比赛详情页 | AI 报告、概率、比分、证据 |
@@ -183,7 +183,7 @@ StatusView
 - 球队页能展示球队评分、近期状态、关键球员和风险提醒。
 - 所有页面在 390px 宽度下无明显文字重叠。
 - 页面跳转路径可用。
-- 所有核心页面有 mock 数据。
+- 所有核心页面有离线 fixture 数据。
 - 所有接口异常场景有兜底 UI。
 
 视觉验收：
@@ -531,7 +531,7 @@ OpenAI 超时模拟
 
 | ID | 任务 | 交付物 |
 | --- | --- |
-| M6-01 | service 层从 mock 切 API | `services/api.ts` |
+| M6-01 | service 层接入 API | `services/api.ts` |
 | M6-02 | 配置环境 API base URL | dev/prod |
 | M6-03 | 微信开发者工具联调 | 体验版 |
 | M6-04 | 配置 request 合法域名 | 小程序后台 |
@@ -794,7 +794,7 @@ Update date: 2026-06-15
 
 - `DATA_BACKEND=database` now covers home, matches today, match detail, match prediction, teams, team detail, team profile, team matches, prediction rankings, groups, group detail, and group simulation.
 - PostgreSQL seed data now includes ranking predictions, group standings, and group simulation rows for the local baseline.
-- Routes keep mock fallback for API areas where detailed content has not been collected yet.
+- Database-mode routes no longer fall back to mock data; missing real data must surface as an empty result or explicit 404.
 - Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 33 tests.
 
 ## Backend Cache Update

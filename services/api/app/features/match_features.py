@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from math import log1p
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,6 +22,7 @@ from app.db.schema import (
 
 FEATURE_SET = "match_pre_match_v1"
 FEATURE_SCHEMA_VERSION = "2026-06-15.match-pre-v1"
+API_TZ = ZoneInfo("Asia/Shanghai")
 
 TEAM_STAT_METRICS = (
     "goals",
@@ -136,13 +138,27 @@ def quality_status(missing_features: list[str]) -> str:
     return "insufficient"
 
 
+def daily_snapshot_time(now: datetime | None = None) -> datetime:
+    value = now or datetime.now(API_TZ)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=API_TZ)
+    return value.astimezone(API_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 class MatchFeatureBuilder:
     def __init__(self, db: Session):
         self.db = db
 
-    def build(self, public_ids: list[str] | None = None, dry_run: bool = False, roster_only: bool = True) -> dict[str, Any]:
+    def build(
+        self,
+        public_ids: list[str] | None = None,
+        dry_run: bool = False,
+        roster_only: bool = True,
+        snapshot_as_of_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        snapshot_time = snapshot_as_of_at or daily_snapshot_time()
         rows = self.load_matches(public_ids, roster_only=roster_only)
-        feature_rows = [self.build_for_match(row) for row in rows]
+        feature_rows = [self.build_for_match(row, snapshot_time) for row in rows]
         if not dry_run and feature_rows:
             self.write_features(feature_rows)
             self.db.commit()
@@ -156,6 +172,7 @@ class MatchFeatureBuilder:
             "matches_read": len(rows),
             "features_written": 0 if dry_run else len(feature_rows),
             "roster_only": roster_only,
+            "snapshot_as_of_at": snapshot_time.isoformat(),
             "quality_counts": quality_counts,
         }
 
@@ -208,10 +225,11 @@ class MatchFeatureBuilder:
             )
         return [dict(row) for row in self.db.execute(query).mappings().all()]
 
-    def build_for_match(self, match_row: dict[str, Any]) -> dict[str, Any]:
-        as_of_at = match_row["kickoff_at"]
-        home = self.team_profile(match_row, "home", as_of_at)
-        away = self.team_profile(match_row, "away", as_of_at)
+    def build_for_match(self, match_row: dict[str, Any], snapshot_as_of_at: datetime) -> dict[str, Any]:
+        kickoff_at = match_row["kickoff_at"]
+        feature_cutoff_at = min(snapshot_as_of_at, kickoff_at)
+        home = self.team_profile(match_row, "home", feature_cutoff_at)
+        away = self.team_profile(match_row, "away", feature_cutoff_at)
         weather = self.weather_features(match_row.get("venue_id"))
         numeric, missing = assemble_numeric_features(match_row, home, away, weather)
         source_summary = {
@@ -238,13 +256,17 @@ class MatchFeatureBuilder:
             "home": home["source_summary"],
             "away": away["source_summary"],
             "weather_available": weather is not None,
+            "snapshot_as_of_at": snapshot_as_of_at.isoformat(),
+            "feature_cutoff_at": feature_cutoff_at.isoformat(),
         }
         features = {
             "identity": {
                 "match_id": match_row["public_id"],
                 "home_team": match_row["home_code"],
                 "away_team": match_row["away_code"],
-                "kickoff_at": as_of_at.isoformat(),
+                "kickoff_at": kickoff_at.isoformat(),
+                "snapshot_as_of_at": snapshot_as_of_at.isoformat(),
+                "feature_cutoff_at": feature_cutoff_at.isoformat(),
                 "neutral_site": bool(match_row["neutral_site"]),
                 "venue_code": match_row.get("venue_code"),
             },
@@ -260,7 +282,7 @@ class MatchFeatureBuilder:
             "entity_key": match_row["public_id"],
             "feature_set": FEATURE_SET,
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
-            "as_of_at": as_of_at,
+            "as_of_at": snapshot_as_of_at,
             "features": features,
             "source_summary": source_summary,
             "missing_features": sorted(set(missing)),
@@ -461,7 +483,7 @@ class MatchFeatureBuilder:
         statement = pg_insert(model_features).values(rows)
         self.db.execute(
             statement.on_conflict_do_update(
-                constraint="uq_model_features_entity_feature_set",
+                constraint="uq_model_features_entity_feature_set_as_of",
                 set_={
                     "feature_schema_version": statement.excluded.feature_schema_version,
                     "as_of_at": statement.excluded.as_of_at,

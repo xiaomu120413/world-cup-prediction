@@ -31,3 +31,31 @@ def test_teams_query_filters_to_roster_teams():
     assert "EXISTS" in sql
     assert "players.team_id = teams.id" in sql
     assert "players.code LIKE 'DQD-P%%'" in sql
+
+
+def test_matches_query_filters_matchday_and_orders_upcoming_ascending():
+    sql = compile_query(PublicDataRepository.matches_query(real_only=True, match_date="2026-06-17"))
+
+    assert "matches.public_id LIKE 'dongqiudi-%%'" in sql
+    assert "matches.kickoff_at >=" in sql
+    assert "matches.kickoff_at <" in sql
+    assert "matches.kickoff_at ASC" in sql
+
+
+def test_groups_query_exposes_only_world_cup_letter_groups():
+    sql = compile_query(PublicDataRepository.groups_query())
+
+    assert "competition_stages.code IN" in sql
+    assert "'group-a'" in sql
+    assert "'group-l'" in sql
+
+
+def test_prediction_summary_marks_draw_when_draw_is_highest():
+    summary = PublicDataRepository.prediction_summary(
+        {
+            "probabilities": {"home_win": 0.31, "draw": 0.36, "away_win": 0.33},
+            "confidence": "medium",
+        }
+    )
+
+    assert summary["tendency"] == "draw"

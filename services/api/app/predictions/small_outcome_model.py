@@ -212,6 +212,15 @@ class Standardizer:
             for name in self.feature_names
         ]
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "Standardizer":
+        feature_names = tuple(payload.get("feature_names") or FEATURE_NAMES)
+        return cls(
+            means={name: float(value) for name, value in payload["means"].items()},
+            stds={name: float(value) for name, value in payload["stds"].items()},
+            feature_names=feature_names,
+        )
+
 
 @dataclass
 class SmallOutcomeModel:
@@ -237,6 +246,16 @@ class SmallOutcomeModel:
             },
             "weights": self.weights,
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SmallOutcomeModel":
+        feature_names = tuple(payload.get("feature_names") or FEATURE_NAMES)
+        return cls(
+            standardizer=Standardizer.from_dict(payload["standardizer"]),
+            weights=[[float(value) for value in row] for row in payload["weights"]],
+            labels=tuple(payload.get("labels") or LABELS),
+            feature_names=feature_names,
+        )
 
 
 def softmax(scores: list[float]) -> list[float]:
