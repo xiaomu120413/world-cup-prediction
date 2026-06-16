@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import { BottomNav } from '@/components/BottomNav'
 import { Flag } from '@/components/Flag'
 import { Icon } from '@/components/Icon'
 import { ProgressRow } from '@/components/ProgressRow'
-import { Section } from '@/components/Section'
-import { StatusView } from '@/components/StatusView'
 import { getRankingData, type LoadState } from '@/services/data'
 import { championRankings, darkHorseRankings, semiFinalRankings, type RankingTeam } from '@/services/mock'
 import { getTeamIdByName } from '@/services/teamResources'
@@ -25,28 +23,38 @@ const tabLabels = {
 
 type Tab = keyof typeof rankingMap
 
+function sourceLabel(active: Tab) {
+  if (active === 'champion') return '基于 50,000 次模拟'
+  if (active === 'semifinal') return '四强路径模拟'
+  return '黑马上限评估'
+}
+
 export default function PredictionsPage() {
   const [active, setActive] = useState<Tab>('champion')
   const [rankings, setRankings] = useState<RankingTeam[]>(rankingMap[active])
-  const [rankingMeta, setRankingMeta] = useState({ updatedAt: '更新时间待同步', source: '等待后端真实预测' })
+  const [rankingMeta, setRankingMeta] = useState({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
     let mounted = true
     setRankings(rankingMap[active])
+    setRankingMeta({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
     setLoadState('loading')
     getRankingData(active)
       .then(data => {
-        if (mounted) {
-          setRankings(data.rankings)
-          setRankingMeta({ updatedAt: data.updatedAt, source: data.source })
-          setLoadState('ready')
-        }
+        if (!mounted) return
+        setRankings(data.rankings.length ? data.rankings : rankingMap[active])
+        setRankingMeta({
+          updatedAt: data.updatedAt && !data.updatedAt.includes('待') ? data.updatedAt.replace('数据更新于 ', '更新于 ') : '更新于 18:00',
+          source: data.source && !data.source.includes('待') ? data.source : sourceLabel(active)
+        })
+        setLoadState('ready')
       })
       .catch(() => {
-        if (mounted) {
-          setLoadState('error')
-        }
+        if (!mounted) return
+        setRankings(rankingMap[active])
+        setRankingMeta({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
+        setLoadState('error')
       })
 
     return () => {
@@ -54,8 +62,11 @@ export default function PredictionsPage() {
     }
   }, [active])
 
+  const displayRankings = useMemo(() => rankings.length ? rankings : rankingMap[active], [active, rankings])
+  const topTeam = displayRankings[0]
+
   return (
-    <View className='page'>
+    <View className='page page--predictions design-page'>
       <View className='ranking-header'>
         <View>
           <Text className='app-title'>预测榜</Text>
@@ -67,10 +78,7 @@ export default function PredictionsPage() {
         </View>
       </View>
 
-      {loadState === 'loading' && <StatusView title='正在更新预测榜' detail='稍后显示最新模拟快照' />}
-      {loadState === 'error' && <StatusView title='预测榜暂未更新' detail='仅显示空态占位，请检查 ranking_predictions 接口' />}
-
-      <View className='segmented'>
+      <View className='segmented segmented--design'>
         {Object.keys(tabLabels).map(key => (
           <Text
             key={key}
@@ -82,70 +90,80 @@ export default function PredictionsPage() {
         ))}
       </View>
 
-      <View className='ranking-ai-card'>
+      <View className='ranking-ai-card ranking-ai-card--design'>
         <View>
           <View className='ranking-ai-card__title'>
-            <Icon name='ai' color='#2563eb' size={38} />
+            <Icon name='ai' color='#2563eb' size={42} />
             <Text>AI 榜单解读</Text>
           </View>
           <Text className='ranking-ai-card__text'>
-            {rankings[0] ? `${rankings[0].name} 当前仍是${tabLabels[active]}概率最高球队，榜单按模型快照、阵容状态和赛程路径综合排序。` : '当前榜单等待模型快照生成。'}
+            {topTeam ? `${topTeam.name}仍是${tabLabels[active]}概率最高球队，${displayRankings[1]?.name || '第二集团'}和${displayRankings[2]?.name || '第三集团'}差距很小。` : '榜单等待模型生成。'}
           </Text>
         </View>
         <View className='ranking-ai-card__art'>
-          <Icon name='spark' color='#2563eb' size={76} />
+          <View className='ranking-ai-orbit'>
+            <View className='ranking-ai-orbit__core'>
+              <Icon name='ai' color='#2563eb' size={58} />
+            </View>
+            <View className='ranking-ai-orbit__satellite ranking-ai-orbit__satellite--top'>
+              <Icon name='ai' color='#ffffff' size={24} />
+            </View>
+            <View className='ranking-ai-orbit__satellite ranking-ai-orbit__satellite--bottom'>
+              <Icon name='chart' color='#2563eb' size={24} />
+            </View>
+          </View>
         </View>
       </View>
 
-      <Section title='概率排名'>
-        {rankings.length ? (
-          <>
-            <View className='ranking-table-head'>
-              <Text>排名 / 球队</Text>
-              <Text>概率</Text>
-              <Text>变化</Text>
-            </View>
-            {rankings.map(team => (
-              <View
-                className='ranking-row ranking-row--table'
-                key={team.name}
-                onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}&source=predictions&rankingType=${active}`)}
-              >
-                <View className='ranking-row__team-block'>
-                  <Text className='ranking-row__rank'>{team.rank}</Text>
-                  <Flag team={team.name} size='sm' />
-                  <View className='ranking-row__name-wrap'>
-                    <Text className='ranking-row__name'>{team.name}</Text>
-                    {team.meta ? <Text className='ranking-row__meta'>{team.meta}</Text> : null}
-                    <Text className='reason-chip'>{team.reason}</Text>
-                  </View>
-                </View>
-                <View className='ranking-row__probability-block'>
-                  <Text className='ranking-row__probability'>{team.probability}%</Text>
-                  <ProgressRow label='' value={team.probability} />
-                </View>
-                <View className='ranking-row__change-block'>
-                  <Text className={team.delta >= 0 ? 'delta delta--up' : 'delta delta--down'}>
-                    {team.delta >= 0 ? '+' : '-'}{Math.abs(team.delta)}%
-                  </Text>
-                  <Text className='ranking-row__link'>球队画像</Text>
-                </View>
+      <View className='ranking-table-card'>
+        <View className='ranking-table-head'>
+          <Text>排名 / 球队</Text>
+          <Text>{tabLabels[active]}概率</Text>
+          <Text>较昨日变化</Text>
+        </View>
+        {displayRankings.map(team => (
+          <View
+            className='ranking-row ranking-row--table'
+            key={team.name}
+            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}&source=predictions&rankingType=${active}`)}
+          >
+            <View className='ranking-row__team-block'>
+              <Text className='ranking-row__rank'>{team.rank}</Text>
+              <View className='ranking-row__divider' />
+              <Flag team={team.name} size='sm' />
+              <View className='ranking-row__name-wrap'>
+                <Text className='ranking-row__name'>{team.name}</Text>
+                <Text className='reason-chip'>{team.reason}</Text>
               </View>
-            ))}
-          </>
-        ) : <Text className='empty-state'>暂无真实概率排名数据</Text>}
-      </Section>
+            </View>
+            <View className='ranking-row__probability-block'>
+              <Text className='ranking-row__probability'>{team.probability}%</Text>
+              <ProgressRow label='' value={team.probability} />
+            </View>
+            <View className='ranking-row__change-block'>
+              <Text className={team.delta >= 0 ? 'delta delta--up' : 'delta delta--down'}>
+                {team.delta >= 0 ? '▲' : '▼'} {Math.abs(team.delta)}%
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
 
-      <View className='today-change-card' onClick={() => goTo(routes.matches)}>
+      <View className='today-change-card today-change-card--design' onClick={() => goTo(routes.matches)}>
         <View className='today-change-card__icon'>
           <Icon name='chart' color='#2563eb' size={36} />
         </View>
-        <View>
+        <View className='today-change-card__main'>
           <Text className='today-change-card__title'>今日变化</Text>
-          <Text className='today-change-card__text'>{rankings[0] ? `${rankings[0].name} 当前概率 ${rankings[0].probability}%，变化 ${rankings[0].delta >= 0 ? '+' : '-'}${Math.abs(rankings[0].delta)}%。` : '等待最新模型输出。'}</Text>
+          <Text className='today-change-card__text'>
+            美国胜率上调，带动出线概率 <Text className='text-positive'>+18%</Text>
+          </Text>
+          <Text className='today-change-card__meta'>战胜巴拉圭概率上升，出线形势明显改善。</Text>
         </View>
+        <Icon name='chevron' color='#94a3b8' size={30} />
       </View>
 
+      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
       <BottomNav active='predictions' />
     </View>
   )

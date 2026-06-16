@@ -10,7 +10,10 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
     <View className='evidence-list'>
       {items.map(item => (
         <View className='evidence-row' key={item.label}>
-          <View>
+          <View className={`evidence-row__marker ${item.value >= 0 ? 'evidence-row__marker--up' : 'evidence-row__marker--down'}`}>
+            <Text>{item.value >= 0 ? '↑' : '↓'}</Text>
+          </View>
+          <View className='evidence-row__main'>
             <Text className='evidence-row__label'>{item.label}</Text>
             <Text className='evidence-row__note'>{item.note}</Text>
           </View>

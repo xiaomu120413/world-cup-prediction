@@ -3,6 +3,8 @@ import { localIconAssets, type IconTone } from '@/assets/icons'
 
 export type IconName =
   | 'ai'
+  | 'appearance'
+  | 'assist'
   | 'bot'
   | 'back'
   | 'ball'
@@ -11,6 +13,8 @@ export type IconName =
   | 'chevron'
   | 'clock'
   | 'defense'
+  | 'euro'
+  | 'fitness'
   | 'group'
   | 'info'
   | 'medal'
@@ -19,6 +23,7 @@ export type IconName =
   | 'share'
   | 'shield'
   | 'spark'
+  | 'stadium'
   | 'star'
   | 'stability'
   | 'target'
@@ -41,7 +46,19 @@ const colorToneMap: Record<string, IconTone> = {
 
 function iconUrl(name: IconName, color: string) {
   const tone = colorToneMap[color.toLowerCase()] || 'slate'
-  return localIconAssets[name]?.[tone] || localIconAssets.info[tone]
+  if (name === 'bot') {
+    return localIconAssets.ai[tone] || localIconAssets.ai.blue
+  }
+  if (name === 'trend') {
+    return localIconAssets.chart[tone] || localIconAssets.chart.blue
+  }
+  if (name === 'warning') {
+    return localIconAssets.shield[tone] || localIconAssets.shield.red
+  }
+  if (name === 'calendar' || name === 'plus') {
+    return localIconAssets.info[tone] || localIconAssets.info.slate
+  }
+  return localIconAssets[name]?.[tone] || localIconAssets.info[tone] || localIconAssets.info.slate
 }
 
 export function Icon({

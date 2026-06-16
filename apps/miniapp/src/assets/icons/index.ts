@@ -1,5 +1,7 @@
 import ai_blue from './generated/ai-blue.svg'
 import ai_white from './generated/ai-white.svg'
+import appearance_blue from './generated/appearance-blue.svg'
+import assist_blue from './generated/assist-blue.svg'
 import back_ink from './generated/back-ink.svg'
 import ball_blue from './generated/ball-blue.svg'
 import ball_muted from './generated/ball-muted.svg'
@@ -12,6 +14,8 @@ import clock_slate from './generated/clock-slate.svg'
 import clock_muted from './generated/clock-muted.svg'
 import clock_gray from './generated/clock-gray.svg'
 import defense_blue from './generated/defense-blue.svg'
+import euro_blue from './generated/euro-blue.svg'
+import fitness_blue from './generated/fitness-blue.svg'
 import group_blue from './generated/group-blue.svg'
 import info_slate from './generated/info-slate.svg'
 import medal_amber from './generated/medal-amber.svg'
@@ -22,6 +26,7 @@ import shield_blue from './generated/shield-blue.svg'
 import shield_red from './generated/shield-red.svg'
 import shield_muted from './generated/shield-muted.svg'
 import spark_blue from './generated/spark-blue.svg'
+import stadium_blue from './generated/stadium-blue.svg'
 import stability_blue from './generated/stability-blue.svg'
 import star_ink from './generated/star-ink.svg'
 import target_blue from './generated/target-blue.svg'
@@ -36,6 +41,12 @@ export const localIconAssets = {
   ai: {
     blue: ai_blue,
     white: ai_white
+  },
+  appearance: {
+    blue: appearance_blue
+  },
+  assist: {
+    blue: assist_blue
   },
   back: {
     ink: back_ink
@@ -61,6 +72,12 @@ export const localIconAssets = {
   defense: {
     blue: defense_blue
   },
+  euro: {
+    blue: euro_blue
+  },
+  fitness: {
+    blue: fitness_blue
+  },
   group: {
     blue: group_blue
   },
@@ -84,6 +101,9 @@ export const localIconAssets = {
   },
   spark: {
     blue: spark_blue
+  },
+  stadium: {
+    blue: stadium_blue
   },
   stability: {
     blue: stability_blue

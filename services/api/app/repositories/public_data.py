@@ -1,4 +1,8 @@
+import json
+import re
 from datetime import date as date_cls, datetime, time, timedelta, timezone as utc_timezone
+from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Select, and_, case, desc, func, or_, select, text
@@ -119,6 +123,44 @@ APPROVED_REAL_SOURCES = {
 }
 
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
+DONGQIUDI_PLAYER_PAGE_URL = "https://www.dongqiudi.com/player/{person_id}.html"
+DONGQIUDI_PLAYER_AVATAR_CACHE_PATH = Path(__file__).resolve().parents[1] / "data" / "dongqiudi_player_avatars.json"
+DONGQIUDI_PLAYER_CODE_PREFIX = "DQD-P"
+
+
+def safe_float(value) -> float | None:
+    return float(value) if value is not None else None
+
+
+def clamp_score(value: float, minimum: float = 5.0, maximum: float = 9.6) -> float:
+    return round(max(minimum, min(maximum, value)), 1)
+
+
+def source_player_id_from_code(code: str | None) -> str | None:
+    if not code or not code.startswith(DONGQIUDI_PLAYER_CODE_PREFIX):
+        return None
+    return code[len(DONGQIUDI_PLAYER_CODE_PREFIX) :]
+
+
+@lru_cache(maxsize=1)
+def dongqiudi_player_avatar_cache() -> dict[str, str]:
+    try:
+        raw_value = json.loads(DONGQIUDI_PLAYER_AVATAR_CACHE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw_value, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in raw_value.items()
+        if isinstance(value, str) and value.startswith("http")
+    }
+
+
+def dongqiudi_player_avatar_url(person_id: str | None) -> str | None:
+    if not person_id:
+        return None
+    return dongqiudi_player_avatar_cache().get(str(person_id))
 
 
 def team_public_id(code: str, name_en: str | None = None) -> str:
@@ -181,6 +223,24 @@ def match_payload(row) -> dict:
     }
 
 
+def news_payload(row, relevance: str = "team") -> dict:
+    policy = SOURCE_TRUST_POLICY.get(row.source, {})
+    return {
+        "id": str(row.id),
+        "source": row.source,
+        "source_label": policy.get("label", row.source),
+        "trust_level": policy.get("trust_level"),
+        "source_url": row.source_url,
+        "title": row.title,
+        "summary": row.summary,
+        "language": row.language,
+        "published_at": row.published_at.isoformat() if row.published_at else None,
+        "fetched_at": row.fetched_at.isoformat() if row.fetched_at else None,
+        "related_team_ids": [str(value) for value in (row.related_team_ids or [])],
+        "relevance": relevance,
+    }
+
+
 def matchday_bounds_utc(match_date: str, timezone_name: str = "Asia/Shanghai") -> tuple[datetime, datetime]:
     local_date = date_cls.fromisoformat(match_date)
     local_zone = ZoneInfo(timezone_name)
@@ -204,6 +264,150 @@ class PublicDataRepository:
             select(teams)
             .where(roster_exists)
             .order_by(teams.c.fifa_rank.asc().nulls_last(), teams.c.code.asc())
+        )
+
+    @staticmethod
+    def team_news_query(team_uuid, team_name_zh: str | None = None, team_name_en: str | None = None, limit: int = 5) -> Select:
+        filters = [news_items.c.related_team_ids.any(team_uuid)]
+        for value in (team_name_zh, team_name_en):
+            if value and value.strip():
+                pattern = f"%{value.strip()}%"
+                filters.append(news_items.c.title.ilike(pattern))
+                filters.append(news_items.c.summary.ilike(pattern))
+        return (
+            select(news_items)
+            .where(or_(*filters))
+            .order_by(desc(func.coalesce(news_items.c.published_at, news_items.c.fetched_at)))
+            .limit(limit)
+        )
+
+    @staticmethod
+    def latest_news_query(limit: int = 5) -> Select:
+        return (
+            select(news_items)
+            .order_by(desc(func.coalesce(news_items.c.published_at, news_items.c.fetched_at)))
+            .limit(limit)
+        )
+
+    @staticmethod
+    def team_group_profile_query(team_uuid) -> Select:
+        return (
+            select(
+                competition_stages.c.id.label("stage_uuid"),
+                competition_stages.c.code.label("group_id"),
+                competition_stages.c.name.label("group_name"),
+                group_standings.c.rank,
+                group_standings.c.played,
+                group_standings.c.wins,
+                group_standings.c.draws,
+                group_standings.c.losses,
+                group_standings.c.goals_for,
+                group_standings.c.goals_against,
+                group_standings.c.goal_diff,
+                group_standings.c.points,
+            )
+            .join(competition_stages, group_standings.c.stage_id == competition_stages.c.id)
+            .where(group_standings.c.team_id == team_uuid)
+            .order_by(competition_stages.c.sort_order.asc(), competition_stages.c.code.asc())
+            .limit(1)
+        )
+
+    @staticmethod
+    def latest_team_group_simulation_query(team_uuid, stage_uuid) -> Select:
+        return (
+            select(
+                group_simulations.c.rank_1_prob,
+                group_simulations.c.rank_2_prob,
+                group_simulations.c.qualify_prob,
+                group_simulations.c.expected_points,
+            )
+            .join(prediction_snapshots, group_simulations.c.prediction_snapshot_id == prediction_snapshots.c.id)
+            .where(group_simulations.c.team_id == team_uuid, group_simulations.c.stage_id == stage_uuid)
+            .order_by(desc(prediction_snapshots.c.generated_at))
+            .limit(1)
+        )
+
+    @staticmethod
+    def latest_team_form_query(team_uuid) -> Select:
+        return (
+            select(team_form_snapshots)
+            .where(team_form_snapshots.c.team_id == team_uuid)
+            .order_by(desc(team_form_snapshots.c.as_of_at))
+            .limit(1)
+        )
+
+    @staticmethod
+    def team_match_results_query(team_uuid, limit: int = 10) -> Select:
+        opponent = teams.alias("opponent_team")
+        return (
+            select(
+                team_match_results.c.played_at,
+                team_match_results.c.competition_name,
+                team_match_results.c.goals_for,
+                team_match_results.c.goals_against,
+                team_match_results.c.result,
+                team_match_results.c.opponent_rank,
+                team_match_results.c.opponent_rank_bucket,
+                opponent.c.name_zh.label("opponent_name"),
+                opponent.c.name_en.label("opponent_name_en"),
+            )
+            .select_from(team_match_results.outerjoin(opponent, team_match_results.c.opponent_team_id == opponent.c.id))
+            .where(team_match_results.c.team_id == team_uuid, team_match_results.c.result != "scheduled")
+            .order_by(desc(team_match_results.c.played_at))
+            .limit(limit)
+        )
+
+    @staticmethod
+    def coach_query(team_uuid) -> Select:
+        return (
+            select(coaches)
+            .where(coaches.c.team_id == team_uuid)
+            .order_by(coaches.c.started_at.desc().nulls_last(), coaches.c.updated_at.desc())
+            .limit(1)
+        )
+
+    @staticmethod
+    def team_matches_query(team_uuid, limit: int = 4) -> Select:
+        home = teams.alias("home_team")
+        away = teams.alias("away_team")
+        status_rank = case(
+            (matches.c.status == "live", 0),
+            (matches.c.status == "scheduled", 1),
+            (matches.c.status == "finished", 2),
+            else_=3,
+        )
+        return (
+            select(
+                matches.c.public_id,
+                matches.c.kickoff_at,
+                matches.c.status,
+                matches.c.home_score,
+                matches.c.away_score,
+                matches.c.neutral_site,
+                matches.c.source_confidence,
+                competition_stages.c.name.label("stage_name"),
+                home.c.code.label("home_code"),
+                home.c.name_zh.label("home_name"),
+                home.c.name_en.label("home_name_en"),
+                home.c.fifa_rank.label("home_fifa_rank"),
+                home.c.elo_rating.label("home_elo_rating"),
+                away.c.code.label("away_code"),
+                away.c.name_zh.label("away_name"),
+                away.c.name_en.label("away_name_en"),
+                away.c.fifa_rank.label("away_fifa_rank"),
+                away.c.elo_rating.label("away_elo_rating"),
+                venues.c.name.label("venue_name"),
+                venues.c.city.label("venue_city"),
+                venues.c.country.label("venue_country"),
+                venues.c.timezone.label("venue_timezone"),
+            )
+            .join(competition_stages, matches.c.stage_id == competition_stages.c.id)
+            .join(home, matches.c.home_team_id == home.c.id)
+            .join(away, matches.c.away_team_id == away.c.id)
+            .outerjoin(venues, matches.c.venue_id == venues.c.id)
+            .where(or_(matches.c.home_team_id == team_uuid, matches.c.away_team_id == team_uuid))
+            .order_by(status_rank.asc(), matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+            .limit(limit)
         )
 
     @staticmethod
@@ -965,6 +1169,21 @@ class PublicDataRepository:
             for row in rows
         ]
 
+    def list_team_news(self, team_uuid, team_row=None, limit: int = 5) -> list[dict]:
+        rows = self.db.execute(
+            self.team_news_query(
+                team_uuid,
+                getattr(team_row, "name_zh", None),
+                getattr(team_row, "name_en", None),
+                limit,
+            )
+        ).mappings().all()
+        relevance = "team"
+        if not rows:
+            rows = self.db.execute(self.latest_news_query(limit)).mappings().all()
+            relevance = "latest"
+        return [news_payload(row, relevance) for row in rows]
+
     def has_real_matches(self) -> bool:
         return bool(
             self.db.execute(
@@ -991,6 +1210,7 @@ class PublicDataRepository:
             )
         ).mappings().all()
         values = [match_payload(row) for row in rows]
+        self.apply_venue_fallback(values)
         if include_prediction:
             for value in values:
                 prediction = self.get_match_prediction(value["id"])
@@ -1001,7 +1221,34 @@ class PublicDataRepository:
         row = self.db.execute(self.match_query(public_id)).mappings().first()
         if row is None:
             return None
-        return match_payload(row)
+        value = match_payload(row)
+        self.apply_venue_fallback([value])
+        return value
+
+    def venue_lookup_by_team_pair(self) -> dict[tuple[str, str], dict]:
+        rows = self.db.execute(self.matches_query(real_only=False)).mappings().all()
+        lookup: dict[tuple[str, str], dict] = {}
+        for row in rows:
+            value = match_payload(row)
+            venue = value.get("venue")
+            if not venue:
+                continue
+            home_id = value["home_team"]["id"]
+            away_id = value["away_team"]["id"]
+            lookup.setdefault((home_id, away_id), venue)
+            lookup.setdefault((away_id, home_id), venue)
+        return lookup
+
+    def apply_venue_fallback(self, values: list[dict]) -> None:
+        if not values or all(value.get("venue") for value in values):
+            return
+        lookup = self.venue_lookup_by_team_pair()
+        for value in values:
+            if value.get("venue"):
+                continue
+            venue = lookup.get((value["home_team"]["id"], value["away_team"]["id"]))
+            if venue:
+                value["venue"] = venue
 
     def get_match_prediction(self, public_id: str) -> dict | None:
         prediction = self.db.execute(self.latest_prediction_query(public_id)).mappings().first()
@@ -1048,12 +1295,19 @@ class PublicDataRepository:
         player_rows = self.latest_team_player_forms(team_row.id)
         key_players = self.key_player_payloads(player_rows)
         form_stats = self.team_form_stats(player_rows)
+        team_form = self.latest_team_form_snapshot(team_row.id)
+        group_profile = self.team_group_profile(team_row.id)
+        result_summary = self.team_result_summary(team_row.id, team_form)
+        coach_profile = self.team_coach_profile(team_row.id)
+        related_matches = self.team_related_matches(team_row.id, team_id)
         champion_probability = self.latest_team_ranking_probability(team_row.id, "champion")
         semifinal_probability = self.latest_team_ranking_probability(team_row.id, "semifinal")
+        team_news = self.list_team_news(team_row.id, team_row)
 
         return {
             "team": team_payload(team_row),
-            "summary": self.team_profile_summary(team_row, form_stats),
+            "summary": self.team_profile_summary(team_row, form_stats, result_summary, group_profile),
+            "group": group_profile,
             "probabilities": [
                 {
                     "label": "冠军概率",
@@ -1065,31 +1319,230 @@ class PublicDataRepository:
                     "value": semifinal_probability,
                     "source": "ranking_predictions",
                 },
+                {
+                    "label": "小组第一",
+                    "value": group_profile.get("rank_1_prob") if group_profile else None,
+                    "source": "group_simulations",
+                },
             ],
-            "ratings": self.team_profile_ratings(team_row, form_stats),
+            "ratings": self.team_profile_ratings(team_row, form_stats, team_form, result_summary),
             "form": {
-                "headline": self.team_form_headline(player_rows, form_stats),
+                "headline": result_summary["headline"],
+                "recent": result_summary["recent"],
+                "evidence": result_summary["evidence"],
                 "stats": [
                     {"label": "入选球员", "value": form_stats["player_count"]},
                     {"label": "近况进球", "value": form_stats["goals"]},
                     {"label": "近况助攻", "value": form_stats["assists"]},
-                    {"label": "平均评分", "value": form_stats["avg_rating"]},
+                    {"label": "Top5身价占比", "value": form_stats["top5_market_share"]},
                 ],
             },
             "key_players": key_players,
-            "risks": self.team_profile_risks(player_rows, form_stats),
+            "coach": coach_profile,
+            "related_matches": related_matches,
+            "news": team_news,
+            "risks": self.team_profile_risks(player_rows, form_stats, team_form),
             "data_sources": {
                 "team": "teams",
                 "players": "players",
                 "player_form": "player_form_snapshots",
+                "team_form": "team_form_snapshots",
+                "team_results": "team_match_results",
+                "group": "group_standings/group_simulations",
+                "coach": "coaches",
+                "related_matches": "matches",
                 "probabilities": "ranking_predictions",
+                "news": "news_items",
             },
         }
+
+    def team_group_profile(self, team_uuid) -> dict | None:
+        row = self.db.execute(self.team_group_profile_query(team_uuid)).mappings().first()
+        if row is None:
+            return None
+        simulation = self.db.execute(
+            self.latest_team_group_simulation_query(team_uuid, row.stage_uuid)
+        ).mappings().first()
+        payload = {
+            "id": row.group_id,
+            "name": row.group_name,
+            "rank": row.rank,
+            "record": f"{row.wins}-{row.draws}-{row.losses}",
+            "points": row.points,
+            "goals": f"{row.goals_for}:{row.goals_against}",
+            "played": row.played,
+            "wins": row.wins,
+            "draws": row.draws,
+            "losses": row.losses,
+        }
+        if simulation:
+            payload.update(
+                {
+                    "rank_1_prob": safe_float(simulation.rank_1_prob),
+                    "rank_2_prob": safe_float(simulation.rank_2_prob),
+                    "qualify_prob": safe_float(simulation.qualify_prob),
+                    "expected_points": safe_float(simulation.expected_points),
+                }
+            )
+        return payload
+
+    def latest_team_form_snapshot(self, team_uuid):
+        return self.db.execute(self.latest_team_form_query(team_uuid)).mappings().first()
+
+    def team_result_summary(self, team_uuid, team_form=None) -> dict:
+        rows = self.db.execute(self.team_match_results_query(team_uuid)).mappings().all()
+        if rows:
+            wins = sum(1 for row in rows if row.result == "win")
+            draws = sum(1 for row in rows if row.result == "draw")
+            losses = sum(1 for row in rows if row.result == "loss")
+            goals_for = sum(row.goals_for or 0 for row in rows)
+            goals_against = sum(row.goals_against or 0 for row in rows)
+            top30_rows = [
+                row
+                for row in rows
+                if row.opponent_rank_bucket in ("top10", "top30")
+                or (row.opponent_rank is not None and row.opponent_rank <= 30)
+            ]
+            top30_wins = sum(1 for row in top30_rows if row.result == "win")
+            top30_draws = sum(1 for row in top30_rows if row.result == "draw")
+            top30_losses = sum(1 for row in top30_rows if row.result == "loss")
+            clean_sheets = sum(1 for row in rows if (row.goals_against or 0) == 0)
+            matches_count = len(rows)
+            avg_goals = goals_for / matches_count if matches_count else 0
+            recent = {
+                "matches": matches_count,
+                "wins": wins,
+                "draws": draws,
+                "losses": losses,
+                "goals_for": goals_for,
+                "goals_against": goals_against,
+            }
+            top30_count = len(top30_rows)
+            top30_value = (
+                f"样本{top30_count}场 · {top30_wins}胜 {top30_draws}平 {top30_losses}负"
+                if top30_rows
+                else "样本不足"
+            )
+            evidence = [
+                {
+                    "label": "对Top30",
+                    "value": top30_value,
+                    "tone": "positive" if top30_count >= 3 and top30_wins >= top30_losses else "neutral",
+                    "source": "team_match_results",
+                },
+                {
+                    "label": "零封率",
+                    "value": f"{round(clean_sheets / matches_count * 100)}%",
+                    "tone": "positive" if clean_sheets / matches_count >= 0.35 else "neutral",
+                    "source": "team_match_results",
+                },
+                {
+                    "label": "场均进球",
+                    "value": f"{avg_goals:.1f}",
+                    "tone": "positive" if avg_goals >= 1.8 else "neutral",
+                    "source": "team_match_results",
+                },
+            ]
+            return {
+                "headline": f"近{matches_count}场 {wins}胜{draws}平{losses}负 · 进{goals_for}失{goals_against}",
+                "recent": recent,
+                "evidence": evidence,
+                "points_per_match": round((wins * 3 + draws) / matches_count, 2),
+                "goals_for_per_match": round(avg_goals, 2),
+                "goals_against_per_match": round(goals_against / matches_count, 2),
+            }
+
+        recent_matches = int(team_form.recent_matches) if team_form and team_form.recent_matches is not None else 0
+        goals_for = safe_float(team_form.goals_for_per_match) if team_form else None
+        goals_against = safe_float(team_form.goals_against_per_match) if team_form else None
+        headline = "球队近期战绩待同步"
+        if recent_matches and goals_for is not None and goals_against is not None:
+            headline = f"近{recent_matches}场 · 场均进{goals_for:.1f}失{goals_against:.1f}"
+        return {
+            "headline": headline,
+            "recent": {
+                "matches": recent_matches,
+                "wins": None,
+                "draws": None,
+                "losses": None,
+                "goals_for": None,
+                "goals_against": None,
+            },
+            "evidence": [
+                {"label": "对Top30", "value": "待同步", "tone": "neutral", "source": "team_match_results"},
+                {
+                    "label": "场均进球",
+                    "value": f"{goals_for:.1f}" if goals_for is not None else "待同步",
+                    "tone": "neutral",
+                    "source": "team_form_snapshots",
+                },
+                {
+                    "label": "场均失球",
+                    "value": f"{goals_against:.1f}" if goals_against is not None else "待同步",
+                    "tone": "neutral",
+                    "source": "team_form_snapshots",
+                },
+            ],
+            "points_per_match": safe_float(team_form.points_per_match) if team_form else None,
+            "goals_for_per_match": goals_for,
+            "goals_against_per_match": goals_against,
+        }
+
+    def team_coach_profile(self, team_uuid) -> dict | None:
+        row = self.db.execute(self.coach_query(team_uuid)).mappings().first()
+        if row is None:
+            return None
+        record_parts = []
+        if row.matches_count is not None:
+            record_parts.append(f"{row.matches_count}场")
+        if row.wins is not None and row.draws is not None and row.losses is not None:
+            record_parts.append(f"{row.wins}胜{row.draws}平{row.losses}负")
+        return {
+            "name": row.name_zh,
+            "name_en": row.name_en,
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "record": " · ".join(record_parts) if record_parts else "战绩待同步",
+            "win_rate": safe_float(row.win_rate),
+            "quality_status": row.quality_status,
+            "source_confidence": safe_float(row.source_confidence),
+        }
+
+    def team_related_matches(self, team_uuid, team_id: str) -> list[dict]:
+        rows = self.db.execute(self.team_matches_query(team_uuid)).mappings().all()
+        values = [match_payload(row) for row in rows]
+        unique_values: dict[str, dict] = {}
+        for value in values:
+            if value["home_team"]["id"] == team_id:
+                value["opponent_team"] = value["away_team"]
+            else:
+                value["opponent_team"] = value["home_team"]
+            prediction = self.get_match_prediction(value["id"])
+            value["prediction_summary"] = self.prediction_summary(prediction) if prediction else None
+            opponent_id = value["opponent_team"]["id"]
+            current = unique_values.get(opponent_id)
+            if current is None or self.related_match_quality(value) > self.related_match_quality(current):
+                unique_values[opponent_id] = value
+        return sorted(
+            unique_values.values(),
+            key=lambda item: (item["status"] != "live", item["status"] != "scheduled", item["kickoff_at"]),
+        )[:4]
+
+    @staticmethod
+    def related_match_quality(match: dict) -> int:
+        score = 0
+        if match.get("venue"):
+            score += 2
+        if match.get("stage") and match["stage"] != "Dongqiudi Schedule Context":
+            score += 2
+        if match.get("prediction_summary"):
+            score += 1
+        return score
 
     def latest_team_player_forms(self, team_uuid) -> list:
         rows = self.db.execute(
             select(
                 players.c.id.label("player_id"),
+                players.c.code.label("player_code"),
                 players.c.name_zh,
                 players.c.name_en,
                 players.c.position,
@@ -1127,32 +1580,59 @@ class PublicDataRepository:
         return list(latest_by_player.values())
 
     def key_player_payloads(self, player_rows: list) -> list[dict]:
-        return [
-            {
-                "id": str(row.player_id),
-                "name": row.name_zh,
-                "name_en": row.name_en,
-                "role": row.position,
-                "form": float(row.form_score or row.rating or 0),
-                "position": row.position,
-                "club": row.club_name,
-                "market_value_eur": float(row.market_value_eur) if row.market_value_eur is not None else None,
-                "recent_form": {
-                    "matches": row.recent_matches,
-                    "minutes": row.minutes,
-                    "goals": row.goals,
-                    "assists": row.assists,
-                    "shots": row.shots,
-                    "key_passes": row.key_passes,
-                    "rating": float(row.rating) if row.rating is not None else None,
-                    "form_score": float(row.form_score) if row.form_score is not None else None,
-                    "availability": row.availability_status,
-                    "as_of_at": row.as_of_at.isoformat() if row.as_of_at else None,
-                },
-                "quality_status": row.player_quality_status,
-            }
-            for row in player_rows[:5]
-        ]
+        payloads = []
+        for row in player_rows[:5]:
+            source_player_id = source_player_id_from_code(row.player_code)
+            payloads.append(
+                {
+                    "id": str(row.player_id),
+                    "source_player_id": source_player_id,
+                    "name": row.name_zh,
+                    "name_en": row.name_en,
+                    "role": row.position,
+                    "form": self.player_display_form_score(row),
+                    "position": row.position,
+                    "club": row.club_name,
+                    "market_value_eur": float(row.market_value_eur) if row.market_value_eur is not None else None,
+                    "profile_url": DONGQIUDI_PLAYER_PAGE_URL.format(person_id=source_player_id)
+                    if source_player_id
+                    else None,
+                    "avatar_url": dongqiudi_player_avatar_url(source_player_id),
+                    "recent_form": {
+                        "matches": row.recent_matches,
+                        "minutes": row.minutes,
+                        "goals": row.goals,
+                        "assists": row.assists,
+                        "shots": row.shots,
+                        "key_passes": row.key_passes,
+                        "rating": float(row.rating) if row.rating is not None else None,
+                        "form_score": float(row.form_score) if row.form_score is not None else None,
+                        "availability": row.availability_status,
+                        "as_of_at": row.as_of_at.isoformat() if row.as_of_at else None,
+                    },
+                    "quality_status": row.player_quality_status,
+                }
+            )
+        return payloads
+
+    @staticmethod
+    def player_display_form_score(row) -> float:
+        if row.form_score is not None:
+            return clamp_score(float(row.form_score), 0.0, 10.0)
+        if row.rating is not None:
+            return clamp_score(float(row.rating), 0.0, 10.0)
+        recent_matches = row.recent_matches or 0
+        goals = row.goals or 0
+        assists = row.assists or 0
+        market_value = float(row.market_value_eur or 0)
+        score = 5.6
+        score += min(recent_matches, 20) * 0.04
+        score += min(goals, 12) * 0.16
+        score += min(assists, 10) * 0.12
+        score += min(market_value, 100_000_000) / 100_000_000 * 0.8
+        if row.availability_status and row.availability_status != "available":
+            score -= 1.2
+        return clamp_score(score, 4.8, 9.4)
 
     @staticmethod
     def team_form_stats(player_rows: list) -> dict:
@@ -1160,12 +1640,22 @@ class PublicDataRepository:
         assists = sum(row.assists or 0 for row in player_rows)
         ratings = [float(row.rating) for row in player_rows if row.rating is not None]
         scores = [float(row.form_score) for row in player_rows if row.form_score is not None]
+        market_values = sorted(
+            [float(row.market_value_eur) for row in player_rows if row.market_value_eur is not None],
+            reverse=True,
+        )
+        total_market_value = sum(market_values)
+        top5_market_share = (
+            round(sum(market_values[:5]) / total_market_value * 100, 1) if total_market_value > 0 else None
+        )
         return {
             "player_count": len(player_rows),
             "goals": goals,
             "assists": assists,
             "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
             "avg_form_score": round(sum(scores) / len(scores), 2) if scores else None,
+            "total_market_value": total_market_value or None,
+            "top5_market_share": f"{top5_market_share}%" if top5_market_share is not None else None,
         }
 
     def latest_team_ranking_probability(self, team_uuid, ranking_type: str) -> float | None:
@@ -1186,27 +1676,48 @@ class PublicDataRepository:
         return float(row.probability) if row else None
 
     @staticmethod
-    def team_profile_summary(team_row, form_stats: dict) -> str:
+    def team_profile_summary(team_row, form_stats: dict, result_summary: dict, group_profile: dict | None) -> str:
         quality = team_row.quality_status or "unknown"
+        rank_text = f"FIFA排名第 {team_row.fifa_rank}" if team_row.fifa_rank else "FIFA排名待同步"
+        group_text = f"，当前位于{group_profile['name']}第 {group_profile['rank']}" if group_profile else ""
         if form_stats["player_count"] == 0:
-            return f"基于 teams 标准表生成，球队基础数据质量为 {quality}；球员近期状态仍待采集。"
+            return f"{team_row.name_zh} {rank_text}{group_text}；基础数据质量为 {quality}，球员近期状态仍待采集。"
         return (
-            f"基于 teams、players 和 player_form_snapshots 标准表生成；"
-            f"当前覆盖 {form_stats['player_count']} 名球员，近况合计 {form_stats['goals']} 球 {form_stats['assists']} 助攻。"
+            f"{team_row.name_zh} {rank_text}{group_text}；{result_summary['headline']}。"
+            f"当前覆盖 {form_stats['player_count']} 名球员，关键判断关注进攻效率、对强队表现和阵容稳定性。"
         )
 
     @staticmethod
-    def team_profile_ratings(team_row, form_stats: dict) -> list[dict]:
+    def team_profile_ratings(team_row, form_stats: dict, team_form=None, result_summary: dict | None = None) -> list[dict]:
         elo = float(team_row.elo_rating) if team_row.elo_rating is not None else None
         rank = team_row.fifa_rank or 80
         form_score = form_stats["avg_form_score"] or 6.2
-        attack = min(9.5, 5.8 + form_stats["goals"] * 0.25 + form_stats["assists"] * 0.15)
+        goals_for_per_match = result_summary.get("goals_for_per_match") if result_summary else None
+        goals_against_per_match = result_summary.get("goals_against_per_match") if result_summary else None
+        attack_base = 5.8 + form_stats["goals"] * 0.08 + form_stats["assists"] * 0.05
+        if goals_for_per_match is not None:
+            attack_base = max(attack_base, 5.7 + goals_for_per_match * 1.25)
+        defense_base = 8.9 - rank / 35
+        if goals_against_per_match is not None:
+            defense_base = max(5.2, defense_base - goals_against_per_match * 0.35)
+        market_value = float(team_row.market_value_eur or form_stats["total_market_value"] or 0)
+        player_depth = min(form_stats["player_count"], 26) / 26 if form_stats["player_count"] else 0
+        market_depth = min(market_value, 1_500_000_000) / 1_500_000_000 if market_value else 0
+        depth = 5.4 + player_depth * 1.4 + market_depth * 2.3
+        stability = None
+        if team_form and team_form.lineup_stability_score is not None:
+            stability = float(team_form.lineup_stability_score)
+        elif result_summary and result_summary.get("points_per_match") is not None:
+            stability = 5.6 + min(float(result_summary["points_per_match"]), 3.0)
+        else:
+            stability = form_score
         baseline = max(5.5, min(9.3, 9.2 - rank / 30))
         elo_score = max(5.5, min(9.4, ((elo or 1700) - 1400) / 120 + 5.8))
         return [
-            {"label": "进攻", "value": round(attack, 1), "source": "player_form_snapshots"},
-            {"label": "整体强度", "value": round((baseline + elo_score) / 2, 1), "source": "teams"},
-            {"label": "近期状态", "value": round(max(5.0, min(9.5, form_score)), 1), "source": "player_form_snapshots"},
+            {"label": "进攻", "value": clamp_score(attack_base), "source": "player_form_snapshots/team_match_results"},
+            {"label": "防守", "value": clamp_score(defense_base), "source": "teams/team_match_results"},
+            {"label": "阵容深度", "value": clamp_score(max(depth, (baseline + elo_score) / 2)), "source": "players/teams"},
+            {"label": "稳定性", "value": clamp_score(stability), "source": "team_form_snapshots"},
         ]
 
     @staticmethod
@@ -1216,15 +1727,21 @@ class PublicDataRepository:
         return f"{form_stats['player_count']} 名球员近期合计 {form_stats['goals']} 球 {form_stats['assists']} 助攻"
 
     @staticmethod
-    def team_profile_risks(player_rows: list, form_stats: dict) -> list[dict]:
+    def team_profile_risks(player_rows: list, form_stats: dict, team_form=None) -> list[dict]:
         risks = []
         unavailable = [row for row in player_rows if row.availability_status and row.availability_status != "available"]
         if unavailable:
             risks.append({"label": "出勤风险", "value": len(unavailable), "source": "player_form_snapshots"})
+        if team_form and team_form.injury_impact_score is not None and float(team_form.injury_impact_score) > 0:
+            risks.append(
+                {
+                    "label": "伤停影响",
+                    "value": round(float(team_form.injury_impact_score), 1),
+                    "source": "team_form_snapshots",
+                }
+            )
         if form_stats["player_count"] < 5:
             risks.append({"label": "球员样本不足", "value": 5 - form_stats["player_count"], "source": "players"})
-        if form_stats["avg_rating"] is None:
-            risks.append({"label": "评分缺失", "value": 1, "source": "player_form_snapshots"})
         return risks
 
     @staticmethod

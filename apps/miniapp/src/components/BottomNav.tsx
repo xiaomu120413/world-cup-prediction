@@ -21,7 +21,7 @@ export function BottomNav({ active }: { active: TabKey }) {
           className={`bottom-nav__item ${active === tab.key ? 'bottom-nav__item--active' : ''}`}
           onClick={() => active !== tab.key && switchSection(tab.url)}
         >
-          <Icon name={tab.icon} color={active === tab.key ? '#2563eb' : '#94a3b8'} size={36} />
+          <Icon name={tab.icon} color={active === tab.key ? '#2563eb' : '#6b7280'} size={36} />
           <Text>{tab.label}</Text>
         </View>
       ))}

@@ -2,8 +2,8 @@ import { Text, View } from '@tarojs/components'
 import { Icon, type IconName } from '@/components/Icon'
 
 function ratingIcon(label: string): IconName {
-  if (label.includes('攻')) return 'target'
-  if (label.includes('防')) return 'defense'
+  if (label.includes('进攻')) return 'target'
+  if (label.includes('防守')) return 'defense'
   if (label.includes('阵容')) return 'group'
   if (label.includes('稳定')) return 'stability'
   return 'chart'
@@ -18,7 +18,7 @@ export function RatingRow({ label, value }: { label: string; value: number }) {
       <Text className='rating-row__label'>{label}</Text>
       <Text className='rating-row__value'>{value.toFixed(1)}</Text>
       <View className='rating-row__track'>
-        <View className='rating-row__bar' style={{ width: `${value * 10}%` }} />
+        <View className='rating-row__bar' style={{ width: `${Math.max(0, Math.min(10, value)) * 10}%` }} />
       </View>
     </View>
   )

@@ -8,14 +8,15 @@ export function Flag({ team, size = 'md' }: { team: string; size?: 'sm' | 'md' |
   const code = getFlagCodeByTeamName(team)
   const flagSrc = getLocalFlagAsset(code) || fallbackFlag
   const [src, setSrc] = useState(flagSrc)
+  const fillMode = size === 'lg'
 
   useEffect(() => {
     setSrc(flagSrc)
   }, [flagSrc])
 
   return (
-    <View className={`flag flag--${size}`}>
-      <Image src={src} mode='aspectFit' className='flag__image' onError={() => setSrc(fallbackFlag)} />
+    <View className={`flag flag--${size} ${fillMode ? 'flag--cover' : 'flag--contain'}`}>
+      <Image src={src} mode={fillMode ? 'aspectFill' : 'aspectFit'} className='flag__image' onError={() => setSrc(fallbackFlag)} />
     </View>
   )
 }

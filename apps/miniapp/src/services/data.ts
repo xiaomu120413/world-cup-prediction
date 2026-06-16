@@ -147,6 +147,7 @@ type ApiTeamProfile = {
     form?: number
     club?: string | null
     market_value_eur?: number | null
+    avatar_url?: string | null
     profile_url?: string | null
     quality_status?: string | null
     recent_form?: {
@@ -543,6 +544,10 @@ function formatMarketValue(value?: number | null) {
   return `身价 €${value}`
 }
 
+function formatCompactMarketValue(value?: number | null) {
+  return formatMarketValue(value).replace(/^身价\s*/, '')
+}
+
 function formatTeamMeta(team: ApiTeam) {
   const values = [
     team.fifa_rank ? `FIFA ${team.fifa_rank}` : undefined,
@@ -618,6 +623,26 @@ function formatPlayerRole(value?: string | null) {
     D: '后卫'
   }
   return roleMap[normalized] || value || '-'
+}
+
+function playerDataPoints(player: ApiTeamProfile['key_players'][number]) {
+  const recent = player.recent_form
+  return [
+    player.club ? { icon: 'stadium', label: '俱乐部', value: player.club } : undefined,
+    recent?.matches !== undefined && recent?.matches !== null
+      ? { icon: 'appearance', label: '近况出场', value: `近${recent.matches}场` }
+      : undefined,
+    recent?.goals !== undefined && recent?.goals !== null
+      ? { icon: 'ball', label: '近期进球', value: `${recent.goals}球` }
+      : undefined,
+    recent?.assists !== undefined && recent?.assists !== null
+      ? { icon: 'assist', label: '近期助攻', value: `${recent.assists}助` }
+      : undefined,
+    player.market_value_eur !== undefined && player.market_value_eur !== null
+      ? { icon: 'euro', label: '球员身价', value: formatCompactMarketValue(player.market_value_eur) }
+      : undefined,
+    { icon: 'fitness', label: '出勤状态', value: formatAvailability(recent?.availability) }
+  ].filter(Boolean) as Array<{ icon: string; label: string; value: string }>
 }
 
 function formatProbabilityLabel(value: string) {
@@ -966,11 +991,9 @@ async function loadTeamProfile(teamId = ''): Promise<TeamProfile> {
       name: player.name,
       role: formatPlayerRole(player.role || player.position),
       form: normalizePlayerScore(player.form || player.recent_form?.form_score || player.recent_form?.rating),
-      meta: [
-        player.club || undefined,
-        player.recent_form?.matches ? `近${player.recent_form.matches}场 ${player.recent_form.goals || 0}球 ${player.recent_form.assists || 0}助` : undefined,
-        formatAvailability(player.recent_form?.availability)
-      ].filter(Boolean).join(' · ')
+      avatarUrl: player.avatar_url || undefined,
+      meta: player.name_en || undefined,
+      dataPoints: playerDataPoints(player)
     })),
     coach: response.data.coach?.name ? {
       name: response.data.coach.name,

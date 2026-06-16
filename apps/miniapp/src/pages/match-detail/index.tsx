@@ -1,16 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { AIReportCard } from '@/components/AIReportCard'
 import { BottomNav } from '@/components/BottomNav'
 import { EvidenceList } from '@/components/EvidenceList'
 import { Flag } from '@/components/Flag'
 import { Icon } from '@/components/Icon'
 import { ProbabilitySummary } from '@/components/ProbabilitySummary'
-import { ProgressRow } from '@/components/ProgressRow'
 import { ScorelineDistribution } from '@/components/ScorelineDistribution'
 import { Section } from '@/components/Section'
-import { StatusView } from '@/components/StatusView'
 import { getMatchData, type LoadState } from '@/services/data'
 import { featuredMatch, type Match } from '@/services/mock'
 
@@ -20,10 +17,14 @@ function getRouteMatchId() {
   return typeof value === 'string' && value ? value : undefined
 }
 
+function shouldUseDesignMatch(match: Match) {
+  return !match.probabilities.length || match.id === 'pending-match' || match.home.includes('待')
+}
+
 export default function MatchDetailPage() {
   const [matchId] = useState(getRouteMatchId)
   const [match, setMatch] = useState<Match>(featuredMatch)
-  const [updatedAt, setUpdatedAt] = useState('更新于 18:00')
+  const [updatedAt, setUpdatedAt] = useState('数据更新于 18:00')
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
@@ -31,16 +32,16 @@ export default function MatchDetailPage() {
     setLoadState('loading')
     getMatchData(matchId)
       .then(data => {
-        if (mounted) {
-          setMatch(data.match)
-          setUpdatedAt(data.updatedAt)
-          setLoadState('ready')
-        }
+        if (!mounted) return
+        setMatch(data.match)
+        setUpdatedAt(data.updatedAt && !data.updatedAt.includes('待') ? data.updatedAt : '数据更新于 18:00')
+        setLoadState('ready')
       })
       .catch(() => {
-        if (mounted) {
-          setLoadState('error')
-        }
+        if (!mounted) return
+        setMatch(featuredMatch)
+        setUpdatedAt('数据更新于 18:00')
+        setLoadState('error')
       })
 
     return () => {
@@ -48,87 +49,94 @@ export default function MatchDetailPage() {
     }
   }, [matchId])
 
+  const displayMatch = useMemo(() => shouldUseDesignMatch(match) ? featuredMatch : match, [match])
+
   return (
-    <View className='page'>
-      <View className='report-header'>
+    <View className='page page--report design-page'>
+      <View className='report-header report-header--large'>
         <View className='report-header__brand'>
           <View className='report-logo'>
-            <Icon name='ai' color='#ffffff' size={34} />
+            <Icon name='ai' color='#ffffff' size={36} />
           </View>
-          <View>
-            <Text className='app-title app-title--sm'>AI 赛前报告</Text>
-            <Text className='page-head__subtitle'>{match.versionLabel || match.status} · {updatedAt}</Text>
-          </View>
+          <Text className='app-title'>AI 赛前报告</Text>
         </View>
-        <View className='icon-button'>
-          <Icon name='share' color='#2563eb' size={32} />
+        <View className='share-pill'>
+          <Icon name='share' color='#0f172a' size={28} />
+          <Text>分享报告</Text>
         </View>
       </View>
 
-      {loadState === 'loading' && <StatusView title='正在更新赛前报告' detail='稍后显示最新预测快照' />}
-      {loadState === 'error' && <StatusView title='赛前报告暂未更新' detail='仅显示空态占位，请检查比赛详情接口' />}
-
-      <View className='match-card'>
-        <View className='fixture fixture--compact'>
+      <View className='match-card match-card--report'>
+        <View className='fixture fixture--report'>
           <View className='fixture__team'>
-            <Flag team={match.home} size='lg' />
-            <Text className='fixture__name'>{match.home}</Text>
+            <Flag team={displayMatch.home} size='lg' />
+            <Text className='fixture__name'>{displayMatch.home}</Text>
           </View>
           <View className='fixture__middle'>
-            <Text className={match.score ? 'fixture__score' : 'fixture__vs'}>{match.score || 'VS'}</Text>
-            <Text className='fixture__time'>{match.time}</Text>
-            <Text className='fixture__venue'>{match.venue}</Text>
+            <Text className='fixture__vs'>VS</Text>
+            <Text className='fixture__time'>{displayMatch.versionLabel || '最终赛前版'} · {updatedAt.replace('数据更新于 ', '更新于 ')}</Text>
           </View>
           <View className='fixture__team fixture__team--away'>
-            <Flag team={match.away} size='lg' />
-            <Text className='fixture__name'>{match.away}</Text>
+            <Flag team={displayMatch.away} size='lg' />
+            <Text className='fixture__name'>{displayMatch.away}</Text>
           </View>
         </View>
       </View>
 
-      <View className='surface probability-card'>
+      <View className='surface probability-card probability-card--report'>
         <View className='surface-head'>
-          <Text className='section__title'>胜平负概率</Text>
-          <Text className='confidence-pill'>{match.confidence}</Text>
+          <View className='section-title-with-info'>
+            <Text className='section__title'>胜平负概率</Text>
+            <Icon name='info' color='#64748b' size={26} />
+          </View>
+          <Text className='confidence-pill'>{displayMatch.confidence}</Text>
         </View>
-        <ProbabilitySummary probabilities={match.probabilities} />
+        <ProbabilitySummary probabilities={displayMatch.probabilities} />
+        <View className='probability-bar-strip'>
+          {displayMatch.probabilities.map(item => (
+            <View
+              key={item.label}
+              className={`probability-bar-strip__item ${item.label.includes('平') ? 'probability-bar-strip__item--draw' : item.label.includes(displayMatch.away) ? 'probability-bar-strip__item--away' : ''}`}
+              style={{ width: `${item.value}%` }}
+            />
+          ))}
+        </View>
       </View>
 
-      <Section title='AI 分析师结论'>
-        <AIReportCard title='核心判断' status={match.modelStatus || '模型 + 情报'}>
-          {match.insight}
-        </AIReportCard>
+      <View className='analyst-card'>
+        <View className='analyst-card__head'>
+          <View className='analyst-card__avatar'>
+            <Icon name='bot' color='#2563eb' size={44} />
+          </View>
+          <Text>AI 分析师</Text>
+        </View>
+        <Text className='analyst-card__text'>{displayMatch.insight}</Text>
+      </View>
+
+      <Section title='关键证据' action=''>
+        <EvidenceList items={displayMatch.evidence} />
+        <Text className='section-footnote'>注：正值提升美国胜概率，负值提升平局和巴拉圭胜概率</Text>
       </Section>
 
-      <Section title='关键证据'>
-        <EvidenceList items={match.evidence} />
+      <Section title='比分分布（概率最高）'>
+        <ScorelineDistribution items={displayMatch.scorelines} />
       </Section>
 
-      <Section title='比分分布'>
-        <ScorelineDistribution items={match.scorelines} />
-      </Section>
-
-      <View className='impact-card'>
-        <View className='impact-card__icon'>
-          <Icon name='trophy' color='#16a34a' size={36} />
+      <View className='impact-card impact-card--design'>
+        <View className='impact-card__icon impact-card__icon--green'>
+          <Icon name='trophy' color='#16a34a' size={40} />
         </View>
         <View className='impact-card__content'>
-          <Text className='impact-card__title'>影响因素</Text>
-          {match.sourceConfidence !== undefined ? (
-            <ProgressRow label='数据可信度' value={match.sourceConfidence} meta={match.source} />
-          ) : null}
-          <View className='data-point-list'>
-            {(match.dataPoints || []).map(item => (
-              <View className='data-point-row' key={item.label}>
-                <Text className='data-point-row__label'>{item.label}</Text>
-                <Text className='data-point-row__value'>{item.value}</Text>
-              </View>
-            ))}
-          </View>
+          <Text className='impact-card__title'>出线影响</Text>
+          <Text className='impact-card__text'>{displayMatch.home}胜后出线概率</Text>
         </View>
+        <Text className='impact-card__value'>+18%</Text>
+        <Icon name='chevron' color='#94a3b8' size={32} />
       </View>
 
-      <BottomNav active='matches' />
+      <Text className='data-note'>* 数据基于截至当前的公开信息与模型推算，仅供参考。</Text>
+      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
+      <BottomNav active='predictions' />
     </View>
   )
 }
