@@ -317,7 +317,7 @@
 | id | uuid | 是 | 主键 |
 | name | varchar(128) | 是 | 模型名 |
 | version | varchar(64) | 是 | `baseline_2026_06_13` |
-| model_type | varchar(64) | 是 | `elo_poisson` / `xg_baseline` |
+| model_type | varchar(64) | 是 | `history_core` / `history_core_plus_context_calibrator` / `elo_poisson` |
 | training_data_start | date | 否 | 训练数据开始 |
 | training_data_end | date | 否 | 训练数据结束 |
 | feature_schema | jsonb | 是 | 特征定义 |
@@ -352,6 +352,10 @@
 | match_id | uuid | 是 | 比赛 |
 | prediction_snapshot_id | uuid | 是 | 预测批次 |
 | model_version_id | uuid | 是 | 模型版本 |
+| inference_mode | varchar(64) | 是 | `context_calibrated` / `history_core_fallback` / `history_core` |
+| calibration_applied | boolean | 是 | 是否应用上下文校准 |
+| fallback_reason | varchar(128) | 否 | 回退原因，如 `missing_context_features` |
+| base_probabilities | jsonb | 否 | `history_core` 基础概率 |
 | home_win_prob | numeric(6,5) | 是 | 主胜概率 |
 | draw_prob | numeric(6,5) | 是 | 平局概率 |
 | away_win_prob | numeric(6,5) | 是 | 客胜概率 |
@@ -359,9 +363,14 @@
 | away_expected_goals | numeric(5,2) | 是 | 客队期望进球 |
 | confidence | varchar(32) | 是 | `low` / `medium` / `high` |
 | key_factors | jsonb | 是 | 关键因素 |
+| feature_snapshot | jsonb | 否 | 实际推理特征快照 |
+| feature_quality_status | varchar(32) | 否 | 对应 `model_features.quality_status` |
+| feature_missing_count | int | 否 | 缺失特征数量 |
 | generated_at | timestamptz | 是 | 生成时间 |
 
 约束：`home_win_prob + draw_prob + away_win_prob` 误差小于 0.001
+
+迁移要求：接入两层小模型后，`inference_mode`、`calibration_applied`、`fallback_reason`、`base_probabilities`、`feature_snapshot` 和特征质量字段必须落库；否则赛后无法解释上下文校准是否生效。
 
 ### 3.19 scoreline_predictions
 
@@ -565,4 +574,3 @@ ai_explanations
 唯一约束：`entity_type + entity_key + source + source_type`。
 
 验收口径：所有进入页面和预测链路的 canonical 外部数据必须能在 `data_source_links` 查到来源；`scripts/backfill_data_source_links.py` 的 `*_without_source` 输出必须全部为 `0`。
-

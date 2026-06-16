@@ -367,12 +367,14 @@ status 可标准化
 | M4-02 | 实现 Elo 计算 | team_elo |
 | M4-03 | 实现近期状态特征 | recent form |
 | M4-04 | 实现基础特征表 | model_features |
-| M4-05 | 实现 Poisson 比分模型 | expected goals |
-| M4-06 | 实现胜平负 baseline | prediction baseline |
+| M4-05 | 实现 history_core 胜平负模型 | base probabilities |
+| M4-06 | 实现 context_calibrator 上下文校准模型 | calibrated probabilities |
 | M4-07 | 实现比分概率 | Top scorelines |
 | M4-08 | 实现小组模拟 | group simulation |
-| M4-09 | 实现冠军模拟 | tournament simulation |
+| M4-09 | 实现冠军/四强榜模拟 | ranking_predictions |
 | M4-10 | 保存模型版本 | model_versions |
+| M4-11 | 实现缺上下文推理兜底 | history_core_fallback |
+| M4-12 | 接入预测 API 新字段 | inference_mode / base_probabilities / feature_snapshot |
 
 ### 8.2 MVP 预测输入
 
@@ -389,6 +391,16 @@ rest_days_diff
 venue_advantage
 ```
 
+当前模型分两层使用特征：
+
+```text
+history_core:
+  历史比赛可回测特征，不能使用当前赛后快照。
+
+context_calibrator:
+  history_core 基础概率 + 当前球队、球员、教练、伤停、球队榜和 AI 情报特征。
+```
+
 ### 8.3 MVP 预测输出
 
 ```text
@@ -399,6 +411,11 @@ home_expected_goals
 away_expected_goals
 top_scorelines
 key_factors
+inference_mode
+calibration_applied
+fallback_reason
+base_probabilities
+feature_snapshot
 ```
 
 ### 8.4 验收标准
@@ -411,6 +428,10 @@ key_factors
 - 冠军概率榜可生成。
 - 每次预测保存 `model_version_id`。
 - 预测结果保存 `snapshot_id`。
+- 两队上下文完整时，`inference_mode=context_calibrated` 且 `calibration_applied=true`。
+- 任一球队缺少上下文时，`inference_mode=history_core_fallback` 且概率来自 `history_core`。
+- 默认模型指标要和 Elo baseline 在同一测试子集比较，不能跨样本集比较。
+- 训练产物必须记录 `feature_names`、`context_feature_count`、`metrics` 和训练说明。
 
 ### 8.5 测试点
 
@@ -423,6 +444,14 @@ pytest tests/model
 重复预测幂等测试
 Monte Carlo 固定随机种子测试
 历史回测 smoke test
+context_calibrator 完整上下文测试
+history_core_fallback 缺上下文测试
+base_probabilities 和 calibrated probabilities 同时返回测试
+特征快照字段存在性测试
+时间泄漏检查：训练样本不读取 kickoff_at 之后的快照
+2026 小组同分规则测试
+最佳第三名排序测试
+32 强第三名组合映射测试
 ```
 
 ### 8.6 模型质量底线

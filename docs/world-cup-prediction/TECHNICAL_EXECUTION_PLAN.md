@@ -203,10 +203,11 @@ Celery + Redis
 MVP 分层：
 
 ```text
-Baseline:
-  Elo + Poisson
+P0:
+  history_core multinomial logistic regression
+  context_calibrator multinomial logistic regression
 
-正式预测:
+P1:
   LightGBM / CatBoost 胜平负模型
 
 比分:
@@ -215,6 +216,14 @@ Baseline:
 赛事:
   Monte Carlo Simulation
 ```
+
+当前不把所有特征简单手写成权重。P0 采用两层结构：
+
+- `history_core` 只学习历史国家队比赛、Elo、近期战绩、赛事类型、休息天数等可回测特征。
+- `context_calibrator` 使用 `history_core` 的基础概率，再叠加当前球队榜、球员身价、球员近期状态、教练、伤停和 AI 情报等上下文特征做概率校准。
+- 如果某场比赛任一球队缺少当前上下文，推理必须回退到 `history_core_fallback`，并在 API 返回里标明未应用校准。
+
+LightGBM / CatBoost 放到 P1：必须先补齐历史赛前快照或严格控制特征时间点，否则训练会把赛后/当前信息带入历史样本，造成时间泄漏。
 
 ### 3.7 AI
 
@@ -484,8 +493,9 @@ player_aliases
 ### 7.3 统计表
 
 ```text
-team_stats_snapshots
-player_stats_snapshots
+team_stat_snapshots
+team_form_snapshots
+player_form_snapshots
 lineup_snapshots
 injury_snapshots
 ```
@@ -504,8 +514,11 @@ data_conflicts
 ```text
 model_versions
 model_features
+prediction_snapshots
 match_predictions
-tournament_simulations
+scoreline_predictions
+group_simulations
+ranking_predictions
 prediction_reviews
 ```
 
@@ -596,6 +609,10 @@ POST /api/admin/mappings/players
 比赛前 3 小时：
   更新关键情报
   生成最终赛前版
+
+比赛前 90 分钟：
+  刷新 FIFA start list / 最终首发
+  若无法拿到最终首发，保留赛前 3 小时预测并降级置信度
 ```
 
 ### 9.3 赛后任务
@@ -619,6 +636,8 @@ Open-Meteo：天气
 公开历史数据：模型训练
 新闻源：懂球帝/FIFA/公开新闻
 ```
+
+当前 MVP 内部验证阶段先把懂球帝作为同一套球队和球员身份源，尤其是 48 队名单、球员身价、教练、球队榜 45 项指标和球员近期状态。这样可以减少跨源姓名映射错误。所有入模数据必须写 `data_source_links`，并标明 `source_class=public_source` 或对应来源类别。
 
 ### 10.2 正式阶段
 
@@ -648,13 +667,13 @@ ExternalNews -> NewsItem
 
 ### 11.1 第一阶段：Baseline
 
-目标：先跑通预测链路。
+目标：先跑通可训练、可回测、可解释的预测链路。
 
 ```text
-Elo 计算球队基础强度
-近期状态修正
+历史国家队比赛导入
+Elo 和近期状态特征
+history_core 胜平负小模型
 Poisson 输出期望进球
-规则修正伤停和场地影响
 Monte Carlo 输出出线概率
 ```
 
@@ -664,7 +683,109 @@ Monte Carlo 输出出线概率
 - 可解释。
 - 不依赖大量特征。
 
-### 11.2 第二阶段：LightGBM / CatBoost
+当前已进入 P0+ 阶段：在 baseline 之上增加 `context_calibrator`。它不是人工权重，而是用当前上下文特征学习对 `history_core` 概率的修正。
+
+### 11.2 当前阶段：两层上下文校准模型
+
+模型结构：
+
+```text
+history_core:
+  输入历史可回测特征
+  输出 base_probabilities
+
+context_calibrator:
+  输入 base_probabilities + 当前上下文特征差值
+  输出 calibrated probabilities
+```
+
+`history_core` 训练特征：
+
+```text
+elo_diff
+recent_10_points_per_match_diff
+recent_10_goal_diff_per_match_diff
+recent_20_points_per_match_diff
+recent_20_goal_diff_per_match_diff
+recent_20_goals_for_per_match_diff
+recent_20_goals_against_per_match_diff
+world_cup_experience_diff
+rest_days_diff
+neutral_site
+is_world_cup
+is_qualifier
+is_friendly
+```
+
+`context_calibrator` 上下文特征：
+
+```text
+base_prob_home_win
+base_prob_draw
+base_prob_away_win
+base_log_prob_home_win
+base_log_prob_draw
+base_log_prob_away_win
+fifa_rank_strength_diff
+team_market_value_log_diff
+roster_market_value_log_diff
+roster_player_count_diff
+player_form_coverage_diff
+player_form_goals_diff
+player_form_assists_diff
+player_form_shots_diff
+player_form_key_passes_diff
+player_form_minutes_diff
+coach_win_rate_diff
+coach_match_count_diff
+availability_impact_diff
+team_stat_goals_diff
+team_stat_goal_against_diff
+team_stat_shots_diff
+team_stat_shots_on_target_diff
+team_stat_key_passes_diff
+team_stat_pass_accuracy_diff
+team_stat_rating_diff
+team_stat_market_value_log_diff
+team_stat_yellow_cards_diff
+team_stat_red_cards_diff
+team_stat_fouls_diff
+```
+
+默认只使用稳定球队榜指标。需要实验全部 45 项懂球帝球队榜指标时，通过 `--include-all-team-stats` 单独训练并与默认模型对比。
+
+推理规则：
+
+```text
+两队都有上下文:
+  inference_mode = context_calibrated
+  calibration_applied = true
+
+任一球队缺少上下文:
+  inference_mode = history_core_fallback
+  calibration_applied = false
+  fallback_reason = missing_context_features
+
+仅历史模型:
+  inference_mode = history_core
+```
+
+训练命令：
+
+```powershell
+$env:PYTHONPATH="."
+$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
+python scripts/train_small_outcome_model.py --model-mode calibrated
+```
+
+验收：
+
+- `calibrated_model` 的 Log Loss 和 Brier Score 不低于同一测试子集的 Elo baseline。
+- `history_core_full_test` 单独记录，不能和上下文子集指标混在一起比较。
+- 训练产物必须保存 `feature_names`、`context_feature_count`、`metrics`、`training_notes`。
+- 预测样本必须输出 `base_probabilities`、`inference_mode`、`feature_snapshot` 和来源质量字段。
+
+### 11.3 第二阶段：LightGBM / CatBoost
 
 输入：
 
@@ -720,7 +841,13 @@ Calibration Curve
 Top-1 Accuracy
 ```
 
-### 11.3 第三阶段：概率校准
+进入条件：
+
+- 已有历史赛前特征快照，或能证明每个训练样本只使用该场比赛开球前已知信息。
+- 国家队名称、球员名称、球队 ID、球员 ID 映射审计通过。
+- LightGBM / CatBoost 在时间切分测试集上的 Log Loss 和 Brier Score 稳定优于两层 Logistic。
+
+### 11.4 第三阶段：概率校准
 
 模型输出概率后必须校准：
 
@@ -734,6 +861,38 @@ Temperature Scaling
 
 - 44% 概率的比赛长期真的接近 44% 发生。
 - 不让模型过度自信。
+
+### 11.5 赛事模拟规则
+
+小组模拟必须使用 2026 赛制：
+
+- 12 个小组，每组前 2 名和 8 个成绩最好的小组第三进入 32 强。
+- 小组同分先比较同分球队之间的积分、净胜球、进球数。
+- 仍无法区分时，比较所有小组赛净胜球、所有小组赛进球数、公平竞赛分。
+- 再无法区分时，按最近发布的 FIFA 男足世界排名；仍相同则继续使用上一版 FIFA 排名，直到可区分。
+- 8 个最佳第三名按全组积分、净胜球、进球数、公平竞赛分、FIFA 排名确定。
+- 32 强对阵要实现 2026 附录 C 的第三名组合映射，不能沿用 32 队世界杯旧模板。
+
+验收测试必须覆盖：
+
+- 两队同分。
+- 三队同分并在相互战绩后仍无法区分。
+- 最佳第三名排序。
+- 公平竞赛分。
+- FIFA 排名兜底。
+- 第三名组合到 32 强对阵映射。
+
+### 11.6 时间泄漏控制
+
+所有入模特征必须有 `as_of_at` 或 `snapshot_id`。训练样本只能读取 `as_of_at <= kickoff_at` 的快照。
+
+当前上下文特征主要来自 2026 赛中/当前快照，因此只能用于：
+
+- 未来未开赛比赛推理。
+- 上下文校准实验。
+- 在文档和模型产物中明确标记训练口径。
+
+不能把当前球员状态、当前球队榜、当前伤停直接回填到多年历史比赛上当作当时已知事实。
 
 ## 12. AI 执行方案
 

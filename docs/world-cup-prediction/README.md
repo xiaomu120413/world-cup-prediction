@@ -72,9 +72,12 @@ MVP 包含：
 
 不训练大语言模型。预测使用结构化小模型：
 
-- 胜平负概率：LightGBM / CatBoost / Logistic Regression baseline
+- P0 胜平负概率：`history_core` + `context_calibrator` 两层 Logistic，小模型可回测、可解释、可兜底
+- P1 胜平负概率：补齐历史赛前快照后评估 LightGBM / CatBoost
 - 进球期望：Poisson / Dixon-Coles / LightGBM Regressor
 - 赛事模拟：Monte Carlo Simulation
+
+推理结果必须标记 `inference_mode`。两队上下文完整时使用 `context_calibrated`；上下文缺失时回退 `history_core_fallback`，不能把缺失数据当成真实特征。
 
 LLM 负责：
 

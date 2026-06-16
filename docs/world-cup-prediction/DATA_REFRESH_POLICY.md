@@ -13,6 +13,7 @@ This project is a low-frequency World Cup prediction product. It does not need s
 | Post-match | Scores, standings, lineups, player ranking, team ranking, prediction review | Dongqiudi | `world_cup_schedule_lineups`, `group_standings`, `player_recent_form`, `world_cup_team_details`, prediction recompute/review |
 | Weekly | Team roster, player market value, coach records, FIFA rank check, 48-team match-data export backstop | Dongqiudi, FIFA, historical results provider | `world_cup_team_details`, `coach_records`, `fifa_mens_world_ranking`, `world_cup_48_national_team_matches` |
 | On schedule change | Static fixtures and venues | TheStatsAPI, manual verified venue facts | `official_schedule_venues`, venue enrichment |
+| T-90m before kickoff | Final start list / lineup confirmation, confidence downgrade if unavailable | FIFA start list, authorized lineup source, Dongqiudi lineup backstop | lineup refresh, prediction recompute |
 | Offline batch | One-off historical backfills or manual corrections | Stable historical provider or authorized/manual verified source | Manual import/export job, then audit |
 
 ## Weather Rule
@@ -23,6 +24,17 @@ Weather is refreshed only twice per day:
 - `12:00` local time
 
 Do not run weather collection every few hours in the MVP. Weather is a model context feature, not a real-time product feature.
+
+## Lineup Rule
+
+FIFA World Cup 26 start lists are available in the official electronic system before kickoff and must be submitted by both teams at least 90 minutes before kickoff. The MVP refreshes lineups at T-90m when the fixture is close enough and a source is available.
+
+If the T-90m lineup cannot be collected:
+
+- Keep the T-3h prediction as the active prediction.
+- Set prediction confidence lower.
+- Expose the missing lineup status in `match_feature_missing_count` and `feature_snapshot`.
+- Do not fabricate expected starters.
 
 ## Matchday Definition
 

@@ -1,7 +1,7 @@
 # 世界杯预测小程序架构设计
 
-版本：v0.1  
-更新时间：2026-06-13
+版本：v0.2
+更新时间：2026-06-16
 
 ## 1. 架构目标
 
@@ -88,6 +88,8 @@ API-Football
 /sport-data/soccer/biz/dqd/bkb_match/lineup/{match_id}?app=dqd&lang=zh-cn
 ```
 
+当前 MVP 内部验证阶段使用懂球帝作为世界杯 48 队球员、球员身价、球队榜指标、教练、赛程、积分榜和当前赛事球员状态的同一套身份源。这样可以先保证球队和球员能稳定匹配。正式公开上线或商业化前，必须保留适配器边界，切换到授权 API 作为主数据源，懂球帝只做中文展示补充和交叉校验。
+
 ### 3.3 历史训练数据
 
 ```text
@@ -147,6 +149,9 @@ sequenceDiagram
 
 比赛前 3 小时：
   关键情报、最终赛前预测
+
+比赛前 90 分钟：
+  按 FIFA start list 时间窗口刷新最终首发，若拿不到最终首发则沿用赛前 3 小时版本并标记低置信度
 
 比赛后：
   赛果、积分榜、球员数据、模型复盘
@@ -243,14 +248,18 @@ matches
 venues
 coaches
 raw_snapshots
-team_stats_snapshots
-player_stats_snapshots
+team_stat_snapshots
+team_form_snapshots
+player_form_snapshots
 news_items
 ai_insights
 model_features
 model_versions
+prediction_snapshots
 match_predictions
-tournament_simulations
+scoreline_predictions
+group_simulations
+ranking_predictions
 prediction_reviews
 ```
 
@@ -269,8 +278,11 @@ match_predictions：
 model_versions：
   保存模型版本、训练数据范围、评估指标。
 
-tournament_simulations：
-  保存赛事模拟结果，包括出线和冠军概率。
+group_simulations：
+  保存小组出线模拟结果。
+
+ranking_predictions：
+  保存冠军、四强、黑马等榜单概率。
 ```
 
 ## 7. 模型架构
@@ -289,17 +301,46 @@ flowchart TD
     H --> I
 ```
 
-模型清单：
+当前 P0 模型清单：
 
 ```text
 胜平负模型：
-  LightGBM / CatBoost / Logistic Regression baseline
+  history_core：基于历史国家队比赛的 multinomial logistic regression
+  context_calibrator：用当前赛前上下文校准 history_core 的基础概率
 
 进球期望模型：
   Poisson / Dixon-Coles / LightGBM Regressor
 
 赛事模拟：
   Monte Carlo Simulation
+```
+
+P0 不直接上 LightGBM / CatBoost 作为主模型。原因是当前上下文特征大多是“当前快照”，严格训练要求每场历史比赛的赛前快照，否则会出现时间泄漏。当前路线先用两层小模型跑通：
+
+```text
+历史比赛 -> history_core -> base_probabilities
+当前球队/球员/教练/伤停/球队榜上下文 -> context_calibrator
+输出 calibrated probabilities
+```
+
+P1 再在补齐历史赛前快照后引入 LightGBM / CatBoost，与两层 Logistic 做回测对比。
+
+推理输出必须带模型模式字段：
+
+```text
+inference_mode:
+  context_calibrated        两队都有当前上下文，使用校准模型
+  history_core_fallback     缺少一队上下文，回退历史核心模型
+  history_core              仅历史模型运行
+
+calibration_applied:
+  true / false
+
+fallback_reason:
+  missing_context_features / null
+
+base_probabilities:
+  history_core 输出的基础胜平负概率
 ```
 
 评估指标：
@@ -311,6 +352,8 @@ Calibration Error
 Top-1 Accuracy
 比分 Top 5 覆盖率
 ```
+
+2026 小组模拟必须按 FIFA 规则实现并回测。小组同分时先看同分球队之间的相互战绩，再看全组净胜球、全组进球、公平竞赛分，最后按最近及连续上一版 FIFA 男足世界排名兜底；32 强第三名晋级和对阵也必须单独测试，不能沿用 32 队世界杯旧规则。
 
 ## 8. 小程序访问架构
 
@@ -346,9 +389,9 @@ OpenAI API
 
 模型：
   Python
+  scikit-learn / pure Python baseline
   LightGBM
   CatBoost
-  scikit-learn
 
 数据库：
   PostgreSQL
@@ -383,7 +426,7 @@ PostgreSQL
 ```text
 历史比赛导入
 Elo 计算
-LightGBM baseline
+history_core + context_calibrator 小模型
 Poisson 比分模型
 ```
 

@@ -287,8 +287,16 @@ curl "$BASE_URL/api/v1/matches/usa-paraguay-2026-06-13"
 {
   "data": {
     "match_id": "usa-paraguay-2026-06-13",
-    "model_version": "baseline_2026_06_13",
+    "model_version": "small_outcome_calibrated_2026_06_16",
     "generated_at": "2026-06-13T18:00:00+08:00",
+    "inference_mode": "context_calibrated",
+    "calibration_applied": true,
+    "fallback_reason": null,
+    "base_probabilities": {
+      "home_win": 0.47,
+      "draw": 0.28,
+      "away_win": 0.25
+    },
     "probabilities": {
       "home_win": 0.44,
       "draw": 0.27,
@@ -305,7 +313,15 @@ curl "$BASE_URL/api/v1/matches/usa-paraguay-2026-06-13"
     "key_factors": [
       { "label": "阵容稳定", "value": 6, "note": "近 5 场首发重复率更高" }
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "match_feature_quality_status": "partial",
+    "match_feature_missing_count": 3,
+    "match_feature_sources": ["historical_international_matches", "team_stat_snapshots", "player_form_snapshots"],
+    "feature_snapshot": {
+      "elo_diff": 58.4,
+      "base_prob_home_win": 0.47,
+      "ctx_roster_market_value_log": 0.31
+    }
   },
   "meta": {
     "updated_at": "2026-06-13T18:00:00+08:00",
@@ -315,6 +331,19 @@ curl "$BASE_URL/api/v1/matches/usa-paraguay-2026-06-13"
 ```
 
 **404 Not Found**: `PREDICTION_NOT_FOUND`
+
+#### Prediction model fields
+
+| Field | Description |
+| --- | --- |
+| `inference_mode` | `context_calibrated`、`history_core_fallback` 或 `history_core` |
+| `calibration_applied` | 是否应用当前上下文校准模型 |
+| `fallback_reason` | 未应用校准时的原因，例如 `missing_context_features` |
+| `base_probabilities` | `history_core` 基础胜平负概率；有上下文校准时用于解释校准前后变化 |
+| `match_feature_quality_status` | 当前比赛特征质量，来自 `model_features.quality_status` |
+| `match_feature_missing_count` | 当前比赛缺失特征数量 |
+| `match_feature_sources` | 参与当前预测的来源表或来源族 |
+| `feature_snapshot` | 实际喂给模型的关键特征快照，便于复盘和解释 |
 
 **Example Request**
 
@@ -776,4 +805,3 @@ MVP 建议：
 - v1 阶段只新增字段，不删除字段。
 - 前端必须忽略未知字段。
 - 破坏性变更进入 `/api/v2`。
-
