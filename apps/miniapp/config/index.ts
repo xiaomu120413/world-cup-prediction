@@ -3,6 +3,8 @@ import TsconfigPathsPlugin from 'tsconfig-paths-webpack-plugin'
 import devConfig from './dev'
 import prodConfig from './prod'
 
+const h5PerformanceBudgetBytes = 360 * 1024
+
 export default defineConfig<'webpack5'>(async (merge) => {
   const baseConfig: UserConfigExport<'webpack5'> = {
     projectName: 'world-cup-prediction-miniapp',
@@ -74,6 +76,10 @@ export default defineConfig<'webpack5'>(async (merge) => {
       },
       webpackChain(chain) {
         chain.resolve.plugin('tsconfig-paths').use(TsconfigPathsPlugin)
+        chain.performance
+          .hints('warning')
+          .maxEntrypointSize(h5PerformanceBudgetBytes)
+          .maxAssetSize(h5PerformanceBudgetBytes)
       }
     }
   }
