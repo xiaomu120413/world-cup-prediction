@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.predictions.small_outcome_model import (
     evaluate_model,
     train_multinomial_logistic,
 )
+from scripts.train_small_outcome_model import CurrentContextFeatureStore, predict_scheduled_matches
 
 
 def make_match(index: int, home: str, away: str, home_score: int, away_score: int) -> HistoricalMatch:
@@ -93,3 +95,58 @@ def test_small_outcome_model_accepts_context_feature_names():
 
     assert model.feature_names == feature_names
     assert "ctx_roster_market_value_log" in model.to_dict()["feature_names"]
+
+
+def test_prediction_uses_history_fallback_when_context_team_is_missing():
+    class FixedModel:
+        feature_names = ("elo_diff",)
+
+        def __init__(self, probabilities):
+            self.probabilities = probabilities
+
+        def predict_proba(self, _features):
+            return self.probabilities
+
+    row = SimpleNamespace(
+        public_id="match-1",
+        home_team_id="team-a",
+        away_team_id="team-b",
+        kickoff_at=datetime(2026, 6, 16, tzinfo=UTC),
+        neutral_site=True,
+        home_team_name="A",
+        away_team_name="B",
+        home_team_code="A",
+        away_team_code="B",
+        match_feature_quality_status=None,
+        match_feature_missing_features=[],
+        match_feature_source_summary={},
+    )
+    states = {"team-a": make_state(), "team-b": make_state()}
+    context_store = CurrentContextFeatureStore(
+        feature_names=("ctx_roster_market_value_log",),
+        team_vectors={"team-a": {"ctx_roster_market_value_log": 1.0}},
+        roster_team_ids={"team-a"},
+    )
+
+    predictions = predict_scheduled_matches(
+        FixedModel([0.1, 0.1, 0.8]),
+        states,
+        [row],
+        context_store=context_store,
+        core_model=FixedModel([0.5, 0.3, 0.2]),
+    )
+
+    assert predictions[0]["inference_mode"] == "history_core_fallback"
+    assert predictions[0]["calibration_applied"] is False
+    assert predictions[0]["fallback_reason"] == "missing_context_features"
+    assert predictions[0]["probabilities"] == {"home_win": 0.5, "draw": 0.3, "away_win": 0.2}
+
+
+def make_state():
+    matches = [
+        make_match(1, "a", "b", 2, 0),
+        make_match(2, "a", "b", 1, 1),
+        make_match(3, "a", "b", 0, 1),
+    ]
+    examples, states = build_examples(matches, min_prior_matches=1)
+    return next(iter(states.values()))

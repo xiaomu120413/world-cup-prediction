@@ -470,15 +470,32 @@ def predict_scheduled_matches(
             "FIFA World Cup",
         )
         base_probabilities = None
+        calibration_applied = False
+        fallback_reason = None
+        has_context_pair = (
+            context_store is not None
+            and context_store.has_team(str(row.home_team_id))
+            and context_store.has_team(str(row.away_team_id))
+        )
         if core_model is not None and context_store is not None:
             base_probabilities = core_model.predict_proba(features)
-            features = {
-                **base_probability_features(base_probabilities),
-                **context_store.diff_features(str(row.home_team_id), str(row.away_team_id)),
-            }
-        elif context_store is not None:
+            if has_context_pair:
+                features = {
+                    **base_probability_features(base_probabilities),
+                    **context_store.diff_features(str(row.home_team_id), str(row.away_team_id)),
+                }
+                probabilities = model.predict_proba(features)
+                calibration_applied = True
+            else:
+                probabilities = base_probabilities
+                fallback_reason = "missing_context_features"
+        elif context_store is not None and has_context_pair:
             features.update(context_store.diff_features(str(row.home_team_id), str(row.away_team_id)))
-        probabilities = model.predict_proba(features)
+            probabilities = model.predict_proba(features)
+            calibration_applied = True
+        else:
+            probabilities = model.predict_proba(features)
+        snapshot_model = model if calibration_applied or core_model is None else core_model
         prediction = {
             "match_id": row.public_id,
             "kickoff_at": row.kickoff_at.isoformat(),
@@ -486,13 +503,16 @@ def predict_scheduled_matches(
             "away_team": row.away_team_name,
             "home_team_code": row.home_team_code,
             "away_team_code": row.away_team_code,
+            "inference_mode": "context_calibrated" if calibration_applied else "history_core_fallback" if fallback_reason else "history_core",
+            "calibration_applied": calibration_applied,
+            "fallback_reason": fallback_reason,
             "probabilities": rounded_probabilities(probabilities),
             "match_feature_quality_status": row.match_feature_quality_status,
             "match_feature_missing_count": len(row.match_feature_missing_features or []),
             "match_feature_sources": (row.match_feature_source_summary or {}).get("sources", []),
             "feature_snapshot": {
                 name: round(safe_float(features.get(name)), 6)
-                for name in model.feature_names
+                for name in snapshot_model.feature_names
             },
         }
         if base_probabilities is not None:
