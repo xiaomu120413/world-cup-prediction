@@ -102,6 +102,7 @@ $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldc
 python scripts/run_refresh_schedule.py --cadence daily_00
 python scripts/run_refresh_schedule.py --cadence daily_12
 python scripts/run_refresh_schedule.py --cadence post_match
+python scripts/run_refresh_schedule.py --cadence pre_match_90m
 python scripts/run_refresh_schedule.py --cadence weekly
 ```
 
@@ -111,11 +112,18 @@ Supported cadences:
 | --- | --- | --- |
 | `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores, standings, player ranking, team detail data, FIFA ranks, verified injuries, news, AI news insights, prediction recompute, audit |
 | `daily_12` | Every day at 12:00 Asia/Shanghai | Weather, 48-team national-team match data refresh/export, verified injuries, news, AI news insights, prediction recompute, audit |
-| `post_match` | 30-60 minutes after matches finish | Scores, standings, played lineups, player ranking, matchday news, AI news insights, prediction recompute, audit |
+| `post_match` | Event check every 30 minutes; due when Dongqiudi matches finished recently | Scoped score/lineup refresh for finished matches, standings, player ranking, matchday news, AI news insights, scoped feature/prediction recompute, audit |
+| `pre_match_90m` | Event check every 30 minutes; due when Dongqiudi matches kick off in 75-105 minutes | Scoped schedule/lineup refresh, matchday news, AI news insights, scoped T-90m feature snapshot, scoped prediction recompute, audit |
 | `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, 48-team match data refresh/export, market-value export, prediction recompute, audit |
-| `auto` | Optional frequent runner | Chooses `daily_00`, `daily_12`, or `post_match` from local time and match context |
+| `auto` | Optional frequent runner | Chooses `daily_00`, `daily_12`, `pre_match_90m`, or `post_match` from local time and match context |
 
-The scheduler writes `collector_runs` rows with `source=scheduler` and `job_type=refresh:{cadence}`. It also uses PostgreSQL advisory locks and once-per-slot checks to avoid duplicate concurrent runs.
+The scheduler writes `collector_runs` rows with `source=scheduler`. Daily and weekly jobs use `job_type=refresh:{cadence}`. Event jobs write one batch row and one success marker per handled match, for example `refresh:pre_match_90m:dongqiudi-54329959`. The next event check removes already marked matches from its scope, so an overlapping morning window does not refresh the same match twice. It also uses PostgreSQL advisory locks and once-per-slot checks to avoid duplicate concurrent runs.
+
+Event refreshes must stay scoped:
+
+- `pre_match_90m` passes only due `--match-id` values to Dongqiudi lineup collection, feature building and prediction recompute.
+- `post_match` refreshes only recently finished Dongqiudi matches for score/lineup collection, then rebuilds features and predictions only for future matches involving the affected teams.
+- If no target match is due, the scheduler returns `skipped` and does not run collectors.
 
 ## Current Canonical Sources
 
@@ -125,7 +133,7 @@ The scheduler writes `collector_runs` rows with `source=scheduler` and `job_type
 | Player market value | Dongqiudi team/player pages |
 | Team ranking metrics | Dongqiudi `cid=61` team ranking APIs into `team_stat_snapshots` |
 | Scores, schedule, standings, lineups | Dongqiudi sport-data |
-| Static fixtures and venues | TheStatsAPI plus manual venue verification |
+| Static venues | Manual venue verification; legacy TheStatsAPI fixture rows are retained as provenance data but are not used by the formal prediction scheduler |
 | FIFA rank | FIFA ranking API |
 | Weather | Open-Meteo |
 | News | Dongqiudi homepage, BBC, Guardian, ESPN, FOX Sports |

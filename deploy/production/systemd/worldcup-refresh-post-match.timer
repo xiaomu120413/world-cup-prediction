@@ -1,0 +1,10 @@
+[Unit]
+Description=Run World Cup post-match scoped refresh checks
+
+[Timer]
+OnCalendar=*-*-* *:0/30:00
+Persistent=true
+Unit=worldcup-refresh@post_match.service
+
+[Install]
+WantedBy=timers.target

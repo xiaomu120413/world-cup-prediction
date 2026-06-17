@@ -6,7 +6,7 @@ from math import log1p
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,8 @@ from app.db.schema import (
 FEATURE_SET = "match_pre_match_v1"
 FEATURE_SCHEMA_VERSION = "2026-06-15.match-pre-v1"
 API_TZ = ZoneInfo("Asia/Shanghai")
+DONGQIUDI_MATCH_PUBLIC_ID_PREFIX = "dongqiudi-"
+PREDICTION_MATCH_STATUSES = ("scheduled", "live")
 
 TEAM_STAT_METRICS = (
     "goals",
@@ -155,9 +157,18 @@ class MatchFeatureBuilder:
         dry_run: bool = False,
         roster_only: bool = True,
         snapshot_as_of_at: datetime | None = None,
+        public_id_prefix: str | None = DONGQIUDI_MATCH_PUBLIC_ID_PREFIX,
+        statuses: tuple[str, ...] | None = PREDICTION_MATCH_STATUSES,
+        min_kickoff_at: datetime | None = None,
     ) -> dict[str, Any]:
         snapshot_time = snapshot_as_of_at or daily_snapshot_time()
-        rows = self.load_matches(public_ids, roster_only=roster_only)
+        rows = self.load_matches(
+            public_ids,
+            roster_only=roster_only,
+            public_id_prefix=public_id_prefix,
+            statuses=statuses,
+            min_kickoff_at=min_kickoff_at,
+        )
         feature_rows = [self.build_for_match(row, snapshot_time) for row in rows]
         if not dry_run and feature_rows:
             self.write_features(feature_rows)
@@ -172,11 +183,21 @@ class MatchFeatureBuilder:
             "matches_read": len(rows),
             "features_written": 0 if dry_run else len(feature_rows),
             "roster_only": roster_only,
+            "public_id_prefix": public_id_prefix,
+            "statuses": list(statuses) if statuses else None,
+            "min_kickoff_at": min_kickoff_at.isoformat() if min_kickoff_at else "db_now",
             "snapshot_as_of_at": snapshot_time.isoformat(),
             "quality_counts": quality_counts,
         }
 
-    def load_matches(self, public_ids: list[str] | None = None, roster_only: bool = True) -> list[dict[str, Any]]:
+    def load_matches(
+        self,
+        public_ids: list[str] | None = None,
+        roster_only: bool = True,
+        public_id_prefix: str | None = DONGQIUDI_MATCH_PUBLIC_ID_PREFIX,
+        statuses: tuple[str, ...] | None = PREDICTION_MATCH_STATUSES,
+        min_kickoff_at: datetime | None = None,
+    ) -> list[dict[str, Any]]:
         home = teams.alias("home_team")
         away = teams.alias("away_team")
         venue = venues.alias("venue")
@@ -218,6 +239,12 @@ class MatchFeatureBuilder:
         )
         if public_ids:
             query = query.where(matches.c.public_id.in_(public_ids))
+        else:
+            if public_id_prefix:
+                query = query.where(matches.c.public_id.like(f"{public_id_prefix}%"))
+            if statuses:
+                query = query.where(matches.c.status.in_(statuses))
+                query = query.where(or_(matches.c.status == "live", matches.c.kickoff_at >= (min_kickoff_at or func.now())))
         if roster_only:
             query = query.where(
                 text("exists (select 1 from players hp where hp.team_id = matches.home_team_id and hp.code like 'DQD-P%')"),
@@ -230,7 +257,7 @@ class MatchFeatureBuilder:
         feature_cutoff_at = min(snapshot_as_of_at, kickoff_at)
         home = self.team_profile(match_row, "home", feature_cutoff_at)
         away = self.team_profile(match_row, "away", feature_cutoff_at)
-        weather = self.weather_features(match_row.get("venue_id"))
+        weather = self.weather_features(match_row.get("venue_id"), feature_cutoff_at)
         numeric, missing = assemble_numeric_features(match_row, home, away, weather)
         source_summary = {
             "tables": [
@@ -292,9 +319,9 @@ class MatchFeatureBuilder:
     def team_profile(self, match_row: dict[str, Any], side: str, as_of_at: datetime) -> dict[str, Any]:
         team_id = match_row[f"{side}_team_id"]
         history = self.history_features(team_id, as_of_at)
-        team_stats = self.team_stat_features(team_id)
-        player_form = self.player_form_features(team_id)
-        availability = self.availability_features(team_id)
+        team_stats = self.team_stat_features(team_id, as_of_at)
+        player_form = self.player_form_features(team_id, as_of_at)
+        availability = self.availability_features(team_id, as_of_at)
         context = {
             "code": match_row[f"{side}_code"],
             "name_zh": match_row[f"{side}_name_zh"],
@@ -344,7 +371,7 @@ class MatchFeatureBuilder:
         ]
         return {**aggregate_history_windows(result_rows, as_of_at), "_rows_loaded": len(result_rows)}
 
-    def team_stat_features(self, team_id: Any) -> dict[str, Any]:
+    def team_stat_features(self, team_id: Any, as_of_at: datetime) -> dict[str, Any]:
         rows = self.db.execute(
             text(
                 """
@@ -353,10 +380,11 @@ class MatchFeatureBuilder:
                 from team_stat_snapshots
                 where team_id = :team_id
                   and metric_type = any(:metric_types)
+                  and as_of_at <= :as_of_at
                 order by metric_type, as_of_at desc
                 """
             ),
-            {"team_id": team_id, "metric_types": list(TEAM_STAT_METRICS)},
+            {"team_id": team_id, "metric_types": list(TEAM_STAT_METRICS), "as_of_at": as_of_at},
         ).mappings().all()
         return {
             row.metric_type: {
@@ -371,7 +399,7 @@ class MatchFeatureBuilder:
             for row in rows
         }
 
-    def player_form_features(self, team_id: Any) -> dict[str, Any]:
+    def player_form_features(self, team_id: Any, as_of_at: datetime) -> dict[str, Any]:
         row = self.db.execute(
             text(
                 """
@@ -387,7 +415,7 @@ class MatchFeatureBuilder:
                         pf.minutes,
                         pf.availability_status
                     from players p
-                    left join player_form_snapshots pf on pf.player_id = p.id
+                    left join player_form_snapshots pf on pf.player_id = p.id and pf.as_of_at <= :as_of_at
                     where p.team_id = :team_id
                       and p.code like 'DQD-P%'
                     order by p.id, pf.as_of_at desc nulls last
@@ -406,7 +434,7 @@ class MatchFeatureBuilder:
                 from latest_player_form
                 """
             ),
-            {"team_id": team_id},
+            {"team_id": team_id, "as_of_at": as_of_at},
         ).mappings().one()
         roster_count = int(row.roster_count or 0)
         return {
@@ -422,7 +450,7 @@ class MatchFeatureBuilder:
             "roster_market_value_eur": safe_float(row.roster_market_value_eur),
         }
 
-    def availability_features(self, team_id: Any) -> dict[str, Any]:
+    def availability_features(self, team_id: Any, as_of_at: datetime) -> dict[str, Any]:
         injury_row = self.db.execute(
             select(
                 text("count(*) filter (where is_model_eligible) as signals"),
@@ -430,6 +458,7 @@ class MatchFeatureBuilder:
             )
             .select_from(injury_reports)
             .where(injury_reports.c.team_id == team_id)
+            .where(injury_reports.c.updated_at <= as_of_at)
         ).mappings().one()
         ai_row = self.db.execute(
             select(
@@ -438,6 +467,7 @@ class MatchFeatureBuilder:
             )
             .select_from(ai_insights)
             .where(ai_insights.c.team_id == team_id)
+            .where(ai_insights.c.created_at <= as_of_at)
         ).mappings().one()
         return {
             "signals": int(injury_row.signals or 0) + int(ai_row.signals or 0),
@@ -446,7 +476,7 @@ class MatchFeatureBuilder:
             "availability_impact": round(float(injury_row.impact or 0) + float(ai_row.impact or 0), 4),
         }
 
-    def weather_features(self, venue_id: Any | None) -> dict[str, Any] | None:
+    def weather_features(self, venue_id: Any | None, as_of_at: datetime) -> dict[str, Any] | None:
         if venue_id is None:
             return None
         row = self.db.execute(
@@ -462,6 +492,7 @@ class MatchFeatureBuilder:
                 weather_snapshots.c.data_quality,
             )
             .where(weather_snapshots.c.venue_id == venue_id)
+            .where(weather_snapshots.c.observed_at <= as_of_at)
             .order_by(weather_snapshots.c.observed_at.desc())
             .limit(1)
         ).mappings().first()

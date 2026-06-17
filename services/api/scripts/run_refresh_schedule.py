@@ -15,9 +15,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a scheduled low-frequency data refresh plan.")
     parser.add_argument(
         "--cadence",
-        choices=["auto", "daily_00", "daily_12", "post_match", "weekly"],
+        choices=["auto", "daily_00", "daily_12", "post_match", "pre_match_90m", "weekly"],
         default="auto",
-        help="Refresh cadence to run. auto chooses by local Asia/Shanghai time and post-match context.",
+        help="Refresh cadence to run. auto chooses by local Asia/Shanghai time, T-90m and post-match context.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print the plan without executing tasks.")
     parser.add_argument("--force", action="store_true", help="Ignore once-per-slot completion checks.")

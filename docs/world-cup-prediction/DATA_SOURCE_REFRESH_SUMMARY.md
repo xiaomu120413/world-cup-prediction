@@ -53,14 +53,14 @@ Acceptance requirement: `team_stat_metrics >= 45`, `team_stat_snapshots_without_
 | --- | --- | --- |
 | `daily_00` | Every day at 00:00 Asia/Shanghai | Schedule/scores/lineups, standings, player rankings, team details, FIFA ranking, verified injuries, public news, AI insights, prediction recompute, real-data audit |
 | `daily_12` | Every day at 12:00 Asia/Shanghai | Weather/foundation refresh, verified injuries, public news, AI insights, prediction recompute, real-data audit |
-| `post_match` | 30-60 minutes after a finished match | Scores/lineups, standings, player rankings, matchday news, AI insights, prediction recompute, real-data audit |
+| `post_match` | Event check every 30 minutes; due when Dongqiudi matches finished recently | Scoped score/lineup refresh for finished matches, standings, player rankings, matchday news, AI insights, scoped feature/prediction recompute, real-data audit |
 | `weekly` | Weekly low-traffic window | Rosters, market values, coaches, FIFA ranks, historical results, missing-market-value export, prediction recompute, real-data audit |
-| `pre_match_90m` | 90 minutes before kickoff when available | Final start list / lineup confirmation, feature rebuild, prediction recompute or confidence downgrade |
-| `auto` | Optional frequent runner | Resolves to `daily_00`, `daily_12`, or `post_match`; otherwise skips |
+| `pre_match_90m` | Event check every 30 minutes; due when Dongqiudi matches kick off in 75-105 minutes | Scoped final start list / lineup confirmation, T-90m feature snapshot, scoped prediction recompute |
+| `auto` | Optional frequent runner | Resolves to `daily_00`, `daily_12`, `pre_match_90m`, or `post_match`; otherwise skips |
 
-`pre_match_90m` is a target cadence for the lineup phase. It should not be enabled until the scheduler has an explicit fixture-aware trigger and a verified lineup source.
+`pre_match_90m` is enabled through a fixture-aware scheduler check. It runs only when a Dongqiudi match is in the T-90m window. `post_match` also runs only when recently finished Dongqiudi matches exist. Both cadences pass scoped `--match-id` values to downstream feature and prediction scripts; they do not rebuild all match predictions. Event cadences write per-match success markers in `collector_runs`, and later checks exclude already marked matches so an overlapping morning window does not repeat the same refresh.
 
-All cadences that can change model inputs must run `backfill_identity_mappings.py`, `audit_identity_mappings.py`, and `build_match_features.py` before prediction recompute. The feature builder writes daily `model_features` snapshots keyed by `entity_type`, `entity_key`, `feature_set`, and `as_of_at`; rerunning the same daily slot updates the existing snapshot instead of overwriting older days.
+All cadences that can change model inputs must run `backfill_identity_mappings.py`, `audit_identity_mappings.py`, and `build_match_features.py` before prediction recompute. Daily jobs write daily `model_features` snapshots keyed by `entity_type`, `entity_key`, `feature_set`, and `as_of_at`; event jobs pass an explicit `--as-of-at` so T-90m and post-match snapshots can be audited separately.
 
 Command examples from repo root:
 
@@ -69,6 +69,7 @@ $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldc
 python services/api/scripts/run_refresh_schedule.py --cadence daily_00
 python services/api/scripts/run_refresh_schedule.py --cadence daily_12
 python services/api/scripts/run_refresh_schedule.py --cadence post_match
+python services/api/scripts/run_refresh_schedule.py --cadence pre_match_90m
 python services/api/scripts/run_refresh_schedule.py --cadence weekly
 python services/api/scripts/run_refresh_schedule.py --cadence auto
 ```
@@ -90,7 +91,8 @@ This means:
 - Consecutive tournament days can be matchdays, but that only raises priority for news, injury, lineup, and post-match refreshes.
 - Weather still refreshes only at `00:00` and `12:00`.
 - Collectors do not become hourly jobs just because the tournament is active.
-- `post_match` is only due when a match finished recently, currently within the scheduler's recent-finished-match window.
+- `post_match` is only due when a Dongqiudi match finished recently, currently within the scheduler's recent-finished-match window.
+- `pre_match_90m` is only due when a Dongqiudi match kicks off in the scheduler's 75-105 minute window.
 
 ## News Extraction Rule
 

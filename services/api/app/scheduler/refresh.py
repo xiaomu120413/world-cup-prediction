@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import insert, select, text
+from sqlalchemy import insert, or_, select, text
 
 from app.db.schema import collector_runs, matches
 
@@ -16,6 +16,50 @@ API_TZ = ZoneInfo("Asia/Shanghai")
 API_ROOT = Path(__file__).resolve().parents[2]
 
 Cadence = str
+EVENT_CADENCES = {"post_match", "pre_match_90m"}
+
+
+def match_id_args(match_ids: tuple[str, ...]) -> tuple[str, ...]:
+    args: list[str] = []
+    for match_id in match_ids:
+        args.extend(["--match-id", match_id])
+    return tuple(args)
+
+
+@dataclass(frozen=True)
+class RefreshContext:
+    cadence: Cadence
+    evaluated_at: datetime
+    is_due: bool = True
+    reason: str | None = None
+    lineup_match_ids: tuple[str, ...] = ()
+    prediction_match_ids: tuple[str, ...] = ()
+    feature_snapshot_at: datetime | None = None
+    run_key: str | None = None
+
+    def args_for(self, source: str) -> tuple[str, ...]:
+        if source == "lineup_match_args":
+            return match_id_args(self.lineup_match_ids)
+        if source == "feature_match_args":
+            args = list(match_id_args(self.prediction_match_ids))
+            if args and self.feature_snapshot_at:
+                args.extend(["--as-of-at", self.feature_snapshot_at.isoformat()])
+            return tuple(args)
+        if source == "prediction_match_args":
+            return match_id_args(self.prediction_match_ids)
+        return ()
+
+
+def context_payload(context: RefreshContext) -> dict:
+    return {
+        "cadence": context.cadence,
+        "is_due": context.is_due,
+        "reason": context.reason,
+        "lineup_match_ids": list(context.lineup_match_ids),
+        "prediction_match_ids": list(context.prediction_match_ids),
+        "feature_snapshot_at": context.feature_snapshot_at.isoformat() if context.feature_snapshot_at else None,
+        "run_key": context.run_key,
+    }
 
 
 @dataclass(frozen=True)
@@ -24,9 +68,23 @@ class RefreshTask:
     args: tuple[str, ...]
     description: str
     timeout_seconds: int = 900
+    arg_sources: tuple[str, ...] = ()
+    required_arg_sources: tuple[str, ...] = ()
 
-    def command(self) -> list[str]:
-        return [sys.executable, *self.args]
+    def resolved_args(self, context: RefreshContext | None = None) -> tuple[str, ...]:
+        values = list(self.args)
+        if context:
+            for source in self.arg_sources:
+                values.extend(context.args_for(source))
+        return tuple(values)
+
+    def command(self, context: RefreshContext | None = None) -> list[str]:
+        return [sys.executable, *self.resolved_args(context)]
+
+    def should_skip(self, context: RefreshContext | None = None) -> bool:
+        if not context:
+            return False
+        return any(not context.args_for(source) for source in self.required_arg_sources)
 
 
 REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
@@ -51,9 +109,21 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
         RefreshTask("identity_mapping_audit", ("scripts/audit_identity_mappings.py",), "Canonical identity mapping audit"),
         RefreshTask("match_features", ("scripts/build_match_features.py",), "Build model-ready match feature snapshots"),
         RefreshTask("prediction_recompute", ("scripts/recompute_predictions.py", "--scope", "matchday"), "Recompute matchday predictions"),
+        RefreshTask("source_link_backfill", ("scripts/backfill_data_source_links.py",), "Backfill source links before real-data audit"),
         RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),
     ),
     "daily_12": (
+        RefreshTask("world_cup_schedule_lineups", ("scripts/collect_dongqiudi_match_context.py",), "Midday schedule, scores and played lineups"),
+        RefreshTask(
+            "group_standings",
+            ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_standings"),
+            "Midday World Cup group standings",
+        ),
+        RefreshTask(
+            "player_recent_form",
+            ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_player_rankings"),
+            "Midday tournament player ranking stats",
+        ),
         RefreshTask("venue_weather", ("scripts/enrich_foundation_data.py",), "Venue weather snapshots and foundation enrichment"),
         RefreshTask(
             "world_cup_48_national_team_matches",
@@ -68,10 +138,17 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
         RefreshTask("identity_mapping_audit", ("scripts/audit_identity_mappings.py",), "Canonical identity mapping audit"),
         RefreshTask("match_features", ("scripts/build_match_features.py",), "Build model-ready match feature snapshots"),
         RefreshTask("prediction_recompute", ("scripts/recompute_predictions.py", "--scope", "matchday"), "Recompute matchday predictions"),
+        RefreshTask("source_link_backfill", ("scripts/backfill_data_source_links.py",), "Backfill source links before real-data audit"),
         RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),
     ),
     "post_match": (
-        RefreshTask("world_cup_schedule_lineups", ("scripts/collect_dongqiudi_match_context.py",), "Post-match scores and played lineups"),
+        RefreshTask(
+            "world_cup_schedule_lineups",
+            ("scripts/collect_dongqiudi_match_context.py",),
+            "Post-match scores and played lineups for recently finished matches",
+            arg_sources=("lineup_match_args",),
+            required_arg_sources=("lineup_match_args",),
+        ),
         RefreshTask(
             "group_standings",
             ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_standings"),
@@ -83,11 +160,53 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
             "Post-match player ranking stats",
         ),
         RefreshTask("public_news_rss", ("scripts/collect_public_news.py", "--mode", "matchday"), "Matchday news refresh"),
-        RefreshTask("ai_news_insights", ("scripts/build_ai_news_insights.py",), "Structured AI news insights"),
+        RefreshTask("ai_news_insights", ("scripts/build_ai_news_insights.py", "--limit", "120"), "Structured AI news insights"),
         RefreshTask("identity_mapping_backfill", ("scripts/backfill_identity_mappings.py",), "Backfill canonical team and player identity mappings"),
         RefreshTask("identity_mapping_audit", ("scripts/audit_identity_mappings.py",), "Canonical identity mapping audit"),
-        RefreshTask("match_features", ("scripts/build_match_features.py",), "Build model-ready match feature snapshots"),
-        RefreshTask("prediction_recompute", ("scripts/recompute_predictions.py", "--scope", "matchday"), "Recompute matchday predictions"),
+        RefreshTask(
+            "match_features",
+            ("scripts/build_match_features.py",),
+            "Build scoped model-ready match feature snapshots",
+            arg_sources=("feature_match_args",),
+            required_arg_sources=("feature_match_args",),
+        ),
+        RefreshTask(
+            "prediction_recompute",
+            ("scripts/recompute_predictions.py", "--scope", "matchday"),
+            "Recompute scoped matchday predictions",
+            arg_sources=("prediction_match_args",),
+            required_arg_sources=("prediction_match_args",),
+        ),
+        RefreshTask("source_link_backfill", ("scripts/backfill_data_source_links.py",), "Backfill source links before real-data audit"),
+        RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),
+    ),
+    "pre_match_90m": (
+        RefreshTask(
+            "world_cup_schedule_lineups",
+            ("scripts/collect_dongqiudi_match_context.py", "--include-scheduled-lineups"),
+            "T-90m schedule and final lineup refresh for due matches",
+            arg_sources=("lineup_match_args",),
+            required_arg_sources=("lineup_match_args",),
+        ),
+        RefreshTask("public_news_rss", ("scripts/collect_public_news.py", "--mode", "matchday"), "T-90m matchday news refresh"),
+        RefreshTask("ai_news_insights", ("scripts/build_ai_news_insights.py", "--limit", "80"), "T-90m structured AI news insights"),
+        RefreshTask("identity_mapping_backfill", ("scripts/backfill_identity_mappings.py",), "Backfill lineup player identity mappings"),
+        RefreshTask("identity_mapping_audit", ("scripts/audit_identity_mappings.py",), "Canonical identity mapping audit"),
+        RefreshTask(
+            "match_features",
+            ("scripts/build_match_features.py",),
+            "Build T-90m feature snapshots for due matches",
+            arg_sources=("feature_match_args",),
+            required_arg_sources=("feature_match_args",),
+        ),
+        RefreshTask(
+            "prediction_recompute",
+            ("scripts/recompute_predictions.py", "--scope", "matchday"),
+            "Recompute T-90m predictions for due matches",
+            arg_sources=("prediction_match_args",),
+            required_arg_sources=("prediction_match_args",),
+        ),
+        RefreshTask("source_link_backfill", ("scripts/backfill_data_source_links.py",), "Backfill source links before real-data audit"),
         RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),
     ),
     "weekly": (
@@ -104,16 +223,17 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
         RefreshTask("identity_mapping_audit", ("scripts/audit_identity_mappings.py",), "Canonical identity mapping audit"),
         RefreshTask("match_features", ("scripts/build_match_features.py",), "Build model-ready match feature snapshots"),
         RefreshTask("prediction_recompute", ("scripts/recompute_predictions.py", "--scope", "matchday"), "Recompute matchday predictions"),
+        RefreshTask("source_link_backfill", ("scripts/backfill_data_source_links.py",), "Backfill source links before real-data audit"),
         RefreshTask("real_data_audit", ("scripts/audit_real_data.py",), "Real-data source audit"),
     ),
 }
 
 
-def task_payload(task: RefreshTask) -> dict:
+def task_payload(task: RefreshTask, context: RefreshContext | None = None) -> dict:
     return {
         "task_id": task.task_id,
         "description": task.description,
-        "command": " ".join(task.command()),
+        "command": " ".join(task.command(context)),
         "timeout_seconds": task.timeout_seconds,
     }
 
@@ -130,21 +250,130 @@ def resolve_auto_cadence(db, now: datetime | None = None) -> Cadence | None:
         return "daily_00"
     if current.hour == 12:
         return "daily_12"
+    if pre_match_90m_matches(db, current):
+        return "pre_match_90m"
     if recent_finished_matches(db, current) > 0:
         return "post_match"
     return None
 
 
-def recent_finished_matches(db, current: datetime) -> int:
+def scoped_run_key(cadence: Cadence, match_ids: tuple[str, ...]) -> str:
+    if not match_ids:
+        return "none"
+    return f"{cadence}:{','.join(sorted(match_ids))}"
+
+
+def event_match_job_type(cadence: Cadence, match_id: str) -> str:
+    return f"refresh:{cadence}:{match_id}"
+
+
+def completed_event_match_ids(db, cadence: Cadence, match_ids: tuple[str, ...]) -> set[str]:
+    if db is None or not match_ids:
+        return set()
+    job_types = [event_match_job_type(cadence, match_id) for match_id in match_ids]
+    rows = db.execute(
+        select(collector_runs.c.job_type)
+        .where(
+            collector_runs.c.source == "scheduler",
+            collector_runs.c.status == "success",
+            collector_runs.c.job_type.in_(job_types),
+        )
+    ).mappings().all()
+    prefix = f"refresh:{cadence}:"
+    return {str(row.job_type).removeprefix(prefix) for row in rows}
+
+
+def pending_event_match_ids(db, cadence: Cadence, match_ids: tuple[str, ...]) -> tuple[str, ...]:
+    completed = completed_event_match_ids(db, cadence, match_ids)
+    return tuple(match_id for match_id in match_ids if match_id not in completed)
+
+
+def pre_match_90m_matches(db, current: datetime) -> tuple[str, ...]:
+    if db is None:
+        return ()
+    start_at = current + timedelta(minutes=75)
+    end_at = current + timedelta(minutes=105)
+    rows = db.execute(
+        select(matches.c.public_id)
+        .where(
+            matches.c.public_id.like("dongqiudi-%"),
+            matches.c.status.in_(("scheduled", "live")),
+            matches.c.kickoff_at >= start_at,
+            matches.c.kickoff_at < end_at,
+        )
+        .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+    ).mappings().all()
+    return pending_event_match_ids(db, "pre_match_90m", tuple(row.public_id for row in rows))
+
+
+def recent_finished_match_rows(db, current: datetime) -> list[dict]:
+    if db is None:
+        return []
     previous_4h = current - timedelta(hours=4)
-    return int(
-        db.execute(
-            select(matches.c.id)
-            .where(matches.c.status == "finished", matches.c.kickoff_at >= previous_4h, matches.c.kickoff_at < current)
-            .limit(1)
-        ).first()
-        is not None
-    )
+    rows = db.execute(
+        select(matches.c.public_id, matches.c.home_team_id, matches.c.away_team_id)
+        .where(
+            matches.c.public_id.like("dongqiudi-%"),
+            matches.c.status == "finished",
+            matches.c.kickoff_at >= previous_4h,
+            matches.c.kickoff_at < current,
+        )
+        .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+    ).mappings().all()
+    pending_ids = set(pending_event_match_ids(db, "post_match", tuple(row.public_id for row in rows)))
+    return [dict(row) for row in rows if row.public_id in pending_ids]
+
+
+def recent_finished_matches(db, current: datetime) -> int:
+    return len(recent_finished_match_rows(db, current))
+
+
+def future_matches_for_teams(db, team_ids: set[object], current: datetime) -> tuple[str, ...]:
+    if db is None or not team_ids:
+        return ()
+    rows = db.execute(
+        select(matches.c.public_id)
+        .where(
+            matches.c.public_id.like("dongqiudi-%"),
+            matches.c.status.in_(("scheduled", "live")),
+            or_(matches.c.status == "live", matches.c.kickoff_at >= current),
+            or_(matches.c.home_team_id.in_(list(team_ids)), matches.c.away_team_id.in_(list(team_ids))),
+        )
+        .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+        .limit(24)
+    ).mappings().all()
+    return tuple(row.public_id for row in rows)
+
+
+def context_for_cadence(db, cadence: Cadence, current: datetime) -> RefreshContext:
+    if cadence == "pre_match_90m":
+        match_ids = pre_match_90m_matches(db, current)
+        return RefreshContext(
+            cadence=cadence,
+            evaluated_at=current,
+            is_due=bool(match_ids),
+            reason=None if match_ids else "no_matches_in_t90_window",
+            lineup_match_ids=match_ids,
+            prediction_match_ids=match_ids,
+            feature_snapshot_at=current,
+            run_key=scoped_run_key(cadence, match_ids),
+        )
+    if cadence == "post_match":
+        rows = recent_finished_match_rows(db, current)
+        finished_match_ids = tuple(row["public_id"] for row in rows)
+        team_ids = {row["home_team_id"] for row in rows} | {row["away_team_id"] for row in rows}
+        prediction_match_ids = future_matches_for_teams(db, team_ids, current)
+        return RefreshContext(
+            cadence=cadence,
+            evaluated_at=current,
+            is_due=bool(finished_match_ids),
+            reason=None if finished_match_ids else "no_recent_finished_matches",
+            lineup_match_ids=finished_match_ids,
+            prediction_match_ids=prediction_match_ids,
+            feature_snapshot_at=current,
+            run_key=scoped_run_key(cadence, finished_match_ids),
+        )
+    return RefreshContext(cadence=cadence, evaluated_at=current, run_key=cadence)
 
 
 def slot_bounds(cadence: Cadence, current: datetime) -> tuple[datetime, datetime]:
@@ -157,18 +386,27 @@ def slot_bounds(cadence: Cadence, current: datetime) -> tuple[datetime, datetime
         start = local_midnight - timedelta(days=current.weekday())
         return start, start + timedelta(days=7)
     if cadence == "post_match":
-        return current - timedelta(hours=2), current
+        return current - timedelta(hours=4), current
+    if cadence == "pre_match_90m":
+        slot_start = current.replace(minute=(current.minute // 30) * 30, second=0, microsecond=0)
+        return slot_start, slot_start + timedelta(minutes=30)
     return local_midnight, local_midnight + timedelta(days=1)
 
 
-def already_ran(db, cadence: Cadence, current: datetime) -> bool:
+def job_type_for(cadence: Cadence, context: RefreshContext | None = None) -> str:
+    if cadence in EVENT_CADENCES and context and context.run_key:
+        return f"refresh:{context.run_key}"
+    return f"refresh:{cadence}"
+
+
+def already_ran(db, cadence: Cadence, current: datetime, context: RefreshContext | None = None) -> bool:
     start, end = slot_bounds(cadence, current)
     return (
         db.execute(
             select(collector_runs.c.id)
             .where(
                 collector_runs.c.source == "scheduler",
-                collector_runs.c.job_type == f"refresh:{cadence}",
+                collector_runs.c.job_type == job_type_for(cadence, context),
                 collector_runs.c.status == "success",
                 collector_runs.c.started_at >= start,
                 collector_runs.c.started_at < end,
@@ -202,20 +440,30 @@ class RefreshScheduler:
             }
 
         tasks = plan_for_cadence(resolved)
+        context = context_for_cadence(self.db, resolved, current)
+        if resolved in EVENT_CADENCES and not context.is_due:
+            return {
+                "status": "skipped",
+                "cadence": resolved,
+                "reason": context.reason or "no_due_event_matches",
+                "evaluated_at": current.isoformat(),
+            }
         if dry_run:
             return {
                 "status": "planned",
                 "cadence": resolved,
                 "dry_run": True,
-                "tasks": [task_payload(task) for task in tasks],
+                "scope": context_payload(context),
+                "tasks": [task_payload(task, context) for task in tasks],
                 "evaluated_at": current.isoformat(),
             }
 
-        if not force and already_ran(self.db, resolved, current):
+        if not force and already_ran(self.db, resolved, current, context):
             return {
                 "status": "skipped",
                 "cadence": resolved,
                 "reason": "cadence_already_completed_for_current_slot",
+                "scope": context_payload(context),
                 "evaluated_at": current.isoformat(),
             }
 
@@ -233,9 +481,9 @@ class RefreshScheduler:
         error_message = None
         try:
             for task in tasks:
-                result = self.run_task(task)
+                result = self.run_task(task, context)
                 results.append(result)
-                if result["status"] != "success":
+                if result["status"] == "failed":
                     status = "failed"
                     error_message = result.get("stderr") or result.get("stdout") or f"{task.task_id} failed"
                     if stop_on_error:
@@ -247,6 +495,7 @@ class RefreshScheduler:
                 records_read=len(tasks),
                 records_written=sum(1 for result in results if result["status"] == "success"),
                 error_message=error_message,
+                context=context,
             )
             self.db.commit()
         except Exception:
@@ -258,17 +507,25 @@ class RefreshScheduler:
         return {
             "status": status,
             "cadence": resolved,
+            "scope": context_payload(context),
             "tasks": results,
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(API_TZ).isoformat(),
         }
 
-    def run_task(self, task: RefreshTask) -> dict:
+    def run_task(self, task: RefreshTask, context: RefreshContext | None = None) -> dict:
+        if task.should_skip(context):
+            return {
+                "task_id": task.task_id,
+                "description": task.description,
+                "status": "skipped",
+                "reason": "empty_scoped_match_args",
+            }
         env = os.environ.copy()
         env["PYTHONPATH"] = str(API_ROOT)
         try:
             process = subprocess.run(
-                task.command(),
+                task.command(context),
                 cwd=API_ROOT,
                 env=env,
                 text=True,
@@ -315,17 +572,40 @@ class RefreshScheduler:
         records_read: int,
         records_written: int,
         error_message: str | None = None,
+        context: RefreshContext | None = None,
     ) -> None:
-        self.db.execute(
-            insert(collector_runs).values(
-                source="scheduler",
-                job_type=f"refresh:{cadence}",
-                status=status,
-                started_at=started_at,
-                finished_at=datetime.now(API_TZ),
-                records_read=records_read,
-                records_written=records_written,
-                error_message=error_message,
-                snapshot_ids=[],
-            )
-        )
+        finished_at = datetime.now(API_TZ)
+        rows = [
+            {
+                "source": "scheduler",
+                "job_type": job_type_for(cadence, context),
+                "status": status,
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "records_read": records_read,
+                "records_written": records_written,
+                "error_message": error_message,
+                "snapshot_ids": [],
+            }
+        ]
+        if status == "success" and cadence in EVENT_CADENCES and context:
+            existing_job_types = {row["job_type"] for row in rows}
+            for match_id in context.lineup_match_ids:
+                job_type = event_match_job_type(cadence, match_id)
+                if job_type in existing_job_types:
+                    continue
+                rows.append(
+                    {
+                        "source": "scheduler",
+                        "job_type": job_type,
+                        "status": status,
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                        "records_read": records_read,
+                        "records_written": records_written,
+                        "error_message": error_message,
+                        "snapshot_ids": [],
+                    }
+                )
+                existing_job_types.add(job_type)
+        self.db.execute(insert(collector_runs), rows)

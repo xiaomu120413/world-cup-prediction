@@ -298,10 +298,11 @@ $env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldc
 python scripts/run_refresh_schedule.py --cadence daily_00 --dry-run
 python scripts/run_refresh_schedule.py --cadence daily_12
 python scripts/run_refresh_schedule.py --cadence post_match
+python scripts/run_refresh_schedule.py --cadence pre_match_90m
 python scripts/run_refresh_schedule.py --cadence weekly
 ```
 
-The scheduler writes its own `collector_runs` records with `source=scheduler` and `job_type=refresh:{cadence}`. It uses PostgreSQL advisory locks so the same cadence cannot run concurrently. Use `--force` only for manual reruns after checking the previous run.
+The scheduler writes its own `collector_runs` records with `source=scheduler`. Daily and weekly jobs use `job_type=refresh:{cadence}`; event jobs include the scoped match key. It uses PostgreSQL advisory locks so the same cadence cannot run concurrently. Use `--force` only for manual reruns after checking the previous run.
 
 Admin API trigger:
 

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run World Cup T-90m scoped refresh checks
+
+[Timer]
+OnCalendar=*-*-* *:0/30:00
+Persistent=true
+Unit=worldcup-refresh@pre_match_90m.service
+
+[Install]
+WantedBy=timers.target

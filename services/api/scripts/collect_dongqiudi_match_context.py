@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -116,6 +117,17 @@ def schedule_rows(payload: dict) -> list[dict]:
             if isinstance(item, dict) and item.get("match_id"):
                 rows.append(item)
     return rows
+
+
+def normalize_match_id(value: str) -> str:
+    return value.removeprefix("dongqiudi-").strip()
+
+
+def filter_schedule_rows(schedule: list[dict], match_ids: list[str] | None) -> list[dict]:
+    if not match_ids:
+        return schedule
+    allowed = {normalize_match_id(value) for value in match_ids}
+    return [item for item in schedule if str(item.get("match_id")) in allowed]
 
 
 def ensure_competition(db):
@@ -632,16 +644,21 @@ def ensure_player(db, team_id, name: str, source_player_id: str | None, item: di
     return player_id
 
 
-def upsert_lineups(db, schedule: list[dict]) -> dict:
+def upsert_lineups(db, schedule: list[dict], include_scheduled: bool = False) -> dict:
     written = 0
     source_links = []
     fetched = 0
+    errors = []
     for item in schedule:
-        if item.get("status") != "Played":
+        if item.get("status") != "Played" and not include_scheduled:
             continue
         match_public_id = f"dongqiudi-{item['match_id']}"
         url = LINEUP_URL_TEMPLATE.format(match_id=item["match_id"])
-        payload = fetch_json(url)
+        try:
+            payload = fetch_json(url)
+        except Exception as exc:
+            errors.append({"match_id": match_public_id, "error": str(exc)[:240]})
+            continue
         snapshot_id = write_raw_snapshot(
             db,
             "dongqiudi",
@@ -696,7 +713,12 @@ def upsert_lineups(db, schedule: list[dict]) -> dict:
                 }
             )
     links_written = write_source_links(db, source_links)
-    return {"lineup_matches_fetched": fetched, "lineup_rows_upserted": written, "lineup_source_links": links_written}
+    return {
+        "lineup_matches_fetched": fetched,
+        "lineup_rows_upserted": written,
+        "lineup_source_links": links_written,
+        "lineup_errors": errors[:10],
+    }
 
 
 def update_lineup_stability(db) -> int:
@@ -730,8 +752,18 @@ def update_lineup_stability(db) -> int:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Collect Dongqiudi World Cup schedule, scores and lineup context.")
+    parser.add_argument("--match-id", action="append", dest="match_ids", help="Dongqiudi public id or source match_id to refresh. Repeatable.")
+    parser.add_argument(
+        "--include-scheduled-lineups",
+        action="store_true",
+        help="Fetch lineup endpoint for scoped scheduled matches, used by the T-90m refresh.",
+    )
+    args = parser.parse_args()
+
     schedule_payload = fetch_json(SCHEDULE_URL)
-    schedule = schedule_rows(schedule_payload)
+    all_schedule = schedule_rows(schedule_payload)
+    schedule = filter_schedule_rows(all_schedule, args.match_ids)
     with SessionLocal() as db:
         schedule_snapshot_id = write_raw_snapshot(
             db,
@@ -741,9 +773,13 @@ def main() -> None:
             {"source_url": SCHEDULE_URL, "matches": schedule},
             "dongqiudi_world_cup_schedule_v1",
         )
-        result = {"schedule_matches_read": len(schedule)}
+        result = {
+            "schedule_matches_read": len(all_schedule),
+            "schedule_matches_scoped": len(schedule),
+            "scope_match_ids": args.match_ids or [],
+        }
         result.update(upsert_match_context(db, schedule, schedule_snapshot_id))
-        result.update(upsert_lineups(db, schedule))
+        result.update(upsert_lineups(db, schedule, include_scheduled=args.include_scheduled_lineups))
         result["lineup_stability_teams_updated"] = update_lineup_stability(db)
         db.commit()
     print(json.dumps(result, ensure_ascii=False, indent=2))

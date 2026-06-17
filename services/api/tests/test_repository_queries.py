@@ -1,7 +1,10 @@
 from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import select
 
+from app.db.schema import matches
+from app.predictions.service import prediction_match_filters
 from app.repositories.public_data import PublicDataRepository, source_player_id_from_code
 
 
@@ -80,6 +83,23 @@ def test_matches_query_filters_matchday_and_orders_upcoming_ascending():
     assert "matches.kickoff_at >=" in sql
     assert "matches.kickoff_at <" in sql
     assert "matches.kickoff_at ASC" in sql
+
+
+def test_prediction_matchday_filters_to_dongqiudi_open_matches():
+    sql = compile_query(select(matches.c.public_id).where(*prediction_match_filters("matchday")))
+
+    assert "matches.public_id LIKE 'dongqiudi-%%'" in sql
+    assert "matches.status IN ('scheduled', 'live')" in sql
+    assert "matches.kickoff_at >= now()" in sql
+
+
+def test_prediction_explicit_match_ids_bypass_source_scope_filter():
+    sql = compile_query(select(matches.c.public_id).where(*prediction_match_filters("matchday", ["thestatsapi-match-1"])))
+
+    assert "matches.public_id IN ('thestatsapi-match-1')" in sql
+    assert "matches.public_id LIKE 'dongqiudi-%%'" not in sql
+    assert "matches.status IN" not in sql
+    assert "matches.kickoff_at >= now()" not in sql
 
 
 def test_groups_query_exposes_only_world_cup_letter_groups():
