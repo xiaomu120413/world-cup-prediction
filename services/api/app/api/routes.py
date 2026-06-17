@@ -15,7 +15,7 @@ from app.scheduler.refresh import RefreshScheduler
 router = APIRouter()
 admin_router = APIRouter()
 RANKING_ORDER_CACHE_VERSION = "probability-v2"
-REAL_COLLECTOR_SOURCES = {"dongqiudi", "thestatsapi"}
+REAL_COLLECTOR_SOURCES = {"dongqiudi"}
 
 
 def require_database_backend(settings: Settings) -> None:

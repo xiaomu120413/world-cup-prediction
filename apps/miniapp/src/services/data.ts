@@ -5,6 +5,7 @@ import type {
   GroupTeam,
   Match,
   RankingTeam,
+  TeamIdentity,
   TeamProfile,
   UpcomingMatch
 } from '@/services/types'
@@ -271,6 +272,7 @@ export type GroupSummary = {
 
 export type TeamListItem = {
   id: string
+  code?: string
   name: string
   nameEn?: string
   meta: string
@@ -432,6 +434,16 @@ function groupSortValue(id: string) {
 
 function displayTeam(team: ApiTeam) {
   return getTeamDisplayName(team.name, team.name_en, team.id)
+}
+
+function teamIdentity(team?: ApiTeam | null): TeamIdentity | undefined {
+  if (!team) return undefined
+  return {
+    teamId: team.id,
+    teamCode: team.code || team.abbr,
+    name: displayTeam(team),
+    nameEn: team.name_en || undefined
+  }
 }
 
 function formatPredictionVersion(hasPrediction: boolean, status: string) {
@@ -815,6 +827,8 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     id: apiMatch.id,
     home: homeName,
     away: awayName,
+    homeTeam: teamIdentity(apiMatch.home_team),
+    awayTeam: teamIdentity(apiMatch.away_team),
     time: formatKickoff(apiMatch.kickoff_at),
     stage: formatStageLabel(apiMatch.stage),
     venue: formatVenue(apiMatch),
@@ -871,6 +885,8 @@ async function loadHomeData(): Promise<HomeData> {
         id: match.id,
         home: homeName,
         away: awayName,
+        homeTeam: teamIdentity(match.home_team),
+        awayTeam: teamIdentity(match.away_team),
         time: formatKickoff(match.kickoff_at),
         status: formatStatus(match.status, match.home_score, match.away_score),
         tendency: formatTendency(match.prediction_summary?.tendency || match.prediction?.tendency, homeName, awayName),
@@ -880,6 +896,8 @@ async function loadHomeData(): Promise<HomeData> {
     championTop: sortApiRankingsByProbability(response.data.champion_rankings)
       .map(item => ({
         teamId: item.team.id,
+        teamCode: item.team.code || item.team.abbr,
+        nameEn: item.team.name_en || undefined,
         name: displayTeam(item.team),
         probability: percentFromApi(item.probability),
         meta: formatTeamMeta(item.team)
@@ -922,6 +940,8 @@ async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Pr
   return {
     rankings: rankings.map((item, index) => ({
       teamId: item.team.id,
+      teamCode: item.team.code || item.team.abbr,
+      nameEn: item.team.name_en || undefined,
       rank: index + 1,
       name: displayTeam(item.team),
       probability: percentFromApi(item.probability),
@@ -969,6 +989,7 @@ export async function getTeamList(): Promise<TeamListItem[]> {
 
   return teamsResponse.data.map(team => ({
     id: team.id,
+    code: team.code || team.abbr,
     name: displayTeam(team),
     nameEn: team.name_en || undefined,
     meta: formatTeamMeta(team),
@@ -994,6 +1015,8 @@ async function loadTeamProfile(teamId = ''): Promise<TeamProfile> {
   ].filter(Boolean) as string[]
   return {
     id: response.data.team.id,
+    code: response.data.team.code || response.data.team.abbr,
+    nameEn: response.data.team.name_en || undefined,
     name: teamName,
     subtitle: formatTeamSubtitle(response.data.team, groupName),
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
@@ -1104,13 +1127,15 @@ export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
     teams: sortedStandings.map(item => {
       const teamName = displayTeam(item.team)
       return {
-      teamId: item.team.id,
-      rank: item.rank,
-      name: teamName,
-      record: item.record,
-      points: item.points,
-      goals: item.goals,
-      qualification: qualificationByTeam.get(item.team.id) || qualificationByName.get(teamName) || 0
+        teamId: item.team.id,
+        teamCode: item.team.code || item.team.abbr,
+        nameEn: item.team.name_en || undefined,
+        rank: item.rank,
+        name: teamName,
+        record: item.record,
+        points: item.points,
+        goals: item.goals,
+        qualification: qualificationByTeam.get(item.team.id) || qualificationByName.get(teamName) || 0
       }
     }),
     updatedAt: formatUpdatedAt(detailResponse.meta?.updated_at),

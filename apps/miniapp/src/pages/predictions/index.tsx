@@ -120,7 +120,7 @@ export default function PredictionsPage() {
             <View className='ranking-row__team-block'>
               <Text className='ranking-row__rank'>{team.rank}</Text>
               <View className='ranking-row__divider' />
-              <Flag team={team.name} size='sm' />
+              <Flag team={team.name} teamId={team.teamId} teamCode={team.teamCode} teamEn={team.nameEn} size='sm' />
               <View className='ranking-row__name-wrap'>
                 <Text className='ranking-row__name'>{team.name}</Text>
                 <Text className='reason-chip'>{team.reason}</Text>

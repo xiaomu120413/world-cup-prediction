@@ -54,11 +54,6 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.95,
         "label": "FIFA official source",
     },
-    "thestatsapi": {
-        "trust_level": "public_dataset",
-        "default_confidence": 0.9,
-        "label": "Public fixture dataset",
-    },
     "dongqiudi": {
         "trust_level": "public_source",
         "default_confidence": 0.8,
@@ -110,7 +105,6 @@ BLOCKED_DATA_SOURCES = {"local_sample"}
 
 APPROVED_REAL_SOURCES = {
     "fifa",
-    "thestatsapi",
     "dongqiudi",
     "open_meteo",
     "manual_verified",
@@ -771,7 +765,6 @@ class PublicDataRepository:
             "teams": self.count_rows(teams),
             "matches": self.count_rows(matches),
             "dongqiudi_matches": self.count_real_matches(),
-            "thestatsapi_matches": self.count_thestatsapi_matches(),
             "venues": self.count_rows(venues),
             "venue_enriched": self.count_enriched_venues(),
             "players": self.count_rows(players),
@@ -1169,13 +1162,6 @@ class PublicDataRepository:
             ).scalar_one()
         )
 
-    def count_thestatsapi_matches(self) -> int:
-        return int(
-            self.db.execute(
-                select(func.count()).select_from(matches).where(matches.c.public_id.like("thestatsapi-%"))
-            ).scalar_one()
-        )
-
     def count_historical_team_match_results(self) -> int:
         return int(
             self.db.execute(
@@ -1372,7 +1358,6 @@ class PublicDataRepository:
             )
         ).mappings().all()
         values = [match_payload(row) for row in rows]
-        self.apply_venue_fallback(values)
         if include_prediction:
             for value in values:
                 prediction = self.get_match_prediction(value["id"])
@@ -1384,33 +1369,7 @@ class PublicDataRepository:
         if row is None:
             return None
         value = match_payload(row)
-        self.apply_venue_fallback([value])
         return value
-
-    def venue_lookup_by_team_pair(self) -> dict[tuple[str, str], dict]:
-        rows = self.db.execute(self.matches_query(real_only=False)).mappings().all()
-        lookup: dict[tuple[str, str], dict] = {}
-        for row in rows:
-            value = match_payload(row)
-            venue = value.get("venue")
-            if not venue:
-                continue
-            home_id = value["home_team"]["id"]
-            away_id = value["away_team"]["id"]
-            lookup.setdefault((home_id, away_id), venue)
-            lookup.setdefault((away_id, home_id), venue)
-        return lookup
-
-    def apply_venue_fallback(self, values: list[dict]) -> None:
-        if not values or all(value.get("venue") for value in values):
-            return
-        lookup = self.venue_lookup_by_team_pair()
-        for value in values:
-            if value.get("venue"):
-                continue
-            venue = lookup.get((value["home_team"]["id"], value["away_team"]["id"]))
-            if venue:
-                value["venue"] = venue
 
     def get_match_prediction(self, public_id: str) -> dict | None:
         prediction = self.db.execute(self.latest_prediction_query(public_id)).mappings().first()

@@ -102,7 +102,7 @@ function TeamListRow({ team, index }: { team: TeamListItem; index: number }) {
   return (
     <View className='team-index-row' onClick={() => goTeam(team.id)}>
       <Text className='team-index-row__rank'>{String(index + 1).padStart(2, '0')}</Text>
-      <Flag team={team.name} size='sm' />
+      <Flag team={team.name} teamId={team.id} teamCode={team.code} teamEn={team.nameEn} size='sm' />
       <View className='team-index-row__main'>
         <Text className='team-index-row__name'>{team.name}</Text>
         <Text className='team-index-row__meta'>{team.nameEn || team.meta}</Text>
@@ -173,7 +173,7 @@ function TeamsIndexPage() {
         {featuredTeams.length ? featuredTeams.map((team, index) => (
           <View className='team-feature-row' key={team.id} onClick={() => goTeam(team.id, 'predictions')}>
             <Text className={`rank-medal rank-medal--${index + 1}`}>{index + 1}</Text>
-            <Flag team={team.name} size='sm' />
+            <Flag team={team.name} teamId={team.id} teamCode={team.code} teamEn={team.nameEn} size='sm' />
             <View className='team-feature-row__main'>
               <Text className='team-feature-row__name'>{team.name}</Text>
               <Text className='team-feature-row__meta'>{team.nameEn || team.meta}</Text>
@@ -277,7 +277,7 @@ export default function TeamDetailPage() {
 
       <View className='team-identity-layout'>
         <View className='team-identity-assets'>
-          <Flag team={displayTeam.name} size='lg' />
+          <Flag team={displayTeam.name} teamId={displayTeam.id} teamCode={displayTeam.code} teamEn={displayTeam.nameEn} size='lg' />
           <View className='team-crest-local'>
             <Icon name='shield' color='#2563eb' size={58} />
           </View>

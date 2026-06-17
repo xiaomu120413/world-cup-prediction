@@ -12,7 +12,7 @@ This project is a low-frequency World Cup prediction product. It does not need s
 | Daily 12:00 | Weather, 48-team national-team match data, news, injury signals, prediction recompute if feature data changed | Open-Meteo, historical results provider, BBC, Guardian, ESPN, FOX Sports, FIFA injury news | `venue_weather`, `world_cup_48_national_team_matches`, `public_news_rss`, `ai_news_insights`, prediction recompute |
 | Post-match | Scores, standings, lineups, player ranking, team ranking, prediction review | Dongqiudi | `world_cup_schedule_lineups`, `group_standings`, `player_recent_form`, `world_cup_team_details`, prediction recompute/review |
 | Weekly | Team roster, player market value, coach records, FIFA rank check, 48-team match-data export backstop | Dongqiudi, FIFA, historical results provider | `world_cup_team_details`, `coach_records`, `fifa_mens_world_ranking`, `world_cup_48_national_team_matches` |
-| On schedule change | Static fixtures and venues | TheStatsAPI, manual verified venue facts | `official_schedule_venues`, venue enrichment |
+| On schedule change | Dongqiudi schedule and source-bound venues | Dongqiudi, manual verified venue facts | `dongqiudi_world_cup_schedule`, venue enrichment |
 | T-90m before kickoff | Final start list / lineup confirmation, confidence downgrade if unavailable | FIFA start list, authorized lineup source, Dongqiudi lineup backstop | lineup refresh, prediction recompute |
 | Offline batch | One-off historical backfills or manual corrections | Stable historical provider or authorized/manual verified source | Manual import/export job, then audit |
 
@@ -133,7 +133,7 @@ Event refreshes must stay scoped:
 | Player market value | Dongqiudi team/player pages |
 | Team ranking metrics | Dongqiudi `cid=61` team ranking APIs into `team_stat_snapshots` |
 | Scores, schedule, standings, lineups | Dongqiudi sport-data |
-| Static venues | Manual venue verification; legacy TheStatsAPI fixture rows are retained as provenance data but are not used by the formal prediction scheduler |
+| Static venues | Manual venue verification; legacy TheStatsAPI fixture rows are removed from canonical tables and should only appear in cleanup/audit history |
 | FIFA rank | FIFA ranking API |
 | Weather | Open-Meteo |
 | News | Dongqiudi homepage, BBC, Guardian, ESPN, FOX Sports |

@@ -156,7 +156,7 @@ export default function GroupsPage() {
           >
             <Text className='table-row__rank'>{team.rank}</Text>
             <View className='table-row__team-wrap'>
-              <Flag team={team.name} size='sm' />
+              <Flag team={team.name} teamId={team.teamId} teamCode={team.teamCode} teamEn={team.nameEn} size='sm' />
               <Text className='table-row__team'>{team.name}</Text>
             </View>
             <Text className='table-row__meta'>{team.record}</Text>
@@ -171,7 +171,7 @@ export default function GroupsPage() {
           {displayGroup?.teams.length ? displayGroup.teams.map(team => (
             <View className='qualification-row' key={team.teamId || team.name}>
               <View className='qualification-row__team'>
-                <Flag team={team.name} size='sm' />
+                <Flag team={team.name} teamId={team.teamId} teamCode={team.teamCode} teamEn={team.nameEn} size='sm' />
                 <Text>{team.name}</Text>
               </View>
               <View className='qualification-row__track'>
@@ -190,13 +190,13 @@ export default function GroupsPage() {
         {keyMatches.length ? keyMatches.map(match => (
           <View className='group-match-row' key={match.id} onClick={() => goTo(`${routes.matchDetail}?matchId=${match.id}`)}>
             <View className='group-match-row__team'>
-              <Flag team={match.home} size='sm' />
+              <Flag team={match.home} teamId={match.homeTeam?.teamId} teamCode={match.homeTeam?.teamCode} teamEn={match.homeTeam?.nameEn} size='sm' />
               <Text>{match.home}</Text>
             </View>
             <Text className='group-match-row__vs'>VS</Text>
             <View className='group-match-row__team group-match-row__team--away'>
               <Text>{match.away}</Text>
-              <Flag team={match.away} size='sm' />
+              <Flag team={match.away} teamId={match.awayTeam?.teamId} teamCode={match.awayTeam?.teamCode} teamEn={match.awayTeam?.nameEn} size='sm' />
             </View>
             <View className='group-match-row__time'>
               <Text>{match.meta || match.tendency}</Text>

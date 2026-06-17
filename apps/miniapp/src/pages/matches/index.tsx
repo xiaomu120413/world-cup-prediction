@@ -86,7 +86,13 @@ export default function MatchesPage() {
 
           <View className='fixture fixture--hero'>
             <View className='fixture__team'>
-              <Flag team={display.match.home} size='lg' />
+              <Flag
+                team={display.match.home}
+                teamId={display.match.homeTeam?.teamId}
+                teamCode={display.match.homeTeam?.teamCode}
+                teamEn={display.match.homeTeam?.nameEn}
+                size='lg'
+              />
               <Text className='fixture__name'>{display.match.home}</Text>
             </View>
             <View className='fixture__middle'>
@@ -96,7 +102,13 @@ export default function MatchesPage() {
               <Text className='fixture__venue'>{display.match.venue}</Text>
             </View>
             <View className='fixture__team fixture__team--away'>
-              <Flag team={display.match.away} size='lg' />
+              <Flag
+                team={display.match.away}
+                teamId={display.match.awayTeam?.teamId}
+                teamCode={display.match.awayTeam?.teamCode}
+                teamEn={display.match.awayTeam?.nameEn}
+                size='lg'
+              />
               <Text className='fixture__name'>{display.match.away}</Text>
             </View>
           </View>
@@ -135,12 +147,24 @@ export default function MatchesPage() {
               </View>
               <View className='match-row__fixture'>
                 <View className='match-row__team'>
-                  <Flag team={item.home} size='sm' />
+                  <Flag
+                    team={item.home}
+                    teamId={item.homeTeam?.teamId}
+                    teamCode={item.homeTeam?.teamCode}
+                    teamEn={item.homeTeam?.nameEn}
+                    size='sm'
+                  />
                   <Text>{item.home}</Text>
                 </View>
                 <Text className='match-row__vs'>VS</Text>
                 <View className='match-row__team match-row__team--away'>
-                  <Flag team={item.away} size='sm' />
+                  <Flag
+                    team={item.away}
+                    teamId={item.awayTeam?.teamId}
+                    teamCode={item.awayTeam?.teamCode}
+                    teamEn={item.awayTeam?.nameEn}
+                    size='sm'
+                  />
                   <Text>{item.away}</Text>
                 </View>
               </View>
@@ -167,7 +191,7 @@ export default function MatchesPage() {
             <View className={`rank-medal rank-medal--${index + 1}`}>
               <Text>{index + 1}</Text>
             </View>
-            <Flag team={team.name} size='sm' />
+            <Flag team={team.name} teamId={team.teamId} teamCode={team.teamCode} teamEn={team.nameEn} size='sm' />
             <View className='champion-row__main'>
               <Text className='champion-row__name'>{team.name}</Text>
             </View>

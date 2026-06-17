@@ -77,8 +77,8 @@ insert into data_source_links (
 select
     'match',
     m.public_id,
-    case when m.public_id like 'dongqiudi-%' then 'dongqiudi' else 'thestatsapi' end,
-    case when m.public_id like 'dongqiudi-%' then 'homepage' else 'fixtures' end,
+    'dongqiudi',
+    'world_cup_schedule',
     r.source_url,
     r.id,
     m.public_id,
@@ -88,49 +88,12 @@ from matches m
 join lateral (
     select id, source_url
     from raw_snapshots r
-    where r.source = case when m.public_id like 'dongqiudi-%' then 'dongqiudi' else 'thestatsapi' end
-      and r.source_type = case when m.public_id like 'dongqiudi-%' then 'homepage' else 'fixtures' end
+    where r.source = 'dongqiudi'
+      and r.source_type = 'world_cup_schedule'
     order by fetched_at desc
     limit 1
 ) r on true
-where m.public_id like 'dongqiudi-%' or m.public_id like 'thestatsapi-%'
-on conflict (entity_type, entity_key, source, source_type) do update set
-    source_url = excluded.source_url,
-    raw_snapshot_id = excluded.raw_snapshot_id,
-    source_record_id = excluded.source_record_id,
-    confidence = excluded.confidence,
-    fetched_at = now(),
-    metadata = excluded.metadata;
-
-insert into data_source_links (
-    entity_type,
-    entity_key,
-    source,
-    source_type,
-    source_url,
-    raw_snapshot_id,
-    source_record_id,
-    confidence,
-    metadata
-)
-select
-    'venue',
-    v.code,
-    'thestatsapi',
-    'fixtures',
-    r.source_url,
-    r.id,
-    v.code,
-    1.0,
-    jsonb_build_object('name', v.name, 'city', v.city, 'country', v.country, 'backfilled', true)
-from venues v
-join lateral (
-    select id, source_url
-    from raw_snapshots r
-    where r.source = 'thestatsapi' and r.source_type = 'fixtures'
-    order by fetched_at desc
-    limit 1
-) r on true
+where m.public_id like 'dongqiudi-%'
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,
     raw_snapshot_id = excluded.raw_snapshot_id,
@@ -153,46 +116,32 @@ insert into data_source_links (
 select
     'team',
     t.code,
-    src.source,
-    src.source_type,
+    'dongqiudi',
+    'world_cup_schedule',
     r.source_url,
     r.id,
     t.code,
-    src.confidence,
+    0.95,
     jsonb_build_object('name_zh', t.name_zh, 'name_en', t.name_en, 'backfilled', true)
 from teams t
 join lateral (
-    select
-        case
-            when exists (
-                select 1 from matches m
-                where (m.home_team_id = t.id or m.away_team_id = t.id)
-                  and m.public_id like 'dongqiudi-%'
-            )
-            then 'dongqiudi'
-            else 'thestatsapi'
-        end as source,
-        case
-            when exists (
-                select 1 from matches m
-                where (m.home_team_id = t.id or m.away_team_id = t.id)
-                  and m.public_id like 'dongqiudi-%'
-            )
-            then 'world_cup_schedule'
-            else 'fixtures'
-        end as source_type,
-        0.95::numeric as confidence
-) src on true
-join lateral (
     select id, source_url
     from raw_snapshots r
-    where r.source = src.source and r.source_type = src.source_type
+    where r.source = 'dongqiudi' and r.source_type = 'world_cup_schedule'
     order by fetched_at desc
     limit 1
 ) r on true
 where not exists (
     select 1 from data_source_links l
     where l.entity_type = 'team' and l.entity_key = t.code
+)
+and (
+    exists (select 1 from players p where p.team_id = t.id and p.code like 'DQD-P%')
+    or exists (
+        select 1 from matches m
+        where (m.home_team_id = t.id or m.away_team_id = t.id)
+          and m.public_id like 'dongqiudi-%'
+    )
 )
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,

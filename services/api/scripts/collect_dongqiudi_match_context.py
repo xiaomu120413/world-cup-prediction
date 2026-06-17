@@ -295,30 +295,14 @@ def ensure_team(db, name: str, source_team_id: str | None):
             )
         return {"id": alias_row.id, "code": alias_row.code}
 
-    normalized = normalize_team_ref(name) or {"code": team_code_from_name(name), "name_zh": name, "name_en": name, "aliases": [name]}
-    team_id = db.execute(
-        pg_insert(teams)
-        .values(code=normalized["code"], name_zh=normalized["name_zh"], name_en=normalized["name_en"], quality_status="source")
-        .on_conflict_do_update(
-            index_elements=["code"],
-            set_={"name_zh": pg_insert(teams).excluded.name_zh, "name_en": pg_insert(teams).excluded.name_en, "updated_at": text("now()")},
-        )
-        .returning(teams.c.id)
-    ).scalar_one()
-    for alias in set([name, normalized["code"], *normalized.get("aliases", [])]):
-        db.execute(
-            pg_insert(team_aliases)
-            .values(
-                team_id=team_id,
-                source="dongqiudi",
-                source_team_id=source_team_id if alias == name else f"{normalized['code']}:{alias}",
-                alias=alias,
-                confidence=1.0,
-                is_primary=alias == normalized["code"],
-            )
-            .on_conflict_do_nothing()
-        )
-    return {"id": team_id, "code": normalized["code"]}
+    return None
+
+
+def is_resolved_roster_match(db, item: dict) -> bool:
+    return bool(
+        find_canonical_roster_team(db, item["team_A_name"])
+        and find_canonical_roster_team(db, item["team_B_name"])
+    )
 
 
 def parse_kickoff(value: str) -> datetime:
@@ -362,6 +346,8 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
     for item in schedule:
         home = ensure_team(db, item["team_A_name"], item.get("team_A_id"))
         away = ensure_team(db, item["team_B_name"], item.get("team_B_id"))
+        if not home or not away:
+            continue
         public_id = f"dongqiudi-{item['match_id']}"
         status = "finished" if item.get("status") == "Played" else "scheduled"
         home_score = int(item["score_A"]) if str(item.get("score_A", "")).isdigit() else None
@@ -461,6 +447,99 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
         source_links.extend(row["source_link"] for row in result_rows)
     source_links_written = write_source_links(db, source_links)
     return {"matches_upserted": rows_written, "team_match_results_upserted": len(result_rows), "source_links": source_links_written}
+
+
+def cleanup_unresolved_placeholder_records(db) -> dict:
+    non_roster_match_filter = """
+        m.public_id like 'dongqiudi-%'
+        and (
+            not exists (select 1 from players hp where hp.team_id = m.home_team_id and hp.code like 'DQD-P%')
+            or not exists (select 1 from players ap where ap.team_id = m.away_team_id and ap.code like 'DQD-P%')
+        )
+    """
+    cleared_insights = db.execute(
+        text(
+            f"""
+            update ai_insights
+            set match_id = null
+            where match_id in (
+                select m.id from matches m where {non_roster_match_filter}
+            )
+            """
+        )
+    ).rowcount or 0
+    deleted_team_match_results = db.execute(
+        text(
+            f"""
+            delete from team_match_results tr
+            where exists (
+                select 1 from matches m
+                where {non_roster_match_filter}
+                  and tr.source_match_id like replace(m.public_id, 'dongqiudi-', '') || ':%'
+            )
+            """
+        )
+    ).rowcount or 0
+    deleted_match_links = db.execute(
+        text(
+            f"""
+            delete from data_source_links l
+            where l.source = 'dongqiudi'
+              and l.source_type = 'world_cup_schedule'
+              and (
+                exists (
+                    select 1 from matches m
+                    where {non_roster_match_filter}
+                      and l.entity_type = 'match'
+                      and l.entity_key = m.public_id
+                )
+                or exists (
+                    select 1 from matches m
+                    where {non_roster_match_filter}
+                      and l.entity_type = 'team_match_result'
+                      and l.source_record_id like replace(m.public_id, 'dongqiudi-', '') || ':%'
+                )
+                or (l.entity_type = 'team' and l.metadata ->> 'backfilled' = 'true')
+              )
+            """
+        )
+    ).rowcount or 0
+    deleted_matches = db.execute(
+        text(f"delete from matches m where {non_roster_match_filter}")
+    ).rowcount or 0
+    deleted_teams = db.execute(
+        text(
+            """
+            delete from teams t
+            where not exists (select 1 from players p where p.team_id = t.id)
+              and not exists (select 1 from matches m where m.home_team_id = t.id or m.away_team_id = t.id)
+              and not exists (select 1 from team_match_results tr where tr.team_id = t.id or tr.opponent_team_id = t.id)
+              and not exists (select 1 from historical_international_matches hm where hm.home_team_id = t.id or hm.away_team_id = t.id)
+              and not exists (select 1 from group_standings gs where gs.team_id = t.id)
+              and not exists (select 1 from team_form_snapshots tf where tf.team_id = t.id)
+              and not exists (select 1 from team_stat_snapshots ts where ts.team_id = t.id)
+              and (
+                t.code like 'GROUP-%'
+                or t.code like 'WINNER-MATCH-%'
+                or t.code like 'LOSER-MATCH-%'
+                or t.code ~ '^[A-L][123](-[A-L]3)*$'
+                or t.code like 'DQD%'
+                or t.name_en ilike 'Group %'
+                or t.name_en ilike 'Winner Match %'
+                or t.name_en ilike 'Loser Match %'
+                or t.name_zh like '第%场%胜者'
+                or t.name_zh like '第%场%败者'
+              )
+            """
+        )
+    ).rowcount or 0
+    return {
+        "unresolved_match_ai_refs_cleared": int(cleared_insights),
+        "unresolved_team_match_results_deleted": int(deleted_team_match_results),
+        "unresolved_schedule_source_links_deleted": int(deleted_match_links),
+        "unresolved_matches_deleted": int(deleted_matches),
+        "unused_placeholder_teams_deleted": int(deleted_teams),
+    }
 
 
 def team_result_rows(db, team_id, opponent_team_id, item: dict, goals_for, goals_against, snapshot_id, side: str) -> list[dict]:
@@ -778,8 +857,12 @@ def main() -> None:
             "schedule_matches_scoped": len(schedule),
             "scope_match_ids": args.match_ids or [],
         }
-        result.update(upsert_match_context(db, schedule, schedule_snapshot_id))
-        result.update(upsert_lineups(db, schedule, include_scheduled=args.include_scheduled_lineups))
+        resolved_schedule = [item for item in schedule if is_resolved_roster_match(db, item)]
+        result["schedule_matches_resolved"] = len(resolved_schedule)
+        result["schedule_matches_skipped_unresolved"] = len(schedule) - len(resolved_schedule)
+        result.update(upsert_match_context(db, resolved_schedule, schedule_snapshot_id))
+        result.update(upsert_lineups(db, resolved_schedule, include_scheduled=args.include_scheduled_lineups))
+        result.update(cleanup_unresolved_placeholder_records(db))
         result["lineup_stability_teams_updated"] = update_lineup_stability(db)
         db.commit()
     print(json.dumps(result, ensure_ascii=False, indent=2))

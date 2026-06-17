@@ -12,16 +12,6 @@ COLLECTOR_CATALOG = [
         "notes": "Low-frequency homepage extraction. Useful for Chinese match/news signals, not enough for full production data.",
     },
     {
-        "job_id": "official_schedule_venues",
-        "source": "thestatsapi",
-        "source_type": "fixtures",
-        "domains": ["matches", "venues"],
-        "target_tables": ["raw_snapshots", "collector_runs", "data_source_links", "venues", "matches"],
-        "status": "implemented_real_schedule",
-        "frequency": "daily_and_matchday",
-        "notes": "Static 2026 World Cup fixtures and venues. Covers schedule only, not live scores or player stats.",
-    },
-    {
         "job_id": "group_standings",
         "source": "dongqiudi",
         "source_type": "world_cup_standings",
@@ -164,7 +154,6 @@ COLLECTOR_CATALOG = [
 def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> dict:
     counts = table_counts or {}
     dongqiudi_matches = counts.get("dongqiudi_matches", 0)
-    thestatsapi_matches = counts.get("thestatsapi_matches", 0)
     players = counts.get("players", 0)
     player_forms = counts.get("player_form_snapshots", 0)
     player_market_values = counts.get("player_market_values", 0)
@@ -192,16 +181,8 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
         "domains": [
             {
                 "domain": "matches",
-                "status": "partial_real" if dongqiudi_matches > 0 or thestatsapi_matches > 0 else "missing_real_source",
-                "current_source": ", ".join(
-                    value
-                    for value in [
-                        "thestatsapi/fixtures" if thestatsapi_matches > 0 else "",
-                        "dongqiudi/homepage" if dongqiudi_matches > 0 else "",
-                    ]
-                    if value
-                )
-                or None,
+                "status": "partial_real" if dongqiudi_matches > 0 else "missing_real_source",
+                "current_source": "dongqiudi/homepage" if dongqiudi_matches > 0 else None,
                 "target_tables": ["matches", "teams", "team_aliases"],
             },
             {
@@ -301,7 +282,6 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                 "current_source": ", ".join(
                     value
                     for value in [
-                        "thestatsapi/fixtures" if counts.get("venues", 0) > 0 else "",
                         "manual_verified/venue_enrichment" if venue_enriched > 0 else "",
                         "open_meteo/venue_current_weather" if weather > 0 else "",
                     ]

@@ -129,11 +129,11 @@ python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-
 python scripts/run_collector.py --source dongqiudi --source-type homepage
 ```
 
-The full World Cup 2026 static fixture source is available as a second real collector:
+TheStatsAPI fixtures are no longer an active collector. Use the cleanup script after restoring an older local database that still has legacy fixture rows:
 
 ```powershell
-python scripts/run_collector.py --source thestatsapi --source-type fixtures --dry-run
-python scripts/run_collector.py --source thestatsapi --source-type fixtures
+python scripts/purge_legacy_thestatsapi_data.py
+python scripts/purge_legacy_thestatsapi_data.py --apply
 ```
 
 World Cup 2026 standings and player ranking data from Dongqiudi sport-data are available as:
@@ -269,9 +269,9 @@ Each adapter should emit the same canonical payload shape before normalization:
 
 Homepage match data is used as the primary read source when `DATA_BACKEND=database` and at least one `dongqiudi-` match exists. Player form, team form, public market value, lineup stability and coach records now have real coverage from public sources. Player rows use a single canonical source: Dongqiudi `team/member_v2` with code `DQD-P{person_id}`. Source names and player ids map through `team_aliases` and `player_aliases`; exports should read canonical names from `teams` and `players`, not raw source-name columns.
 
-TheStatsAPI fixtures normalize 104 scheduled matches plus venue name, city, country and timezone into `matches`, `teams`, `team_aliases` and `venues`. This source covers static schedule data only; it does not cover live scores, player form, standings or match stats.
+Dongqiudi schedule rows are the canonical match source. Unresolved knockout placeholders stay in raw snapshots and are skipped from `matches` until both sides resolve to roster-backed national teams. Venue fields are shown only when a source-bound venue exists; the API no longer copies venue data from legacy fixture rows.
 
-Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values. `collect_dongqiudi_team_details.py` starts from the World Cup team list, then fetches each team page, `detail/team/{team_id}`, `team/member_v2/{team_id}` and the `cid=61` team ranking page APIs. It canonicalizes the national team first, then writes exactly one player row per Dongqiudi `person_id` as `DQD-P{person_id}`. It writes squad players, player market values, player appearance/goal/assist rows, team market values, Dongqiudi team aliases, coach/staff history and all available team-stat ranking metrics into `team_stat_snapshots` plus source links. These team-stat rows include cards, fouls, shots, passes, duels, saves, ratings and market value with both raw and numeric values for later model features. Historical `FIFA-*` player rows are removed during the run so prediction features consume only this one roster dataset.
+Dongqiudi sport-data normalizes World Cup 2026 group standings into `group_standings` and derived current-tournament `team_form_snapshots`. Player ranking data is normalized into `players` plus `player_form_snapshots`. Current player ranking fields cover goals, assists, shots, shots on target, key passes and matched EUR market values. `collect_dongqiudi_team_details.py` starts from the World Cup team list, then fetches each team page, `detail/team/{team_id}`, `team/member_v2/{team_id}` and the `cid=61` team ranking page APIs. It canonicalizes the national team first, then writes exactly one player row per Dongqiudi `person_id` as `DQD-P{person_id}`. It writes squad players, player avatars from `person_logo`, player market values, player appearance/goal/assist rows, team market values, Dongqiudi team aliases, coach/staff history and all available team-stat ranking metrics into `team_stat_snapshots` plus source links. These team-stat rows include cards, fouls, shots, passes, duels, saves, ratings and market value with both raw and numeric values for later model features. Historical `FIFA-*` player rows are removed during the run so prediction features consume only this one roster dataset.
 
 All normalized data must have a provenance row in `data_source_links`. The collector runner writes these rows for canonical entities such as `match`, `venue`, `team`, `team_alias`, `group_standing`, `team_form`, `player`, `player_form` and `news_item`.
 

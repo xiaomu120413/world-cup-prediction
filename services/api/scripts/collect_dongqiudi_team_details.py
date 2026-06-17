@@ -43,6 +43,7 @@ TEAM_RANKING_TYPES_URL = (
     "?season_id=26123&app=dqd&version=853&platform=ios&language=zh-cn&app_type=&type=team"
 )
 MAX_WORKERS = 6
+PLAYER_AVATAR_CACHE_PATH = Path(__file__).resolve().parents[1] / "app" / "data" / "dongqiudi_player_avatars.json"
 # Low-frequency roster pages are collected as daily snapshots; using midnight keeps
 # repeated local runs idempotent for player form rows on the same day.
 AS_OF_AT = datetime.now(API_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -273,6 +274,55 @@ def player_profile_market_value(person_id: str) -> int | None:
         return None
     # Dongqiudi player profiles store market_value in ten-thousand EUR.
     return int(Decimal(match.group(1)) * Decimal("10000"))
+
+
+def load_player_avatar_cache() -> dict[str, str]:
+    try:
+        payload = json.loads(PLAYER_AVATAR_CACHE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in payload.items()
+        if isinstance(value, str) and value.startswith("http")
+    }
+
+
+def update_player_avatar_cache(team_payloads: list[dict[str, Any]]) -> dict:
+    existing = load_player_avatar_cache()
+    current_person_ids: set[str] = set()
+    avatars: dict[str, str] = {}
+    for team_data in team_payloads:
+        groups = (((team_data.get("member") or {}).get("data") or {}).get("list") or [])
+        for group in groups:
+            group_title = group.get("title")
+            for item in group.get("data") or []:
+                person_id = str(item.get("person_id") or "").strip()
+                position = POSITION_MAP.get(item.get("type")) or POSITION_MAP.get(group_title) or group_title
+                if not person_id or position not in {"FW", "MF", "DF", "GK"}:
+                    continue
+                current_person_ids.add(person_id)
+                avatar_url = str(item.get("person_logo") or "").strip()
+                if avatar_url.startswith("http"):
+                    avatars[person_id] = avatar_url
+
+    next_cache = {
+        person_id: avatars.get(person_id) or existing.get(person_id)
+        for person_id in sorted(current_person_ids)
+        if avatars.get(person_id) or existing.get(person_id)
+    }
+    PLAYER_AVATAR_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PLAYER_AVATAR_CACHE_PATH.write_text(
+        json.dumps(next_cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "player_avatar_cache_before": len(existing),
+        "player_avatar_cache_after": len(next_cache),
+        "player_avatar_urls_seen": len(avatars),
+    }
 
 
 def to_int(value: Any) -> int | None:
@@ -581,6 +631,27 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
                     },
                 )
             )
+            avatar_url = str(item.get("person_logo") or "").strip()
+            if avatar_url.startswith("http"):
+                links.append(
+                    source_link(
+                        "player_avatar",
+                        code,
+                        "team_member_v2_person_logo",
+                        source_url,
+                        snapshot_id,
+                        person_id,
+                        0.86,
+                        {
+                            "team_code": team_row["code"],
+                            "source_team_id": team_row["source_team_id"],
+                            "player_name": name,
+                            "position_type": item.get("type"),
+                            "group": group_title,
+                            "avatar_url": avatar_url,
+                        },
+                    )
+                )
             if market_value:
                 links.append(
                     source_link(
@@ -1184,6 +1255,7 @@ def run() -> dict:
             links.extend(coach_result["links"])
 
         links_written = write_source_links(db, links)
+        avatar_cache_result = update_player_avatar_cache(team_payloads)
         non_player_roster_records_removed = cleanup_non_player_roster_records(db)
         non_dongqiudi_player_rows_removed = cleanup_non_dongqiudi_player_rows(db)
         fifa_squad_only_coaches_removed = cleanup_fifa_squad_only_coaches(db)
@@ -1205,6 +1277,7 @@ def run() -> dict:
         "coaches_written": coaches_written,
         "team_ranking_metrics": len(team_rankings.get("rankings") or []),
         "team_stat_rows_written": team_stat_rows_written,
+        **avatar_cache_result,
         "non_player_roster_records_removed": non_player_roster_records_removed,
         "non_dongqiudi_player_rows_removed": non_dongqiudi_player_rows_removed,
         "fifa_squad_only_coaches_removed": fifa_squad_only_coaches_removed,

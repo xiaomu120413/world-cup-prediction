@@ -79,6 +79,29 @@ export function getFlagCodeByTeamName(name: string) {
   return teamByLookupKey[normalizeTeamKey(name)]?.flagCode
 }
 
+export function getTeamResource(input?: {
+  id?: string | null
+  code?: string | null
+  name?: string | null
+  nameEn?: string | null
+}) {
+  const keys = [input?.id, input?.nameEn, input?.name, input?.code]
+  for (const key of keys) {
+    const team = teamByLookupKey[normalizeTeamKey(key)]
+    if (team) return team
+  }
+  return undefined
+}
+
+export function getFlagCodeByTeam(input?: {
+  id?: string | null
+  code?: string | null
+  name?: string | null
+  nameEn?: string | null
+}) {
+  return getTeamResource(input)?.flagCode
+}
+
 export function getTeamDisplayName(name?: string | null, nameEn?: string | null, id?: string | null) {
   const direct = teamByLookupKey[normalizeTeamKey(name)]
   if (direct && !looksGarbled(name)) return direct.name

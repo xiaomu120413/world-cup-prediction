@@ -563,7 +563,7 @@ ai_explanations
 | --- | --- | --- |
 | `entity_type` | varchar(64) | 业务实体类型，例如 `match`、`venue`、`player`、`player_form`、`team_form`、`group_standing`、`news_item` |
 | `entity_key` | varchar(256) | 业务稳定 key，例如 `matches.public_id`、`venues.code`、`players.code`、`stage_code:team_code` |
-| `source` | varchar(64) | 来源，例如 `dongqiudi`、`thestatsapi` |
+| `source` | varchar(64) | 来源，例如 `dongqiudi`、`fifa`、`open_meteo` |
 | `source_type` | varchar(64) | 采集类型，例如 `homepage`、`fixtures`、`world_cup_standings`、`world_cup_player_rankings` |
 | `source_url` | text | 请求 URL 或页面 URL |
 | `raw_snapshot_id` | uuid | 对应 `raw_snapshots.id` |

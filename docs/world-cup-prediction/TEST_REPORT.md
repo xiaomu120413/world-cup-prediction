@@ -211,7 +211,7 @@ Test date: 2026-06-15
 | `python -m pytest tests/test_collectors.py` | Passed, 8 tests |
 | `python -m pytest` | Passed, 39 passed / 13 skipped |
 | `RUN_DATABASE_TESTS=1 python -m pytest tests/test_database_backend.py` | Passed, 13 tests |
-| `python scripts/run_collector.py --source thestatsapi --source-type fixtures --dry-run` | Passed |
+| `python scripts/purge_legacy_thestatsapi_data.py` | Passed |
 | `python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings --dry-run` | Passed |
 | `python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings --dry-run` | Passed |
 | Canonical tables verified | Real-source rows only; blocked source audit remains `0` |

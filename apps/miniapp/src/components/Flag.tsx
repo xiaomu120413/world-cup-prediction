@@ -2,10 +2,23 @@ import { useEffect, useState } from 'react'
 import { Image, View } from '@tarojs/components'
 import { getLocalFlagAsset } from '@/assets/flags'
 import fallbackFlag from '@/assets/flags/fallback.svg'
-import { getFlagCodeByTeamName } from '@/services/teamResources'
+import { getFlagCodeByTeam } from '@/services/teamResources'
 
-export function Flag({ team, size = 'md' }: { team: string; size?: 'sm' | 'md' | 'lg' }) {
-  const code = getFlagCodeByTeamName(team)
+type FlagProps = {
+  team?: string
+  teamId?: string | null
+  teamCode?: string | null
+  teamEn?: string | null
+  size?: 'sm' | 'md' | 'lg'
+}
+
+export function Flag({ team, teamId, teamCode, teamEn, size = 'md' }: FlagProps) {
+  const code = getFlagCodeByTeam({
+    id: teamId,
+    code: teamCode,
+    name: team,
+    nameEn: teamEn
+  })
   const flagSrc = getLocalFlagAsset(code) || fallbackFlag
   const [src, setSrc] = useState(flagSrc)
   const fillMode = size === 'lg'

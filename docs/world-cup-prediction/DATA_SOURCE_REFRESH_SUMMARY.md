@@ -139,7 +139,7 @@ The ingestion rule is:
 - Incoming teams are matched against canonical roster teams by normalized code, Chinese name, English name, and stored aliases.
 - If a name maps to exactly one canonical roster team, new matches, aliases, standings, and form rows use that canonical team.
 - If a name is ambiguous, it is not merged automatically.
-- Knockout placeholders such as `第1场1/16决赛胜者` remain non-roster teams until the actual team is known.
+- Knockout placeholders such as `第1场1/16决赛胜者` are kept in raw snapshots only. They are skipped from canonical `matches` until both sides resolve to roster-backed national teams.
 
 - Player identity uses `players.code = DQD-P{person_id}` as the canonical key and `player_aliases` as the source/name mapping layer.
 - Player name-only mapping is allowed only when a team/name pair resolves to exactly one player. Same-name players stay warning-only and must use `source_player_id`.
@@ -161,8 +161,8 @@ Current local identity snapshot:
 - Canonical Dongqiudi roster teams: `48`.
 - Canonical Dongqiudi roster players: `1248`.
 - Player identity mappings: `3744`.
-- Roster-backed matches for feature generation: `147`.
-- Remaining non-roster matches: knockout placeholders only.
+- Roster-backed canonical matches for feature generation: `75`.
+- Remaining non-roster matches in canonical tables: `0`.
 - Warning-only same-name aliases: Austria `施拉格尔` and Croatia `苏契奇`; use `source_player_id` for these.
 
 Current confidence defaults:
@@ -198,7 +198,7 @@ Feature builder can use:
 - Group/team current form from standings and played matches.
 - Played-lineup stability where lineups exist.
 - Injury/news AI availability signals only when source-bound and confidence-qualified.
-- Venue/weather context with neutral fallback when unavailable.
+- Venue/weather context only when a source-bound venue exists; unavailable venue context stays missing/neutral and must not be copied from legacy fixture data.
 
 Feature builder must not use:
 

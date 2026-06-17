@@ -559,6 +559,4 @@ def build_adapter(source: str, source_type: str) -> CollectorAdapter:
         if source_type in {"world_cup_standings", "world_cup_player_rankings"}:
             return DongqiudiWorldCupDataAdapter(source_type)
         return DongqiudiHomepageAdapter(source_type)
-    if source == "thestatsapi":
-        return TheStatsApiFixturesAdapter(source_type)
     raise ValueError(f"Unsupported collector source: {source}")

@@ -14,10 +14,19 @@ export type Scoreline = {
   probability: number
 }
 
+export type TeamIdentity = {
+  teamId?: string
+  teamCode?: string
+  name?: string
+  nameEn?: string
+}
+
 export type Match = {
   id: string
   home: string
   away: string
+  homeTeam?: TeamIdentity
+  awayTeam?: TeamIdentity
   time: string
   stage: string
   venue: string
@@ -39,6 +48,8 @@ export type Match = {
 
 export type GroupTeam = {
   teamId?: string
+  teamCode?: string
+  nameEn?: string
   rank: number
   name: string
   record: string
@@ -49,6 +60,8 @@ export type GroupTeam = {
 
 export type RankingTeam = {
   teamId?: string
+  teamCode?: string
+  nameEn?: string
   rank: number
   name: string
   probability: number
@@ -59,6 +72,8 @@ export type RankingTeam = {
 
 export type TeamProfile = {
   id: string
+  code?: string
+  nameEn?: string
   name: string
   subtitle: string
   updatedAt: string
@@ -108,6 +123,8 @@ export type UpcomingMatch = {
   id: string
   home: string
   away: string
+  homeTeam?: TeamIdentity
+  awayTeam?: TeamIdentity
   time: string
   tendency: string
   status?: string
@@ -116,6 +133,8 @@ export type UpcomingMatch = {
 
 export type ChampionTopTeam = {
   teamId?: string
+  teamCode?: string
+  nameEn?: string
   name: string
   probability: number
   delta?: number

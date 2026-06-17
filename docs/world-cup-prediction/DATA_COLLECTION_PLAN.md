@@ -1,7 +1,7 @@
 # 世界杯预测数据采集与组织方案
 
-版本：v0.1  
-更新日期：2026-06-15  
+版本：v0.2  
+更新日期：2026-06-17  
 目标：把数据采集从“页面能看到一些真实数据”推进到“可持续入库、可验收、可供模型使用”。
 
 ## 1. 当前结论
@@ -13,8 +13,7 @@
 - 懂球帝首页低频采集：`https://pc.dongqiudi.com/`
 - 已能写入 `raw_snapshots`、`collector_runs`、`news_items`、`teams/team_aliases`、`matches`
 - 前端数据库模式已优先展示 `dongqiudi-` 开头的真实比赛
-- TheStatsAPI 2026 世界杯 fixtures：`https://www.thestatsapi.com/world-cup/data/fixtures.json`
-- 已能写入全量 104 场赛程、球队占位/参赛队、场地、城市、国家和时区
+- TheStatsAPI fixtures 已从活动采集源和 canonical 表清理；赛程以懂球帝为主，未解析淘汰赛占位只保留在 raw snapshot
 - 懂球帝 sport-data 世界杯 2026 接口：`competition_id=61`、`season_id=26123`
 - 已能写入 12 个小组积分榜，以及球员射手、助攻、射门、射正、关键传球榜
 - 懂球帝全站球员身价榜：按 `person_id` 匹配世界杯球员，已能写入匹配球员的 `market_value_eur`
@@ -91,7 +90,7 @@
 
 | 需求 | 当前来源 | 当前状态 | 目标来源 | 标准表 | 更新频率 | 验收点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 赛程/比分/状态 | TheStatsAPI fixtures + 懂球帝首页 | 赛程/场地真实，比分片段部分真实 | 官方/授权赛程源 + 懂球帝校验 | `matches` | 每日，比赛日加密 | 覆盖全部世界杯比赛，时间/双方/状态可解析 |
+| 赛程/比分/状态 | 懂球帝 World Cup schedule/homepage | 真实来源；未解析淘汰赛占位不入 canonical | 懂球帝主链路 | `matches` | 每日，比赛日加密 | 当前只保留双方均匹配 48 队 roster 的真实国家队对阵 |
 | 中文新闻链接 | 懂球帝首页 | 部分真实 | 懂球帝/新闻源 | `news_items` | 每日 | 去重、保留 URL、可关联球队 |
 | 小组积分榜 | 懂球帝 sport-data | 部分真实 | 官方/授权积分源交叉校验 | `group_standings` | 赛后 30 分钟 | 积分、净胜球、排名一致 |
 | 球员近期进球助攻 | 懂球帝 sport-data | 部分真实 | 授权球员数据或稳定页面 | `players`、`player_form_snapshots` | 每日 | 已有进球、助攻、射门、射正、关键传球；分钟、评分、可用状态待补 |
@@ -100,7 +99,7 @@
 | 阵容稳定性 | 未接入 | 缺失 | 首发/出场分钟/大名单 | `team_form_snapshots.lineup_stability_score` | 每日 | 最近 N 场主力出勤率可计算 |
 | 球员/球队身价 | 懂球帝 market_value_ranking | 球员部分真实 | 授权身价源/人工核验 | `players.market_value_eur`，后续补 `teams.market_value_eur` | 每周 | 已按 `person_id` 匹配部分世界杯球员，单位 EUR |
 | 主教练带队战绩 | 未接入 | schema 缺口 | 授权源/人工核验 | `coaches` | 每周 | 任期、场次、胜率、大赛成绩 |
-| 场地信息 | TheStatsAPI fixtures | 部分真实 | 官方场馆源补容量/海拔/草皮 | `venues` | 低频 | 城市、时区、国家已入库；容量、海拔、草皮待补 |
+| 场地信息 | manual_verified + Open-Meteo | 部分真实 | 后续补官方场馆源 | `venues` / `weather_snapshots` | 0 点、12 点 | 懂球帝赛程当前不含 venue 字段，页面不得用旧 fixture 兜底 |
 | 天气 | Open-Meteo | 部分真实 | 天气 API | `weather_snapshots` | 每日 00:00/12:00 | 温度、湿度、风、降水概率 |
 | 伤停/停赛 | 未接入 | 缺失 | 新闻 + AI 抽取 + 人工确认 | `injuries` 或 `ai_insights` | 每日/赛前 | 置信度大于 0.65 才进模型 |
 
@@ -111,7 +110,7 @@
 | 顺序 | job | 目标 | 说明 |
 | --- | --- | --- | --- |
 | 1 | `dongqiudi_homepage` | 已有真实入口稳定化 | 保留 raw、比赛、新闻链接；继续做解析健壮性 |
-| 2 | `official_schedule_venues` | 全量赛程 + 场地 | 已用 TheStatsAPI fixtures 接入 104 场赛程和场地基础字段 |
+| 2 | `dongqiudi_world_cup_schedule` | 真实国家队赛程 + 比分状态 | 已清理 TheStatsAPI 旧赛程；未解析占位只留 raw snapshot |
 | 3 | `group_standings` | 小组积分榜 | 已用懂球帝 sport-data 接入 12 个小组 |
 | 4 | `player_recent_form` | 球员进球、助攻、评分 | 已用懂球帝 sport-data 接入射手/助攻/射门等榜单；评分和出勤待补 |
 | 5 | `team_form` | 球队近期状态 | 已从积分榜派生当前杯赛场均积分/进失球 |
@@ -373,7 +372,6 @@ $env:RUN_DATABASE_TESTS="1"; python -m pytest tests/test_database_backend.py
 ```powershell
 python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run
 python scripts/run_collector.py --source dongqiudi --source-type homepage
-python scripts/run_collector.py --source thestatsapi --source-type fixtures --dry-run
 python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings --dry-run
 python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings --dry-run
 ```
@@ -398,7 +396,7 @@ select source, count(*) from news_items group by 1;
 ## 11. 下一步执行顺序
 
 1. 保持现有懂球帝首页采集稳定，补解析测试用例。
-2. TheStatsAPI fixtures 已接入；下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
+2. TheStatsAPI fixtures 已停用并清理；场地字段只展示 source-bound venue，下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
 3. 懂球帝世界杯积分榜已接入；后续接官方/授权积分源做交叉校验。
 4. 懂球帝球员榜已接入；下一步补球员分钟、评分、可用状态和国家队名单。
 5. `team_form_snapshots` 已从当前杯赛积分榜派生；下一步补全年国家队近期战绩。
@@ -419,16 +417,16 @@ select source, count(*) from news_items group by 1;
 
 当前本地真实库快照：
 
-- `matches=211`：TheStatsAPI fixtures 与懂球帝 World Cup schedule/homepage 合并后的本地覆盖。
+- `matches=75`：懂球帝 World Cup schedule/homepage 中双方均可匹配 48 队 roster 的 canonical 覆盖。
 - `venues=16`：正式比赛场馆已补齐静态信息和天气坐标。
 - `players=1248`：全部来自懂球帝 `team/member_v2`，编码统一为 `DQD-P{person_id}`，`FIFA-*` 球员为 `0`。
 - `player_form_snapshots=5272`：懂球帝 World Cup player rankings 与 `team/member_v2` 统计派生。
-- `group_standings=48`、`team_form_snapshots=24`：懂球帝 World Cup standings 派生。
-- `lineup_snapshots=264`、`team_match_results=208`：懂球帝比赛上下文派生。
+- `group_standings=48`、`team_form_snapshots=32`：懂球帝 World Cup standings 和比赛上下文派生。
+- `lineup_snapshots=440`、`team_match_results=98986`：懂球帝比赛上下文和历史国家队战绩派生。
 - `team_stat_snapshots=868`、`team_stat_metrics=45`：懂球帝 `cid=61` 球队榜指标结构化落库，覆盖红牌、黄牌、犯规、射门、传球、评分、身价等模型候选特征。
-- `news_items=221`：懂球帝首页、Guardian、BBC、ESPN、FOX Sports。
-- `ai_insights=67`：由 `build_ai_news_insights.py` 从已入库新闻抽取，包含伤病、停赛、阵容、名单、教练、训练和战术信号，其中 `8` 条达到 `is_model_eligible=true`。
-- `data_source_links=12471`，阻断源记录为 `0`。
+- `news_items=359`：懂球帝首页、Guardian、BBC、ESPN、FOX Sports。
+- `ai_insights=109`：由 `build_ai_news_insights.py` 从已入库新闻抽取，包含伤病、停赛、阵容、名单、教练、训练和战术信号，其中 `12` 条达到 `is_model_eligible=true`。
+- `data_source_links=162764`，阻断源记录为 `0`。
 
 ## 2026-06-15 Foundation Data Enrichment
 
@@ -460,7 +458,7 @@ python services/api/scripts/audit_real_data.py
 可信来源等级：
 
 - `official`：FIFA 官方排名、官方赛事实体，默认置信度约 `0.95`。
-- `public_dataset`：TheStatsAPI fixture 等公开结构化数据集，默认置信度约 `0.90`。
+- `public_dataset`：历史国家队比赛等公开结构化数据集，默认置信度约 `0.90`。TheStatsAPI fixture 不再是活动采集源。
 - `public_api`：Open-Meteo 等公开 API，默认置信度约 `0.85`。
 - `public_source`：懂球帝页面或 sport-data，默认置信度约 `0.80`，适合中文补充和状态榜单。
 - `manual_verified`：人工核验后的场馆静态信息，默认置信度约 `0.90`。

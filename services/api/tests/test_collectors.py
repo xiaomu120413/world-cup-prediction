@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app.collectors.adapters import (
     DongqiudiHomepageAdapter,
     DongqiudiWorldCupDataAdapter,
@@ -137,17 +139,15 @@ def test_build_adapter_supports_dongqiudi_world_cup_data_source():
     assert adapter.source_type == "world_cup_player_rankings"
 
 
-def test_build_adapter_supports_thestatsapi_source():
-    adapter = build_adapter("thestatsapi", "fixtures")
-
-    assert adapter.source == "thestatsapi"
+def test_build_adapter_rejects_thestatsapi_source():
+    with pytest.raises(ValueError, match="Unsupported collector source"):
+        build_adapter("thestatsapi", "fixtures")
 
 
 def test_collection_catalog_tracks_required_data_domains():
     summary = collection_catalog_summary(
         {
             "dongqiudi_matches": 3,
-            "thestatsapi_matches": 104,
             "news_items": 10,
             "dongqiudi_standings_snapshots": 1,
             "dongqiudi_player_ranking_snapshots": 1,
@@ -158,7 +158,7 @@ def test_collection_catalog_tracks_required_data_domains():
     assert any(job["job_id"] == "dongqiudi_homepage" for job in COLLECTOR_CATALOG)
     assert summary["domains"][0]["domain"] == "matches"
     assert summary["domains"][0]["status"] == "partial_real"
-    assert "thestatsapi/fixtures" in summary["domains"][0]["current_source"]
+    assert summary["domains"][0]["current_source"] == "dongqiudi/homepage"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "standings")["status"] == "partial_real"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "player_form")["status"] == "partial_real"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "market_value")["status"] == "partial_real"
