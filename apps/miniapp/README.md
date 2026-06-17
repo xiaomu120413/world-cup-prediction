@@ -39,9 +39,14 @@ Release WeChat mini program build:
 
 ```powershell
 $env:TARO_APP_API_BASE_URL="https://api.worldcupai-mu.cn"
-$env:TARO_APP_WEAPP_APPID="wx1348bbc303a75dc9"
+$env:TARO_APP_WEAPP_APPID="<your-wechat-mini-program-appid>"
 npm.cmd run build:weapp:release
 ```
+
+Do not commit the real AppID. For local WeChat DevTools usage, copy
+`project.private.config.example.json` to `project.private.config.json` and put
+the real AppID there, or provide it through `TARO_APP_WEAPP_APPID` / `WEAPP_APPID`.
+`project.private.config.json` is ignored by Git.
 
 Local H5 static preview after build:
 
@@ -103,7 +108,8 @@ downloadFile legal domain: https://static.worldcupai-mu.cn
 `npm run build:weapp:release` enforces this by requiring:
 
 - `TARO_APP_API_BASE_URL` to be a public `https://` URL.
-- `TARO_APP_WEAPP_APPID` or `WEAPP_APPID` to be the real AppID.
+- `TARO_APP_WEAPP_APPID`, `WEAPP_APPID`, or local `project.private.config.json`
+  to provide the real AppID.
 
 The generated mini program uses `TARO_APP_API_BASE_URL` at compile time, so
 changing domains requires a rebuild.

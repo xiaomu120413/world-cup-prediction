@@ -19,6 +19,7 @@ apps/miniapp/.swc/
 apps/miniapp/screenshots/
 apps/miniapp/private*.key
 apps/miniapp/keys/
+apps/miniapp/project.private.config.json
 
 # Backend local artifacts
 services/api/.venv/

@@ -4,16 +4,22 @@ import { fileURLToPath } from 'node:url'
 
 const args = new Set(process.argv.slice(2))
 const isRelease = args.has('--release')
+const writeDistConfig = args.has('--dist')
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(__dirname, '..')
 const configPath = path.join(appRoot, 'project.config.json')
+const privateConfigPath = path.join(appRoot, 'project.private.config.json')
+const distConfigPath = path.join(appRoot, 'dist-weapp', 'project.config.json')
 
 const apiBaseUrl = (process.env.TARO_APP_API_BASE_URL || '').trim()
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-const appid = (
+const privateConfig = fs.existsSync(privateConfigPath)
+  ? JSON.parse(fs.readFileSync(privateConfigPath, 'utf8'))
+  : {}
+const localAppid = (
   process.env.TARO_APP_WEAPP_APPID ||
   process.env.WEAPP_APPID ||
-  config.appid ||
+  privateConfig.appid ||
   ''
 ).trim()
 
@@ -47,21 +53,30 @@ function validateReleaseApiBaseUrl(value) {
 
 if (isRelease) {
   validateReleaseApiBaseUrl(apiBaseUrl)
-  if (!appid || appid === 'touristappid') {
-    fail('TARO_APP_WEAPP_APPID or WEAPP_APPID must be set to the real mini program AppID.')
+  if (!localAppid || localAppid === 'touristappid') {
+    fail('TARO_APP_WEAPP_APPID, WEAPP_APPID, or project.private.config.json must provide the real mini program AppID.')
   }
 }
 
 config.miniprogramRoot = './dist-weapp'
-if (appid) {
-  config.appid = appid
-}
+config.appid = 'touristappid'
 
 const next = `${JSON.stringify(config, null, 2)}\n`
 if (fs.readFileSync(configPath, 'utf8') !== next) {
   fs.writeFileSync(configPath, next)
 }
 
+if (writeDistConfig) {
+  if (!fs.existsSync(distConfigPath)) {
+    fail('dist-weapp/project.config.json was not found. Run the Taro weapp build first.')
+  }
+  const distConfig = JSON.parse(fs.readFileSync(distConfigPath, 'utf8'))
+  distConfig.miniprogramRoot = './'
+  distConfig.appid = localAppid || 'touristappid'
+  fs.writeFileSync(distConfigPath, `${JSON.stringify(distConfig, null, 2)}\n`)
+}
+
+const appidSource = localAppid && localAppid !== 'touristappid' ? 'local' : 'touristappid'
 console.log(
-  `[weapp config] miniprogramRoot=${config.miniprogramRoot}, appid=${config.appid}, release=${isRelease ? 'yes' : 'no'}`
+  `[weapp config] miniprogramRoot=${config.miniprogramRoot}, appid=${appidSource}, dist=${writeDistConfig ? 'yes' : 'no'}, release=${isRelease ? 'yes' : 'no'}`
 )

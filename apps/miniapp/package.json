@@ -6,8 +6,10 @@
   "scripts": {
     "prepare:weapp": "node scripts/prepare-weapp-config.mjs",
     "prepare:weapp:release": "node scripts/prepare-weapp-config.mjs --release",
-    "build:weapp": "npm run prepare:weapp && taro build --type weapp",
-    "build:weapp:release": "npm run prepare:weapp:release && taro build --type weapp",
+    "finalize:weapp": "node scripts/prepare-weapp-config.mjs --dist",
+    "finalize:weapp:release": "node scripts/prepare-weapp-config.mjs --dist --release",
+    "build:weapp": "npm run prepare:weapp && taro build --type weapp && npm run finalize:weapp",
+    "build:weapp:release": "npm run prepare:weapp:release && taro build --type weapp && npm run finalize:weapp:release",
     "build:h5": "taro build --type h5",
     "build:h5:api": "set TARO_APP_API_BASE_URL=http://127.0.0.1:8001&& taro build --type h5",
     "dev:weapp": "npm run prepare:weapp && taro build --type weapp --watch",
