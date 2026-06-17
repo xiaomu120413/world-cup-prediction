@@ -1,0 +1,13 @@
+[Unit]
+Description=World Cup Prediction Refresh (%i)
+After=network.target postgresql.service redis-server.service worldcup-api.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/world-cup-prediction/services/api
+Environment=PYTHONPATH=/opt/world-cup-prediction/services/api
+ExecStart=/opt/world-cup-prediction/services/api/.venv/bin/python scripts/run_refresh_schedule.py --cadence %i
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

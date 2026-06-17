@@ -1,0 +1,17 @@
+[Unit]
+Description=World Cup Prediction API
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/world-cup-prediction/services/api
+Environment=PYTHONPATH=/opt/world-cup-prediction/services/api
+ExecStart=/opt/world-cup-prediction/services/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+MemoryMax=800M
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+{
+	email {$TLS_EMAIL}
+}
+
+{$API_SITE_ADDRESS} {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	@health path /health
+	reverse_proxy @health api:8001
+
+	@api path /api/*
+	reverse_proxy @api api:8001
+
+	respond "World Cup Prediction API" 200
+}

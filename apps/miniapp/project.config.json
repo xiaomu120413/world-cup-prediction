@@ -1,8 +1,8 @@
 {
-  "miniprogramRoot": "./dist",
+  "miniprogramRoot": "./dist-weapp",
   "projectname": "world-cup-prediction-miniapp",
   "description": "World Cup prediction mini program prototype",
-  "appid": "touristappid",
+  "appid": "wx1348bbc303a75dc9",
   "setting": {
     "urlCheck": true,
     "es6": false,
@@ -13,4 +13,3 @@
   },
   "compileType": "miniprogram"
 }
-

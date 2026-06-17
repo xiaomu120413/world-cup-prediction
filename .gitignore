@@ -17,6 +17,8 @@ apps/miniapp/dist/
 apps/miniapp/dist-weapp/
 apps/miniapp/.swc/
 apps/miniapp/screenshots/
+apps/miniapp/private*.key
+apps/miniapp/keys/
 
 # Backend local artifacts
 services/api/.venv/

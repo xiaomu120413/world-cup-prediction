@@ -1,0 +1,10 @@
+[Unit]
+Description=Run World Cup daily 12:00 refresh
+
+[Timer]
+OnCalendar=*-*-* 12:05:00
+Persistent=true
+Unit=worldcup-refresh@daily_12.service
+
+[Install]
+WantedBy=timers.target

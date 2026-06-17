@@ -9,7 +9,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'light',
     navigationBarBackgroundColor: '#f7f8fa',
-    navigationBarTitleText: '世界杯预测',
+    navigationBarTitleText: '小木绿茵AI',
     navigationBarTextStyle: 'black'
   }
 })
