@@ -85,14 +85,41 @@ def sanitize_metric_name(value: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in value.lower()).strip("_")
 
 
+CRITICAL_CONTEXT_FEATURE_NAMES = {
+    "ctx_fifa_rank_strength",
+    "ctx_team_market_value_log",
+    "ctx_roster_market_value_log",
+    "ctx_avg_player_market_value_log",
+    "ctx_avg_form_score",
+}
+
+
 class CurrentContextFeatureStore:
-    def __init__(self, feature_names: tuple[str, ...], team_vectors: dict[str, dict[str, float]], roster_team_ids: set[str]):
+    def __init__(
+        self,
+        feature_names: tuple[str, ...],
+        team_vectors: dict[str, dict[str, float]],
+        roster_team_ids: set[str],
+        team_missing_features: dict[str, set[str]] | None = None,
+        required_feature_names: set[str] | None = None,
+    ):
         self.feature_names = feature_names
         self.team_vectors = team_vectors
         self.roster_team_ids = roster_team_ids
+        self.team_missing_features = team_missing_features or {}
+        self.required_feature_names = (
+            required_feature_names if required_feature_names is not None else CRITICAL_CONTEXT_FEATURE_NAMES
+        )
 
     def has_team(self, team_id: str | None) -> bool:
-        return bool(team_id and team_id in self.roster_team_ids and team_id in self.team_vectors)
+        if not team_id or team_id not in self.roster_team_ids or team_id not in self.team_vectors:
+            return False
+        return not (self.team_missing_features.get(team_id, set()) & self.required_feature_names)
+
+    def missing_features(self, team_id: str | None) -> set[str]:
+        if not team_id:
+            return set()
+        return self.team_missing_features.get(team_id, set())
 
     def diff_features(self, home_team_id: str | None, away_team_id: str | None) -> dict[str, float]:
         home = self.team_vectors.get(str(home_team_id), {})
@@ -188,6 +215,7 @@ def load_current_context_feature_store(db, include_all_team_stats: bool = False)
     ).mappings().all()
 
     team_vectors: dict[str, dict[str, float]] = {}
+    team_missing_features: dict[str, set[str]] = {}
     roster_team_ids: set[str] = set()
     base_feature_names = [
         "ctx_fifa_rank_strength",
@@ -208,7 +236,29 @@ def load_current_context_feature_store(db, include_all_team_stats: bool = False)
     for row in roster_rows:
         team_id = str(row.team_id)
         roster_count = int(row.roster_count or 0)
+        missing_features: set[str] = set()
+        if row.fifa_rank is None:
+            missing_features.add("ctx_fifa_rank_strength")
+        if row.team_market_value_eur is None:
+            missing_features.add("ctx_team_market_value_log")
+        if row.roster_market_value_eur is None:
+            missing_features.add("ctx_roster_market_value_log")
+        if row.avg_player_market_value_eur is None:
+            missing_features.add("ctx_avg_player_market_value_log")
+        if row.avg_form_score is None:
+            missing_features.add("ctx_avg_form_score")
+        if int(row.player_form_count or 0) == 0:
+            missing_features.update(
+                {
+                    "ctx_player_goals_per_player",
+                    "ctx_player_assists_per_player",
+                    "ctx_player_shots_per_player",
+                    "ctx_player_key_passes_per_player",
+                    "ctx_player_minutes_per_player",
+                }
+            )
         roster_team_ids.add(team_id)
+        team_missing_features[team_id] = missing_features
         team_vectors[team_id] = {
             "ctx_fifa_rank_strength": -safe_float(row.fifa_rank, 99.0),
             "ctx_team_market_value_log": log1p(safe_float(row.team_market_value_eur)),
@@ -258,6 +308,10 @@ def load_current_context_feature_store(db, include_all_team_stats: bool = False)
                 "ctx_coach_avg_win_rate": safe_float(row.avg_win_rate) / 100.0,
             }
         )
+
+    coach_team_ids = {str(row.team_id) for row in coach_rows}
+    for team_id in roster_team_ids - coach_team_ids:
+        team_missing_features.setdefault(team_id, set()).update(coach_feature_names)
 
     availability_rows = db.execute(
         text(
@@ -323,11 +377,27 @@ def load_current_context_feature_store(db, include_all_team_stats: bool = False)
         metric_value = safe_float(row.numeric_value)
         vector[f"ctx_team_stat_{metric_type}_value"] = log1p(metric_value) if metric_type == "market_value" else metric_value
 
+    metrics_by_team: dict[str, set[str]] = {}
+    for row in metric_rows:
+        metric_type = sanitize_metric_name(row.metric_type)
+        if metric_type in metric_types:
+            metrics_by_team.setdefault(str(row.team_id), set()).add(metric_type)
+    for team_id in roster_team_ids:
+        missing_metric_types = set(metric_types) - metrics_by_team.get(team_id, set())
+        team_missing_features.setdefault(team_id, set()).update(
+            f"ctx_team_stat_{metric_type}_value" for metric_type in missing_metric_types
+        )
+
     feature_names = tuple(base_feature_names + coach_feature_names + availability_feature_names + metric_feature_names)
     for vector in team_vectors.values():
         for name in feature_names:
             vector.setdefault(name, 0.0)
-    return CurrentContextFeatureStore(feature_names=feature_names, team_vectors=team_vectors, roster_team_ids=roster_team_ids)
+    return CurrentContextFeatureStore(
+        feature_names=feature_names,
+        team_vectors=team_vectors,
+        roster_team_ids=roster_team_ids,
+        team_missing_features=team_missing_features,
+    )
 
 
 def augment_examples_with_current_context(

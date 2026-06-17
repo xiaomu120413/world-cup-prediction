@@ -2074,35 +2074,51 @@ class PublicDataRepository:
     @staticmethod
     def team_profile_ratings(team_row, form_stats: dict, team_form=None, result_summary: dict | None = None) -> list[dict]:
         elo = float(team_row.elo_rating) if team_row.elo_rating is not None else None
-        rank = team_row.fifa_rank or 80
-        form_score = form_stats["avg_form_score"] or 6.2
+        rank = team_row.fifa_rank
+        form_score = form_stats["avg_form_score"]
         goals_for_per_match = result_summary.get("goals_for_per_match") if result_summary else None
         goals_against_per_match = result_summary.get("goals_against_per_match") if result_summary else None
-        attack_base = 5.8 + form_stats["goals"] * 0.08 + form_stats["assists"] * 0.05
-        if goals_for_per_match is not None:
-            attack_base = max(attack_base, 5.7 + goals_for_per_match * 1.25)
-        defense_base = 8.9 - rank / 35
-        if goals_against_per_match is not None:
-            defense_base = max(5.2, defense_base - goals_against_per_match * 0.35)
+        ratings = []
+        if goals_for_per_match is not None or form_stats["goals"] or form_stats["assists"]:
+            attack_base = 5.8 + form_stats["goals"] * 0.08 + form_stats["assists"] * 0.05
+            if goals_for_per_match is not None:
+                attack_base = max(attack_base, 5.7 + goals_for_per_match * 1.25)
+            ratings.append(
+                {
+                    "label": "进攻",
+                    "value": clamp_score(attack_base),
+                    "source": "player_form_snapshots/team_match_results",
+                }
+            )
+        if rank is not None or goals_against_per_match is not None:
+            defense_base = 7.0 if rank is None else 8.9 - rank / 35
+            if goals_against_per_match is not None:
+                defense_base = max(5.2, defense_base - goals_against_per_match * 0.35)
+            ratings.append({"label": "防守", "value": clamp_score(defense_base), "source": "teams/team_match_results"})
         market_value = float(team_row.market_value_eur or form_stats["total_market_value"] or 0)
         player_depth = min(form_stats["player_count"], 26) / 26 if form_stats["player_count"] else 0
         market_depth = min(market_value, 1_500_000_000) / 1_500_000_000 if market_value else 0
-        depth = 5.4 + player_depth * 1.4 + market_depth * 2.3
+        if form_stats["player_count"] or market_value or rank is not None or elo is not None:
+            depth = 5.4 + player_depth * 1.4 + market_depth * 2.3
+            if rank is not None:
+                depth = max(depth, max(5.5, min(9.3, 9.2 - rank / 30)))
+            if elo is not None:
+                depth = max(depth, max(5.5, min(9.4, (elo - 1400) / 120 + 5.8)))
+            ratings.append({"label": "阵容深度", "value": clamp_score(depth), "source": "players/teams"})
         stability = None
+        stability_source = None
         if team_form and team_form.lineup_stability_score is not None:
             stability = float(team_form.lineup_stability_score)
+            stability_source = "team_form_snapshots"
         elif result_summary and result_summary.get("points_per_match") is not None:
             stability = 5.6 + min(float(result_summary["points_per_match"]), 3.0)
-        else:
+            stability_source = "team_match_results"
+        elif form_score is not None:
             stability = form_score
-        baseline = max(5.5, min(9.3, 9.2 - rank / 30))
-        elo_score = max(5.5, min(9.4, ((elo or 1700) - 1400) / 120 + 5.8))
-        return [
-            {"label": "进攻", "value": clamp_score(attack_base), "source": "player_form_snapshots/team_match_results"},
-            {"label": "防守", "value": clamp_score(defense_base), "source": "teams/team_match_results"},
-            {"label": "阵容深度", "value": clamp_score(max(depth, (baseline + elo_score) / 2)), "source": "players/teams"},
-            {"label": "稳定性", "value": clamp_score(stability), "source": "team_form_snapshots"},
-        ]
+            stability_source = "player_form_snapshots"
+        if stability is not None:
+            ratings.append({"label": "稳定性", "value": clamp_score(stability), "source": stability_source})
+        return ratings
 
     @staticmethod
     def team_form_headline(player_rows: list, form_stats: dict) -> str:

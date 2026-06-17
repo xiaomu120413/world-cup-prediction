@@ -1,4 +1,5 @@
 from uuid import uuid4
+from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql
 from sqlalchemy import select
@@ -119,3 +120,43 @@ def test_prediction_summary_marks_draw_when_draw_is_highest():
     )
 
     assert summary["tendency"] == "draw"
+
+
+def test_team_profile_ratings_do_not_emit_scores_without_real_inputs():
+    team = SimpleNamespace(elo_rating=None, fifa_rank=None, market_value_eur=None)
+    form_stats = {
+        "avg_form_score": None,
+        "goals": 0,
+        "assists": 0,
+        "total_market_value": None,
+        "player_count": 0,
+    }
+
+    assert PublicDataRepository.team_profile_ratings(team, form_stats) == []
+
+
+def test_team_profile_ratings_use_available_real_inputs_only():
+    team = SimpleNamespace(elo_rating=None, fifa_rank=8, market_value_eur=900_000_000)
+    form_stats = {
+        "avg_form_score": None,
+        "goals": 0,
+        "assists": 0,
+        "total_market_value": 900_000_000,
+        "player_count": 26,
+    }
+
+    ratings = PublicDataRepository.team_profile_ratings(
+        team,
+        form_stats,
+        result_summary={"goals_for_per_match": 1.8, "goals_against_per_match": 0.9, "points_per_match": 2.2},
+    )
+
+    assert [item["label"] for item in ratings] == ["进攻", "防守", "阵容深度", "稳定性"]
+    assert {item["source"] for item in ratings}.issubset(
+        {
+            "player_form_snapshots/team_match_results",
+            "teams/team_match_results",
+            "players/teams",
+            "team_match_results",
+        }
+    )

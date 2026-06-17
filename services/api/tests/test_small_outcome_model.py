@@ -158,6 +158,58 @@ def test_prediction_uses_history_fallback_when_context_team_is_missing():
     assert predictions[0]["probabilities"] == {"home_win": 0.5, "draw": 0.3, "away_win": 0.2}
 
 
+def test_prediction_uses_history_fallback_when_context_features_are_incomplete():
+    class FixedModel:
+        feature_names = ("ctx_avg_form_score",)
+
+        def __init__(self, probabilities):
+            self.probabilities = probabilities
+
+        def predict_proba(self, _features):
+            return self.probabilities
+
+    class FixedCoreModel(FixedModel):
+        feature_names = ("elo_diff",)
+
+    row = SimpleNamespace(
+        public_id="match-1",
+        home_team_id="team-a",
+        away_team_id="team-b",
+        kickoff_at=datetime(2026, 6, 16, tzinfo=UTC),
+        neutral_site=True,
+        home_team_name="A",
+        away_team_name="B",
+        home_team_code="A",
+        away_team_code="B",
+        match_feature_quality_status="partial",
+        match_feature_missing_features=["away_player_avg_form_score"],
+        match_feature_source_summary={},
+    )
+    states = {"team-a": make_state(), "team-b": make_state()}
+    context_store = CurrentContextFeatureStore(
+        feature_names=("ctx_avg_form_score",),
+        team_vectors={
+            "team-a": {"ctx_avg_form_score": 6.8},
+            "team-b": {"ctx_avg_form_score": 0.0},
+        },
+        roster_team_ids={"team-a", "team-b"},
+        team_missing_features={"team-b": {"ctx_avg_form_score"}},
+    )
+
+    predictions = predict_scheduled_matches(
+        FixedModel([0.1, 0.1, 0.8]),
+        states,
+        [row],
+        context_store=context_store,
+        core_model=FixedCoreModel([0.5, 0.3, 0.2]),
+    )
+
+    assert predictions[0]["inference_mode"] == "history_core_fallback"
+    assert predictions[0]["calibration_applied"] is False
+    assert predictions[0]["fallback_reason"] == "missing_context_features"
+    assert predictions[0]["probabilities"] == {"home_win": 0.5, "draw": 0.3, "away_win": 0.2}
+
+
 def test_calibration_gate_rejects_model_worse_than_elo_baseline():
     gate = calibration_gate_result(
         {
