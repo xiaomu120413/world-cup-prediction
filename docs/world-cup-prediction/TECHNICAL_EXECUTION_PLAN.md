@@ -101,7 +101,7 @@ apps/miniapp/
       BottomNav/
     services/
       api.ts
-      mock.ts
+      data.ts
     stores/
     styles/
     utils/
@@ -1059,7 +1059,7 @@ Taro 项目
 小组页
 预测榜
 球队页
-mock 数据
+真实数据空状态
 ```
 
 ### 17.3 第 3 周：后端 API
@@ -1071,7 +1071,7 @@ FastAPI 项目
 PostgreSQL schema
 Redis 缓存
 小程序接口
-mock 数据入库
+真实数据入库
 ```
 
 ### 17.4 第 4 周：数据采集

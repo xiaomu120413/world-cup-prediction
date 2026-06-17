@@ -84,7 +84,7 @@ AI 解读任务
 | M1 视觉 QA | 已通过 | 390 x 844 视口下检查首页、比赛详情、小组、预测榜、球队页，无横向溢出。 |
 | M2 设计 | 已完成 | `DATA_MODEL.md`、`API_CONTRACT.md`、`FUNCTIONAL_DESIGN.md` 已定义数据表、接口合约和功能闭环。 |
 | M2 API 骨架 | 已完成 | `services/api` 已提供 FastAPI 骨架、数据库默认读取、OpenAPI 文档和契约测试。 |
-| M2 数据库 | 已切到数据库默认路径 | `services/api/db` 已提供 PostgreSQL schema；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本、Docker Compose 已接入。真实数据审计通过后，公共 API 默认从数据库读取，mock 仅保留给测试 fixture。 |
+| M2 数据库 | 已切到数据库默认路径 | `services/api/db` 已提供 PostgreSQL schema；`services/api/alembic`、SQLAlchemy 元数据、初始化脚本、Docker Compose 已接入。公共 API 默认从数据库读取，运行时代码不保留占位数据源。 |
 | M6 小程序联调 | 已开始 | `apps/miniapp/src/services/data.ts` 已接入 API service 层，API 构建通过 `TARO_APP_API_BASE_URL` 直连后端真实数据；H5 API 模式 smoke 已通过。 |
 
 ## 4. M0 基础设施
@@ -145,7 +145,7 @@ SSL Labs / 浏览器证书检查
 | --- | --- | --- |
 | M1-01 | 初始化 Taro 项目 | `apps/miniapp` |
 | M1-02 | 配置 TypeScript 和基础样式 | 可编译 |
-| M1-03 | 建立离线 fixture 数据 | `src/services/mock.ts` |
+| M1-03 | 建立真实接口类型与空状态 | `src/services/types.ts` |
 | M1-04 | 实现底部导航 | 比赛 / 小组 / 预测 / 球队 |
 | M1-05 | 实现首页 | 今日比赛、AI 简报、冠军概率 |
 | M1-06 | 实现比赛详情页 | AI 报告、概率、比分、证据 |
@@ -793,8 +793,8 @@ MVP v0.1 完成必须同时满足：
 Update date: 2026-06-15
 
 - `DATA_BACKEND=database` now covers home, matches today, match detail, match prediction, teams, team detail, team profile, team matches, prediction rankings, groups, group detail, and group simulation.
-- PostgreSQL seed data now includes ranking predictions, group standings, and group simulation rows for the local baseline.
-- Database-mode routes no longer fall back to mock data; missing real data must surface as an empty result or explicit 404.
+- PostgreSQL real-source data now includes ranking predictions, group standings, and group simulation rows.
+- Database-mode routes do not fall back to placeholder data; missing real data must surface as an empty result or explicit 404.
 - Backend verification: `RUN_DATABASE_TESTS=1 python -m pytest` passed with 33 tests.
 
 ## Backend Cache Update

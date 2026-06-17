@@ -2239,7 +2239,7 @@
   background: #effaf2;
 }
 
-/* Design-spec pass 2: tighter visual match to the selected report mockups. */
+/* Design-spec pass 2: tighter visual match to the selected report references. */
 .icon-button--plain,
 .top-bar .icon-button {
   border: 0;
@@ -2919,7 +2919,7 @@
   text-align: right;
 }
 
-/* Design mock restoration: match the five mobile report screenshots. */
+/* Design reference restoration: match the five mobile report screenshots. */
 .design-page {
   min-height: 100vh;
   padding: 42rpx 30rpx 150rpx;
@@ -3463,12 +3463,11 @@
 }
 
 .evidence-row {
-  display: grid;
-  grid-template-columns: 54rpx minmax(0, 1fr) 72rpx;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
   gap: 18rpx;
-  min-height: 96rpx;
-  padding: 18rpx 24rpx;
+  min-height: 106rpx;
+  padding: 22rpx 24rpx;
   border-bottom: 1rpx solid #e5e7eb;
 }
 
@@ -3478,14 +3477,21 @@
 
 .evidence-row__marker {
   display: flex;
+  flex: 0 0 42rpx;
   align-items: center;
   justify-content: center;
   width: 42rpx;
   height: 42rpx;
+  margin-top: 4rpx;
   border-radius: 50%;
   color: #ffffff;
   font-size: 28rpx;
   font-weight: 900;
+}
+
+.evidence-row__main {
+  flex: 1;
+  min-width: 0;
 }
 
 .evidence-row__marker--up {
@@ -3497,21 +3503,33 @@
 }
 
 .evidence-row__label {
+  display: block;
   color: #111827;
   font-size: 28rpx;
   font-weight: 650;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .evidence-row__note {
+  display: block;
   margin-top: 8rpx;
   color: #6b7280;
   font-size: 23rpx;
+  line-height: 1.45;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .evidence-row__score {
+  flex: 0 0 auto;
+  min-width: 88rpx;
+  max-width: 132rpx;
   font-size: 38rpx;
   font-weight: 850;
+  line-height: 1.2;
   text-align: right;
+  word-break: break-word;
 }
 
 .scorelines {
@@ -4257,6 +4275,8 @@
   justify-content: center;
   width: 62rpx;
   height: 62rpx;
+  overflow: hidden;
+  border: 1rpx solid #dbeafe;
   border-radius: 50%;
   background: #eff6ff;
 }
@@ -5374,17 +5394,17 @@
 }
 
 .page--groups .group-match-row {
-  grid-template-columns: minmax(0, 1fr) 46rpx minmax(0, 1fr) 142rpx;
-  gap: 14rpx;
-  min-height: 114rpx;
-  padding: 20rpx 0;
+  grid-template-columns: minmax(86rpx, 0.86fr) 34rpx minmax(86rpx, 0.86fr) minmax(196rpx, 214rpx);
+  gap: 8rpx;
+  min-height: 108rpx;
+  padding: 18rpx 0;
   border-bottom: 1rpx solid #e5e7eb;
 }
 
 .page--groups .group-match-row__team {
-  gap: 12rpx;
+  gap: 8rpx;
   color: #111827;
-  font-size: 31rpx;
+  font-size: 29rpx;
   font-weight: 700;
 }
 
@@ -5394,13 +5414,23 @@
 
 .page--groups .group-match-row__vs {
   color: #0457e7;
-  font-size: 28rpx;
+  font-size: 27rpx;
   font-weight: 900;
 }
 
 .page--groups .group-match-row__time {
-  font-size: 25rpx;
-  line-height: 1.38;
+  min-width: 196rpx;
+  max-width: 214rpx;
+  font-size: 23rpx;
+  line-height: 1.32;
+}
+
+.page--groups .group-match-row__time text {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page--groups .group-match-row__time text:first-child {

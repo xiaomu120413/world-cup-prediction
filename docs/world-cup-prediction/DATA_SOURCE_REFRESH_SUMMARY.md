@@ -121,7 +121,7 @@ AI insights must remain evidence-bound. Only confidence-qualified availability s
 
 Hard requirements before data can be treated as real production data:
 
-- No `local_sample` records in the real database.
+- No blocked test-source records in the real database.
 - No canonical records without source links.
 - `players.code` must use `DQD-P{person_id}` for roster players.
 - Historical `FIFA-*` player rows must remain `0`; FIFA can be used for team ranking and injury news, not player roster identity.
@@ -172,7 +172,7 @@ Current confidence defaults:
 | `public_source` | Dongqiudi pages and sport-data | `0.80` |
 | `public_news` | BBC, Guardian, ESPN, FOX Sports | `0.75-0.85` depending on source |
 | `manual_verified` | Venue static enrichment | `0.90` |
-| `sample_for_tests_only` | `local_sample` | Not allowed in real-data DB |
+| blocked test sources | n/a | Not allowed in real-data DB |
 
 ## Concurrency And Idempotency
 
@@ -237,7 +237,7 @@ python services/api/scripts/audit_real_data.py
 Required audit result:
 
 - `status = pass`
-- `local_sample_records = 0`
+- `blocked_source_records = 0`
 - all `*_without_source = 0`
 - `team_stat_snapshots_without_source = 0`
 - `ai_insights_without_source = 0`

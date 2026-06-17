@@ -1,5 +1,5 @@
 import { Text, View } from '@tarojs/components'
-import type { Probability } from '@/services/mock'
+import type { Probability } from '@/services/types'
 
 export function ProbabilitySummary({ probabilities }: { probabilities: Probability[] }) {
   if (!probabilities.length) {

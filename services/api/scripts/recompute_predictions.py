@@ -5,14 +5,14 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.db.session import SessionLocal
-from app.predictions.service import DEFAULT_SMALL_MODEL_VERSION, BaselinePredictionService
+from app.predictions.service import DEFAULT_PREDICTION_MODEL_VERSION, BaselinePredictionService
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Recompute match predictions.")
     parser.add_argument("--scope", default="matchday")
-    parser.add_argument("--model-version", default=DEFAULT_SMALL_MODEL_VERSION)
-    parser.add_argument("--model-kind", choices=("small_outcome", "baseline"), default=None)
+    parser.add_argument("--model-version", default=DEFAULT_PREDICTION_MODEL_VERSION)
+    parser.add_argument("--model-kind", choices=("scoreline", "small_outcome", "baseline"), default=None)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--match-id", action="append", dest="match_ids")
     args = parser.parse_args()

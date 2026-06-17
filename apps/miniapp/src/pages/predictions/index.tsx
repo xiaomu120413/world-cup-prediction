@@ -5,15 +5,8 @@ import { Flag } from '@/components/Flag'
 import { Icon } from '@/components/Icon'
 import { ProgressRow } from '@/components/ProgressRow'
 import { getRankingData, type LoadState } from '@/services/data'
-import { championRankings, darkHorseRankings, semiFinalRankings, type RankingTeam } from '@/services/mock'
-import { getTeamIdByName } from '@/services/teamResources'
+import type { RankingTeam } from '@/services/types'
 import { goTo, routes } from '@/utils/navigation'
-
-const rankingMap = {
-  champion: championRankings,
-  semifinal: semiFinalRankings,
-  darkhorse: darkHorseRankings
-}
 
 const tabLabels = {
   champion: '冠军',
@@ -21,39 +14,33 @@ const tabLabels = {
   darkhorse: '黑马'
 }
 
-type Tab = keyof typeof rankingMap
-
-function sourceLabel(active: Tab) {
-  if (active === 'champion') return '基于 50,000 次模拟'
-  if (active === 'semifinal') return '四强路径模拟'
-  return '黑马上限评估'
-}
+type Tab = keyof typeof tabLabels
 
 export default function PredictionsPage() {
   const [active, setActive] = useState<Tab>('champion')
-  const [rankings, setRankings] = useState<RankingTeam[]>(rankingMap[active])
-  const [rankingMeta, setRankingMeta] = useState({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
+  const [rankings, setRankings] = useState<RankingTeam[]>([])
+  const [rankingMeta, setRankingMeta] = useState({ updatedAt: '', source: '' })
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
     let mounted = true
-    setRankings(rankingMap[active])
-    setRankingMeta({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
+    setRankings([])
+    setRankingMeta({ updatedAt: '', source: '' })
     setLoadState('loading')
     getRankingData(active)
       .then(data => {
         if (!mounted) return
-        setRankings(data.rankings.length ? data.rankings : rankingMap[active])
+        setRankings(data.rankings)
         setRankingMeta({
-          updatedAt: data.updatedAt && !data.updatedAt.includes('待') ? data.updatedAt.replace('数据更新于 ', '更新于 ') : '更新于 18:00',
-          source: data.source && !data.source.includes('待') ? data.source : sourceLabel(active)
+          updatedAt: data.updatedAt.replace('数据更新于 ', '更新于 '),
+          source: data.source
         })
         setLoadState('ready')
       })
       .catch(() => {
         if (!mounted) return
-        setRankings(rankingMap[active])
-        setRankingMeta({ updatedAt: '更新于 18:00', source: sourceLabel(active) })
+        setRankings([])
+        setRankingMeta({ updatedAt: '', source: '' })
         setLoadState('error')
       })
 
@@ -62,19 +49,18 @@ export default function PredictionsPage() {
     }
   }, [active])
 
-  const displayRankings = useMemo(() => rankings.length ? rankings : rankingMap[active], [active, rankings])
-  const topTeam = displayRankings[0]
+  const topTeam = useMemo(() => rankings[0], [rankings])
 
   return (
     <View className='page page--predictions design-page'>
       <View className='ranking-header'>
         <View>
           <Text className='app-title'>预测榜</Text>
-          <Text className='page-head__subtitle'>{rankingMeta.source}</Text>
+          <Text className='page-head__subtitle'>{rankingMeta.source || (loadState === 'loading' ? '加载真实预测数据' : '等待真实预测数据')}</Text>
         </View>
         <View className='ranking-header__updated'>
           <Icon name='clock' color='#6b7280' size={28} />
-          <Text>{rankingMeta.updatedAt}</Text>
+          <Text>{rankingMeta.updatedAt || '-'}</Text>
         </View>
       </View>
 
@@ -97,7 +83,7 @@ export default function PredictionsPage() {
             <Text>AI 榜单解读</Text>
           </View>
           <Text className='ranking-ai-card__text'>
-            {topTeam ? `${topTeam.name}仍是${tabLabels[active]}概率最高球队，${displayRankings[1]?.name || '第二集团'}和${displayRankings[2]?.name || '第三集团'}差距很小。` : '榜单等待模型生成。'}
+            {topTeam ? `${topTeam.name} 当前位列${tabLabels[active]}榜首，概率为 ${topTeam.probability}%。` : '暂无真实预测榜数据。'}
           </Text>
         </View>
         <View className='ranking-ai-card__art'>
@@ -119,13 +105,17 @@ export default function PredictionsPage() {
         <View className='ranking-table-head'>
           <Text>排名 / 球队</Text>
           <Text>{tabLabels[active]}概率</Text>
-          <Text>较昨日变化</Text>
+          <Text>变化</Text>
         </View>
-        {displayRankings.map(team => (
+        {rankings.length ? rankings.map(team => (
           <View
             className='ranking-row ranking-row--table'
-            key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}&source=predictions&rankingType=${active}`)}
+            key={team.teamId || team.name}
+            onClick={() => {
+              if (team.teamId) {
+                goTo(`${routes.teamDetail}?teamId=${team.teamId}&source=predictions&rankingType=${active}`)
+              }
+            }}
           >
             <View className='ranking-row__team-block'>
               <Text className='ranking-row__rank'>{team.rank}</Text>
@@ -146,7 +136,7 @@ export default function PredictionsPage() {
               </Text>
             </View>
           </View>
-        ))}
+        )) : <View className='empty-state'><Text>{loadState === 'loading' ? '正在加载真实榜单' : '暂无真实榜单数据'}</Text></View>}
       </View>
 
       <View className='today-change-card today-change-card--design' onClick={() => goTo(routes.matches)}>
@@ -154,16 +144,16 @@ export default function PredictionsPage() {
           <Icon name='chart' color='#2563eb' size={36} />
         </View>
         <View className='today-change-card__main'>
-          <Text className='today-change-card__title'>今日变化</Text>
+          <Text className='today-change-card__title'>数据状态</Text>
           <Text className='today-change-card__text'>
-            美国胜率上调，带动出线概率 <Text className='text-positive'>+18%</Text>
+            {topTeam ? `${topTeam.name} 当前 ${tabLabels[active]}概率 ${topTeam.probability}%` : '真实预测快照暂不可用'}
           </Text>
-          <Text className='today-change-card__meta'>战胜巴拉圭概率上升，出线形势明显改善。</Text>
+          <Text className='today-change-card__meta'>{rankingMeta.updatedAt || '等待后端定时任务刷新'}</Text>
         </View>
         <Icon name='chevron' color='#94a3b8' size={30} />
       </View>
 
-      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
       <BottomNav active='predictions' />
     </View>
   )

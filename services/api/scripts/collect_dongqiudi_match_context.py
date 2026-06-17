@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -310,7 +310,14 @@ def ensure_team(db, name: str, source_team_id: str | None):
 
 
 def parse_kickoff(value: str) -> datetime:
-    return datetime.fromisoformat(value).replace(tzinfo=API_TZ)
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    # Dongqiudi's schedule payload exposes start_play alongside date_utc/time_utc.
+    # The value is zone-less, so keep it aligned with the UTC fields instead of
+    # stamping it as Beijing time.
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def result_for(goals_for: int | None, goals_against: int | None, status: str) -> str:

@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Text, View } from '@tarojs/components'
+import { Image, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { BottomNav } from '@/components/BottomNav'
 import { Flag } from '@/components/Flag'
-import { Icon } from '@/components/Icon'
+import { Icon, type IconName } from '@/components/Icon'
 import { RatingRow } from '@/components/RatingRow'
 import { Section } from '@/components/Section'
-import { getTeamProfile, type LoadState } from '@/services/data'
-import { championRankings, emptyTeamProfile, type TeamProfile } from '@/services/mock'
-import {
-  allTournamentTeams,
-  getFallbackGroupSummaries,
-  getTeamGroupLabel,
-  type TournamentTeam
-} from '@/services/tournamentStructure'
+import { getTeamList, getTeamProfile, type LoadState, type TeamListItem } from '@/services/data'
+import type { TeamProfile } from '@/services/types'
 import { goTo, routes } from '@/utils/navigation'
 
 type TeamSource = 'home' | 'predictions' | 'groups' | 'direct'
@@ -54,10 +48,6 @@ function sourceTarget(context: RouteContext) {
   return routes.matches
 }
 
-function shouldUseDesignTeam(team: TeamProfile) {
-  return !team.probabilities.length || team.name.includes('待')
-}
-
 function evidenceValueClass(tone?: string) {
   if (tone === 'negative') return 'team-evidence-row__value text-negative'
   if (tone === 'positive') return 'team-evidence-row__value text-positive'
@@ -68,22 +58,57 @@ function goTeam(teamId: string, source = 'direct') {
   goTo(`${routes.teamDetail}?teamId=${teamId}&source=${source}`)
 }
 
-function rankingProbability(teamId: string) {
-  return championRankings.find(team => team.teamId === teamId)?.probability
+function PlayerAvatar({ player }: { player: TeamProfile['players'][number] }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const roleIcon = player.roleIcon || 'stability'
+
+  if (player.avatarUrl && !imageFailed) {
+    return (
+      <View className='avatar avatar--local'>
+        <Image
+          className='avatar__image'
+          src={player.avatarUrl}
+          mode='aspectFill'
+          onError={() => setImageFailed(true)}
+        />
+      </View>
+    )
+  }
+
+  return (
+    <View className='avatar avatar--local'>
+      <Icon name={roleIcon} color='#2563eb' size={34} />
+    </View>
+  )
 }
 
-function TeamListRow({ team, index }: { team: TournamentTeam; index: number }) {
-  const probability = rankingProbability(team.id)
+function PlayerDataChips({ player }: { player: TeamProfile['players'][number] }) {
+  const chips = (player.dataPoints || []).slice(0, 4)
+  if (!chips.length) return null
+
+  return (
+    <View className='player-data-points'>
+      {chips.map(item => (
+        <View className='player-data-chip' key={`${item.icon}-${item.label}`}>
+          <Icon name={item.icon as IconName} color='#2563eb' size={20} />
+          <Text>{item.value}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+function TeamListRow({ team, index }: { team: TeamListItem; index: number }) {
   return (
     <View className='team-index-row' onClick={() => goTeam(team.id)}>
       <Text className='team-index-row__rank'>{String(index + 1).padStart(2, '0')}</Text>
       <Flag team={team.name} size='sm' />
       <View className='team-index-row__main'>
         <Text className='team-index-row__name'>{team.name}</Text>
-        <Text className='team-index-row__meta'>{team.nameEn} · {getTeamGroupLabel(team.id)}</Text>
+        <Text className='team-index-row__meta'>{team.nameEn || team.meta}</Text>
       </View>
       <View className='team-index-row__right'>
-        {probability ? <Text>{probability}%</Text> : <Text>{team.groupName}</Text>}
+        {team.probability !== undefined ? <Text>{team.probability}%</Text> : <Text>{team.meta}</Text>}
         <Icon name='chevron' color='#94a3b8' size={26} />
       </View>
     </View>
@@ -91,21 +116,43 @@ function TeamListRow({ team, index }: { team: TournamentTeam; index: number }) {
 }
 
 function TeamsIndexPage() {
-  const [activeGroupId, setActiveGroupId] = useState('all')
-  const groupOptions = getFallbackGroupSummaries()
-  const featuredTeams = championRankings
-    .map(item => allTournamentTeams.find(team => team.id === item.teamId))
-    .filter(Boolean) as TournamentTeam[]
-  const visibleTeams = activeGroupId === 'all'
-    ? allTournamentTeams
-    : allTournamentTeams.filter(team => team.groupId === activeGroupId)
+  const [teams, setTeams] = useState<TeamListItem[]>([])
+  const [loadState, setLoadState] = useState<LoadState>('idle')
+
+  useEffect(() => {
+    let mounted = true
+    setLoadState('loading')
+    getTeamList()
+      .then(data => {
+        if (!mounted) return
+        setTeams(data)
+        setLoadState('ready')
+      })
+      .catch(() => {
+        if (!mounted) return
+        setTeams([])
+        setLoadState('error')
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const featuredTeams = useMemo(
+    () => teams
+      .filter(team => team.probability !== undefined)
+      .sort((a, b) => (b.probability || 0) - (a.probability || 0) || a.name.localeCompare(b.name))
+      .slice(0, 3),
+    [teams]
+  )
 
   return (
     <View className='page page--team-index design-page'>
       <View className='team-index-header'>
         <View>
           <Text className='app-title'>球队</Text>
-          <Text className='page-head__subtitle'>48支球队画像 · 点击进入分析</Text>
+          <Text className='page-head__subtitle'>真实球队数据 · 点击进入分析</Text>
         </View>
         <View className='team-index-header__icon'>
           <Icon name='team' color='#2563eb' size={42} />
@@ -118,48 +165,36 @@ function TeamsIndexPage() {
         </View>
         <View className='team-index-ai-card__main'>
           <Text className='team-index-ai-card__title'>AI 球队索引</Text>
-          <Text className='team-index-ai-card__text'>从热门球队、全部小组进入单队画像，概率、评分、状态和关键球员保持同一套字段。</Text>
+          <Text className='team-index-ai-card__text'>球队列表来自后端真实接口，未使用本地静态 48 队样例。</Text>
         </View>
       </View>
 
       <Section title='冠军热门' action='预测榜' onAction={() => goTo(routes.predictions)}>
-        {featuredTeams.map((team, index) => (
+        {featuredTeams.length ? featuredTeams.map((team, index) => (
           <View className='team-feature-row' key={team.id} onClick={() => goTeam(team.id, 'predictions')}>
             <Text className={`rank-medal rank-medal--${index + 1}`}>{index + 1}</Text>
             <Flag team={team.name} size='sm' />
             <View className='team-feature-row__main'>
               <Text className='team-feature-row__name'>{team.name}</Text>
-              <Text className='team-feature-row__meta'>{team.nameEn} · {team.groupName}</Text>
+              <Text className='team-feature-row__meta'>{team.nameEn || team.meta}</Text>
             </View>
-            <Text className='team-feature-row__prob'>{championRankings[index]?.probability}%</Text>
+            <Text className='team-feature-row__prob'>{team.probability}%</Text>
             <Icon name='chevron' color='#94a3b8' size={26} />
           </View>
-        ))}
+        )) : <View className='empty-state'><Text>暂无真实冠军热门数据</Text></View>}
       </Section>
 
-      <Section title='全部球队' action={activeGroupId === 'all' ? '全部小组' : '查看全部'} onAction={() => setActiveGroupId('all')}>
-        <View className='team-group-filter'>
-          <Text
-            className={`team-group-filter__item ${activeGroupId === 'all' ? 'team-group-filter__item--active' : ''}`}
-            onClick={() => setActiveGroupId('all')}
-          >
-            全部
-          </Text>
-          {groupOptions.map(group => (
-            <Text
-              key={group.id}
-              className={`team-group-filter__item ${activeGroupId === group.id ? 'team-group-filter__item--active' : ''}`}
-              onClick={() => setActiveGroupId(group.id)}
-            >
-              {group.name}
-            </Text>
-          ))}
-        </View>
+      <Section title='全部球队' action='真实接口'>
         <View className='team-index-list'>
-          {visibleTeams.map((team, index) => <TeamListRow key={team.id} team={team} index={index} />)}
+          {teams.length ? teams.map((team, index) => <TeamListRow key={team.id} team={team} index={index} />) : (
+            <View className='empty-state'>
+              <Text>{loadState === 'loading' ? '正在加载真实球队数据' : '暂无真实球队数据'}</Text>
+            </View>
+          )}
         </View>
       </Section>
 
+      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
       <BottomNav active='teams' />
     </View>
   )
@@ -168,7 +203,7 @@ function TeamsIndexPage() {
 export default function TeamDetailPage() {
   const [teamId] = useState<string | undefined>(getRouteTeamId)
   const [routeContext] = useState<RouteContext>(getRouteContext)
-  const [team, setTeam] = useState<TeamProfile>(emptyTeamProfile)
+  const [team, setTeam] = useState<TeamProfile | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const isTeamListMode = !teamId && routeContext.source === 'direct'
 
@@ -179,12 +214,12 @@ export default function TeamDetailPage() {
     getTeamProfile(teamId)
       .then(data => {
         if (!mounted) return
-        setTeam(shouldUseDesignTeam(data) ? emptyTeamProfile : data)
+        setTeam(data)
         setLoadState('ready')
       })
       .catch(() => {
         if (!mounted) return
-        setTeam(emptyTeamProfile)
+        setTeam(null)
         setLoadState('error')
       })
 
@@ -193,11 +228,33 @@ export default function TeamDetailPage() {
     }
   }, [isTeamListMode, teamId])
 
-  const displayTeam = useMemo(() => shouldUseDesignTeam(team) ? emptyTeamProfile : team, [team])
+  const displayTeam = useMemo(() => team, [team])
 
   if (isTeamListMode) {
     return <TeamsIndexPage />
   }
+
+  if (!displayTeam) {
+    return (
+      <View className='page page--team-report design-page'>
+        <View className='team-report-topbar'>
+          <View className='icon-button icon-button--plain' onClick={() => goTo(sourceTarget(routeContext))}>
+            <Icon name='back' color='#0f172a' size={34} />
+          </View>
+          <View className='team-report-title'>
+            <Text className='team-report-title__name'>球队数据</Text>
+            <Text className='team-report-title__meta'>{loadState === 'loading' ? '正在加载真实球队数据' : '真实球队数据不可用'}</Text>
+          </View>
+        </View>
+        <View className='empty-state'>
+          <Text>{loadState === 'loading' ? '正在加载真实球队数据' : '真实球队数据不可用，未显示虚拟数据。'}</Text>
+        </View>
+        <BottomNav active='teams' />
+      </View>
+    )
+  }
+
+  const recent = displayTeam.form.recent
 
   return (
     <View className='page page--team-report design-page'>
@@ -235,39 +292,39 @@ export default function TeamDetailPage() {
       </View>
 
       <View className='probability-mini-grid team-probability-strip'>
-        {displayTeam.probabilities.map(item => (
+        {displayTeam.probabilities.length ? displayTeam.probabilities.map(item => (
           <View className='probability-mini' key={item.label}>
             <Text className='probability-mini__label'>{item.label}</Text>
             <Text className='probability-mini__value'>{item.value}</Text>
-            {item.delta ? <Text className='delta delta--up'>▲ {item.delta.replace('+', '')}</Text> : null}
+            {item.delta ? <Text className='delta delta--up'>▲{item.delta.replace('+', '')}</Text> : null}
           </View>
-        ))}
+        )) : <View className='empty-state'><Text>暂无真实概率数据</Text></View>}
       </View>
 
       <Section title='核心评分' action='满分 10 分'>
-        {displayTeam.ratings.map(item => (
+        {displayTeam.ratings.length ? displayTeam.ratings.map(item => (
           <RatingRow key={item.label} label={item.label} value={item.value} />
-        ))}
+        )) : <View className='empty-state'><Text>暂无真实评分数据</Text></View>}
       </Section>
 
       <Section title='近期状态'>
         <View className='team-form-report'>
           <View className='team-form-summary'>
-            <Text className='team-form-summary__label'>近{displayTeam.form.recent?.matches || 10}场</Text>
+            <Text className='team-form-summary__label'>{recent ? `近${recent.matches}场` : '暂无近期记录'}</Text>
             <View className='team-form-summary__record'>
-              <Text className='text-positive'>{displayTeam.form.recent?.wins ?? 7}胜</Text>
-              <Text>{displayTeam.form.recent?.draws ?? 2}平</Text>
-              <Text className='text-negative'>{displayTeam.form.recent?.losses ?? 1}负</Text>
+              <Text className='text-positive'>{recent?.wins ?? '-'}胜</Text>
+              <Text>{recent?.draws ?? '-'}平</Text>
+              <Text className='text-negative'>{recent?.losses ?? '-'}负</Text>
             </View>
-            <Text className='team-form-summary__goals'>进{displayTeam.form.recent?.goalsFor ?? 21}失{displayTeam.form.recent?.goalsAgainst ?? 8}</Text>
+            <Text className='team-form-summary__goals'>进{recent?.goalsFor ?? '-'} 失{recent?.goalsAgainst ?? '-'}</Text>
           </View>
           <View className='team-evidence-list'>
-            {(displayTeam.form.evidence || []).map(item => (
+            {(displayTeam.form.evidence || []).length ? (displayTeam.form.evidence || []).map(item => (
               <View className='team-evidence-row' key={item.label}>
                 <Text className='team-evidence-row__label'>{item.label}</Text>
                 <Text className={evidenceValueClass(item.tone)}>{item.value}</Text>
               </View>
-            ))}
+            )) : <View className='empty-state'><Text>暂无真实状态证据</Text></View>}
           </View>
         </View>
       </Section>
@@ -278,14 +335,13 @@ export default function TeamDetailPage() {
           <Text>位置</Text>
           <Text>状态评分</Text>
         </View>
-        {displayTeam.players.map(player => (
+        {displayTeam.players.length ? displayTeam.players.map(player => (
           <View className='player-row player-row--design' key={player.name}>
-            <View className='avatar avatar--local'>
-              <Icon name='team' color='#2563eb' size={34} />
-            </View>
+            <PlayerAvatar player={player} />
             <View className='player-row__main'>
               <Text className='list-row__title'>{player.name}</Text>
               {player.meta ? <Text className='list-row__meta'>{player.meta}</Text> : null}
+              <PlayerDataChips player={player} />
             </View>
             <Text className='player-row__position'>{player.role}</Text>
             <View className='player-score-box'>
@@ -295,26 +351,28 @@ export default function TeamDetailPage() {
               </View>
             </View>
           </View>
-        ))}
+        )) : <View className='empty-state'><Text>暂无真实关键球员数据</Text></View>}
       </Section>
 
-      <View className='risk-card risk-card--design'>
-        <View className='risk-card__icon'>
-          <Icon name='shield' color='#dc2626' size={42} />
+      {displayTeam.risks.length ? (
+        <View className='risk-card risk-card--design'>
+          <View className='risk-card__icon'>
+            <Icon name='shield' color='#dc2626' size={42} />
+          </View>
+          <View className='risk-card__main'>
+            <Text className='risk-card__title'>风险提醒</Text>
+            <Text className='risk-card__text'>{displayTeam.risks[0].label}</Text>
+            <Text className='risk-card__meta'>来自后端真实风险信号。</Text>
+          </View>
+          <View className='risk-card__score'>
+            <Text>{displayTeam.risks[0].value}</Text>
+            <Text>影响评分</Text>
+          </View>
+          <Icon name='chevron' color='#94a3b8' size={30} />
         </View>
-        <View className='risk-card__main'>
-          <Text className='risk-card__title'>风险提醒</Text>
-          <Text className='risk-card__text'>{displayTeam.risks[0]?.label || '主力中卫伤停'}</Text>
-          <Text className='risk-card__meta'>后防稳定性下降，淘汰赛风险上升。</Text>
-        </View>
-        <View className='risk-card__score'>
-          <Text>{displayTeam.risks[0]?.value ?? -2.4}</Text>
-          <Text>影响评分</Text>
-        </View>
-        <Icon name='chevron' color='#94a3b8' size={30} />
-      </View>
+      ) : null}
 
-      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
       <BottomNav active='teams' />
     </View>
   )

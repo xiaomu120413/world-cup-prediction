@@ -3,13 +3,15 @@ import re
 from datetime import date as date_cls, datetime, time, timedelta, timezone as utc_timezone
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID as ParsedUUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, and_, case, desc, func, or_, select, text
+from sqlalchemy import Select, and_, bindparam, case, desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.collectors.catalog import collection_catalog_summary
 from app.db.schema import (
+    ai_explanations,
     ai_insights,
     competition_stages,
     collector_runs,
@@ -23,6 +25,7 @@ from app.db.schema import (
     match_predictions,
     matches,
     news_items,
+    player_aliases,
     player_form_snapshots,
     players,
     prediction_snapshots,
@@ -101,12 +104,9 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.9,
         "label": "Mart Jürisoo international football results dataset",
     },
-    "local_sample": {
-        "trust_level": "sample_for_tests_only",
-        "default_confidence": 0.0,
-        "label": "Local sample data, forbidden in real-data validation",
-    },
 }
+
+BLOCKED_DATA_SOURCES = {"local_sample"}
 
 APPROVED_REAL_SOURCES = {
     "fifa",
@@ -488,7 +488,167 @@ class PublicDataRepository:
         return (
             select(scoreline_predictions)
             .where(scoreline_predictions.c.match_prediction_id == match_prediction_id)
-            .order_by(scoreline_predictions.c.rank.asc())
+            .order_by(scoreline_predictions.c.probability.desc(), scoreline_predictions.c.rank.asc())
+        )
+
+    @staticmethod
+    def match_identity_query(public_id: str) -> Select:
+        home = teams.alias("home_team")
+        away = teams.alias("away_team")
+        return (
+            select(
+                matches.c.id.label("match_uuid"),
+                matches.c.public_id,
+                matches.c.home_team_id,
+                matches.c.away_team_id,
+                home.c.name_zh.label("home_name"),
+                home.c.name_en.label("home_name_en"),
+                away.c.name_zh.label("away_name"),
+                away.c.name_en.label("away_name_en"),
+            )
+            .join(home, matches.c.home_team_id == home.c.id)
+            .join(away, matches.c.away_team_id == away.c.id)
+            .where(matches.c.public_id == public_id)
+            .limit(1)
+        )
+
+    @staticmethod
+    def latest_match_explanation_query(match_uuid) -> Select:
+        return (
+            select(ai_explanations)
+            .where(ai_explanations.c.target_type == "match", ai_explanations.c.target_id == match_uuid)
+            .order_by(desc(ai_explanations.c.generated_at))
+            .limit(1)
+        )
+
+    @staticmethod
+    def match_ai_insights_query(match_uuid, home_team_uuid, away_team_uuid, limit: int = 6) -> Select:
+        return (
+            select(ai_insights)
+            .where(
+                or_(
+                    ai_insights.c.match_id == match_uuid,
+                    ai_insights.c.team_id.in_([home_team_uuid, away_team_uuid]),
+                )
+            )
+            .order_by(desc(ai_insights.c.created_at))
+            .limit(limit)
+        )
+
+    @staticmethod
+    def player_detail_query(player_id: str) -> Select:
+        team = teams.alias("player_team")
+        normalized = player_id.strip().lower()
+        filters = [
+            func.lower(players.c.code) == normalized,
+            func.lower(players.c.name_zh) == normalized,
+            func.lower(players.c.name_en) == normalized,
+            select(player_aliases.c.id)
+            .where(
+                player_aliases.c.player_id == players.c.id,
+                or_(
+                    func.lower(player_aliases.c.alias) == normalized,
+                    func.lower(player_aliases.c.source_player_id) == normalized,
+                ),
+            )
+            .exists(),
+        ]
+        if normalized and not normalized.startswith(DONGQIUDI_PLAYER_CODE_PREFIX.lower()):
+            filters.append(func.lower(players.c.code) == f"{DONGQIUDI_PLAYER_CODE_PREFIX.lower()}{normalized}")
+        if len(normalized) >= 3:
+            pattern = f"%{player_id.strip()}%"
+            normalized_pattern = f"%{normalized}%"
+            accented_chars = "áàäâãåéèëêíìïîóòöôõúùüûçñ"
+            plain_chars = "aaaaaaeeeeiiiiooooouuuucn"
+            normalized_player_name_en = func.translate(
+                func.lower(players.c.name_en),
+                accented_chars,
+                plain_chars,
+            )
+            normalized_player_alias = func.translate(
+                func.lower(player_aliases.c.alias),
+                accented_chars,
+                plain_chars,
+            )
+            filters.extend(
+                [
+                    players.c.name_zh.ilike(pattern),
+                    players.c.name_en.ilike(pattern),
+                    normalized_player_name_en.like(normalized_pattern),
+                    select(player_aliases.c.id)
+                    .where(
+                        player_aliases.c.player_id == players.c.id,
+                        or_(
+                            player_aliases.c.alias.ilike(pattern),
+                            normalized_player_alias.like(normalized_pattern),
+                        ),
+                    )
+                    .exists(),
+                ]
+            )
+        try:
+            filters.append(players.c.id == ParsedUUID(player_id))
+        except (ValueError, TypeError):
+            pass
+        return (
+            select(
+                players.c.id.label("player_id"),
+                players.c.code.label("player_code"),
+                players.c.name_zh,
+                players.c.name_en,
+                players.c.position,
+                players.c.shirt_number,
+                players.c.birth_date,
+                players.c.club_name,
+                players.c.market_value_eur,
+                players.c.is_key_player,
+                players.c.quality_status.label("player_quality_status"),
+                players.c.updated_at.label("player_updated_at"),
+                team.c.id.label("team_uuid"),
+                team.c.code.label("team_code"),
+                team.c.name_zh.label("team_name_zh"),
+                team.c.name_en.label("team_name_en"),
+                team.c.confederation.label("team_confederation"),
+                team.c.fifa_rank.label("team_fifa_rank"),
+                team.c.elo_rating.label("team_elo_rating"),
+                team.c.market_value_eur.label("team_market_value_eur"),
+                team.c.quality_status.label("team_quality_status"),
+            )
+            .select_from(players.join(team, players.c.team_id == team.c.id))
+            .where(or_(*filters))
+            .order_by(
+                players.c.is_key_player.desc(),
+                players.c.market_value_eur.desc().nulls_last(),
+                players.c.updated_at.desc(),
+            )
+            .limit(1)
+        )
+
+    @staticmethod
+    def latest_player_form_query(player_uuid) -> Select:
+        return (
+            select(player_form_snapshots)
+            .where(player_form_snapshots.c.player_id == player_uuid)
+            .order_by(desc(player_form_snapshots.c.as_of_at))
+            .limit(1)
+        )
+
+    @staticmethod
+    def player_injuries_query(player_uuid, limit: int = 5) -> Select:
+        return (
+            select(injury_reports)
+            .where(injury_reports.c.player_id == player_uuid)
+            .order_by(desc(injury_reports.c.updated_at))
+            .limit(limit)
+        )
+
+    @staticmethod
+    def player_ai_insights_query(player_uuid, limit: int = 5) -> Select:
+        return (
+            select(ai_insights)
+            .where(ai_insights.c.player_id == player_uuid)
+            .order_by(desc(ai_insights.c.created_at))
+            .limit(limit)
         )
 
     @staticmethod
@@ -506,7 +666,7 @@ class PublicDataRepository:
             .join(teams, ranking_predictions.c.team_id == teams.c.id)
             .join(latest_snapshot, ranking_predictions.c.prediction_snapshot_id == latest_snapshot.c.snapshot_id)
             .where(and_(ranking_predictions.c.ranking_type == ranking_type))
-            .order_by(ranking_predictions.c.rank.asc())
+            .order_by(ranking_predictions.c.probability.desc(), ranking_predictions.c.rank.asc())
             .limit(limit)
         )
 
@@ -689,7 +849,7 @@ class PublicDataRepository:
     def get_real_data_audit(self) -> dict:
         missing_source_checks = self.missing_source_checks()
         source_quality = self.source_quality_summary()
-        local_sample_records = self.count_local_sample_records()
+        blocked_source_records = self.count_blocked_source_records()
         unapproved_source_links = sum(
             item["records"] for item in source_quality if item["source"] not in APPROVED_REAL_SOURCES
         )
@@ -698,10 +858,11 @@ class PublicDataRepository:
 
         return {
             "status": "pass"
-            if local_sample_records == 0 and missing_source_total == 0 and unapproved_source_links == 0
+            if blocked_source_records == 0 and missing_source_total == 0 and unapproved_source_links == 0
             else "needs_attention",
-            "no_sample_data": local_sample_records == 0,
-            "local_sample_records": local_sample_records,
+            "no_sample_data": blocked_source_records == 0,
+            "blocked_source_records": blocked_source_records,
+            "blocked_sources": sorted(BLOCKED_DATA_SOURCES),
             "all_canonical_data_has_source": missing_source_total == 0,
             "missing_source_checks": missing_source_checks,
             "approved_real_sources": sorted(APPROVED_REAL_SOURCES),
@@ -840,17 +1001,18 @@ class PublicDataRepository:
             for row in rows
         ]
 
-    def count_local_sample_records(self) -> int:
+    def count_blocked_source_records(self) -> int:
         return int(
             self.db.execute(
                 text(
                     """
                     select
-                        (select count(*) from raw_snapshots where source = 'local_sample') +
-                        (select count(*) from collector_runs where source = 'local_sample') +
-                        (select count(*) from data_source_links where source = 'local_sample')
+                        (select count(*) from raw_snapshots where source in :blocked_sources) +
+                        (select count(*) from collector_runs where source in :blocked_sources) +
+                        (select count(*) from data_source_links where source in :blocked_sources)
                     """
-                )
+                ).bindparams(bindparam("blocked_sources", expanding=True)),
+                {"blocked_sources": tuple(BLOCKED_DATA_SOURCES)},
             ).scalar_one()
         )
 
@@ -1287,6 +1449,249 @@ class PublicDataRepository:
             "generated_at": prediction.generated_at.isoformat(),
         }
 
+    def get_match_ai_report(self, public_id: str) -> dict | None:
+        identity = self.db.execute(self.match_identity_query(public_id)).mappings().first()
+        if identity is None:
+            return None
+
+        prediction = self.get_match_prediction(public_id)
+        explanation = self.db.execute(self.latest_match_explanation_query(identity.match_uuid)).mappings().first()
+        insights = self.db.execute(
+            self.match_ai_insights_query(identity.match_uuid, identity.home_team_id, identity.away_team_id)
+        ).mappings().all()
+        if explanation is None and prediction is None and not insights:
+            return None
+
+        generated_at = None
+        if explanation and explanation.generated_at:
+            generated_at = explanation.generated_at.isoformat()
+        elif prediction:
+            generated_at = prediction["generated_at"]
+        elif insights and insights[0].created_at:
+            generated_at = insights[0].created_at.isoformat()
+
+        return {
+            "match_id": public_id,
+            "title": explanation.title if explanation else self.match_report_title(identity),
+            "content": explanation.content if explanation else self.match_report_content(identity, prediction, insights),
+            "confidence_label": explanation.confidence_label
+            if explanation
+            else self.prediction_confidence_label(prediction["confidence"] if prediction else None),
+            "evidence": self.match_report_evidence(prediction, explanation, insights),
+            "probabilities": prediction["probabilities"] if prediction else None,
+            "expected_goals": prediction["expected_goals"] if prediction else None,
+            "scorelines": prediction["scorelines"][:5] if prediction else [],
+            "feature_sources": prediction["match_feature_sources"] if prediction else [],
+            "source": "ai_explanations" if explanation else "match_predictions",
+            "generated_at": generated_at,
+        }
+
+    @staticmethod
+    def match_report_title(identity) -> str:
+        return f"{identity.home_name or identity.home_name_en} vs {identity.away_name or identity.away_name_en} AI 赛前报告"
+
+    @staticmethod
+    def prediction_confidence_label(value: str | None) -> str:
+        if value == "high":
+            return "high"
+        if value == "medium":
+            return "medium"
+        if value == "low":
+            return "low"
+        return value or "unknown"
+
+    @staticmethod
+    def match_report_content(identity, prediction: dict | None, insights: list) -> str:
+        home = identity.home_name or identity.home_name_en
+        away = identity.away_name or identity.away_name_en
+        if prediction:
+            probabilities = prediction["probabilities"]
+            expected_goals = prediction["expected_goals"]
+            return (
+                f"{home} vs {away} 的赛前模型已生成：主队胜率 {probabilities['home_win']:.1%}，"
+                f"平局 {probabilities['draw']:.1%}，客队胜率 {probabilities['away_win']:.1%}；"
+                f"预期进球 {expected_goals['home']:.2f}-{expected_goals['away']:.2f}。"
+                f"报告基于已入库的比赛预测、比分模型和赛前特征证据生成。"
+            )
+        return (
+            f"{home} vs {away} 已有 AI 情报记录，但当前还没有生成比赛预测快照。"
+        )
+
+    @staticmethod
+    def numeric_value(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def match_report_evidence(self, prediction: dict | None, explanation, insights: list) -> list[dict]:
+        evidence = []
+        if explanation and isinstance(explanation.evidence_refs, list):
+            for item in explanation.evidence_refs[:6]:
+                if not isinstance(item, dict):
+                    continue
+                evidence.append(
+                    {
+                        "label": str(item.get("label") or item.get("source") or "evidence"),
+                        "value": self.numeric_value(item.get("value")) or 0,
+                        "note": str(item.get("note") or item.get("text") or "ai_explanations"),
+                    }
+                )
+        if prediction:
+            for item in (prediction.get("key_factors") or [])[:6]:
+                if not isinstance(item, dict):
+                    continue
+                evidence.append(
+                    {
+                        "label": str(item.get("label") or "feature"),
+                        "value": self.numeric_value(item.get("value")) or 0,
+                        "note": str(item.get("note") or "match_predictions"),
+                    }
+                )
+        for insight in insights[:6]:
+            evidence.append(
+                {
+                    "label": insight.impact_area or insight.event_type,
+                    "value": float(insight.impact_score),
+                    "note": insight.evidence_text,
+                    "source_url": insight.source_url,
+                    "confidence": float(insight.confidence),
+                }
+            )
+        return evidence[:8]
+
+    def get_player_detail(self, player_id: str) -> dict | None:
+        row = self.db.execute(self.player_detail_query(player_id)).mappings().first()
+        if row is None:
+            return None
+
+        form = self.db.execute(self.latest_player_form_query(row.player_id)).mappings().first()
+        injuries = self.db.execute(self.player_injuries_query(row.player_id)).mappings().all()
+        insights = self.db.execute(self.player_ai_insights_query(row.player_id)).mappings().all()
+        source_player_id = source_player_id_from_code(row.player_code)
+        updated_at = self.player_detail_updated_at(row, form, injuries, insights)
+
+        return {
+            "id": str(row.player_id),
+            "code": row.player_code,
+            "source_player_id": source_player_id,
+            "name": row.name_zh,
+            "name_en": row.name_en,
+            "team": {
+                "id": team_public_id(row.team_code, row.team_name_en),
+                "code": row.team_code,
+                "abbr": row.team_code,
+                "name": row.team_name_zh,
+                "name_en": row.team_name_en,
+                "confederation": row.team_confederation,
+                "fifa_rank": row.team_fifa_rank,
+                "elo_rating": safe_float(row.team_elo_rating),
+                "market_value_eur": safe_float(row.team_market_value_eur),
+                "quality_status": row.team_quality_status,
+            },
+            "position": row.position,
+            "shirt_number": row.shirt_number,
+            "birth_date": row.birth_date.isoformat() if row.birth_date else None,
+            "club": row.club_name,
+            "market_value_eur": safe_float(row.market_value_eur),
+            "is_key_player": row.is_key_player,
+            "profile_url": DONGQIUDI_PLAYER_PAGE_URL.format(person_id=source_player_id)
+            if source_player_id
+            else None,
+            "avatar_url": dongqiudi_player_avatar_url(source_player_id),
+            "form": self.player_detail_form_score(row, form),
+            "recent_form": self.player_recent_form_payload(form),
+            "injuries": self.player_injury_payloads(injuries),
+            "insights": self.player_insight_payloads(insights),
+            "quality_status": row.player_quality_status,
+            "data_sources": {
+                "player": "players",
+                "player_form": "player_form_snapshots" if form else None,
+                "injuries": "injury_reports" if injuries else None,
+                "insights": "ai_insights" if insights else None,
+            },
+            "updated_at": updated_at.isoformat() if updated_at else None,
+        }
+
+    def player_detail_form_score(self, row, form) -> float | None:
+        if form is None:
+            return None
+        return self.player_display_form_score_from_values(
+            form.form_score,
+            form.rating,
+            form.recent_matches,
+            form.goals,
+            form.assists,
+            row.market_value_eur,
+            form.availability_status,
+        )
+
+    @staticmethod
+    def player_recent_form_payload(form) -> dict | None:
+        if form is None:
+            return None
+        return {
+            "matches": form.recent_matches,
+            "minutes": form.minutes,
+            "goals": form.goals,
+            "assists": form.assists,
+            "shots": form.shots,
+            "key_passes": form.key_passes,
+            "rating": safe_float(form.rating),
+            "form_score": safe_float(form.form_score),
+            "availability": form.availability_status,
+            "source_count": form.source_count,
+            "as_of_at": form.as_of_at.isoformat() if form.as_of_at else None,
+        }
+
+    @staticmethod
+    def player_injury_payloads(rows: list) -> list[dict]:
+        return [
+            {
+                "id": str(row.id),
+                "report_type": row.report_type,
+                "status": row.status,
+                "impact_score": safe_float(row.impact_score),
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "expected_return_at": row.expected_return_at.isoformat() if row.expected_return_at else None,
+                "source_url": row.source_url,
+                "confidence": safe_float(row.confidence),
+                "evidence_text": row.evidence_text,
+                "is_model_eligible": row.is_model_eligible,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def player_insight_payloads(rows: list) -> list[dict]:
+        return [
+            {
+                "id": str(row.id),
+                "event_type": row.event_type,
+                "impact_area": row.impact_area,
+                "impact_score": safe_float(row.impact_score),
+                "confidence": safe_float(row.confidence),
+                "evidence_text": row.evidence_text,
+                "source_url": row.source_url,
+                "is_model_eligible": row.is_model_eligible,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def player_detail_updated_at(row, form, injuries: list, insights: list) -> datetime | None:
+        candidates = [row.player_updated_at]
+        if form and form.as_of_at:
+            candidates.append(form.as_of_at)
+        candidates.extend(item.updated_at for item in injuries if item.updated_at)
+        candidates.extend(item.created_at for item in insights if item.created_at)
+        values = [item for item in candidates if item is not None]
+        return max(values) if values else None
+
     def get_team_profile(self, team_id: str) -> dict | None:
         team_row = self.get_team_row(team_id)
         if team_row is None:
@@ -1617,20 +2022,40 @@ class PublicDataRepository:
 
     @staticmethod
     def player_display_form_score(row) -> float:
-        if row.form_score is not None:
-            return clamp_score(float(row.form_score), 0.0, 10.0)
-        if row.rating is not None:
-            return clamp_score(float(row.rating), 0.0, 10.0)
-        recent_matches = row.recent_matches or 0
-        goals = row.goals or 0
-        assists = row.assists or 0
-        market_value = float(row.market_value_eur or 0)
+        return PublicDataRepository.player_display_form_score_from_values(
+            row.form_score,
+            row.rating,
+            row.recent_matches,
+            row.goals,
+            row.assists,
+            row.market_value_eur,
+            row.availability_status,
+        )
+
+    @staticmethod
+    def player_display_form_score_from_values(
+        form_score,
+        rating,
+        recent_matches,
+        goals,
+        assists,
+        market_value_eur,
+        availability_status,
+    ) -> float:
+        if form_score is not None:
+            return clamp_score(float(form_score), 0.0, 10.0)
+        if rating is not None:
+            return clamp_score(float(rating), 0.0, 10.0)
+        recent_matches = recent_matches or 0
+        goals = goals or 0
+        assists = assists or 0
+        market_value = float(market_value_eur or 0)
         score = 5.6
         score += min(recent_matches, 20) * 0.04
         score += min(goals, 12) * 0.16
         score += min(assists, 10) * 0.12
         score += min(market_value, 100_000_000) / 100_000_000 * 0.8
-        if row.availability_status and row.availability_status != "available":
+        if availability_status and availability_status != "available":
             score -= 1.2
         return clamp_score(score, 4.8, 9.4)
 

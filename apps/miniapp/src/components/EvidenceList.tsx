@@ -1,5 +1,5 @@
 import { Text, View } from '@tarojs/components'
-import type { Evidence } from '@/services/mock'
+import type { Evidence } from '@/services/types'
 
 export function EvidenceList({ items }: { items: Evidence[] }) {
   if (!items.length) {

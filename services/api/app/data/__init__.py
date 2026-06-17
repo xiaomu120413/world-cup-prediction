@@ -1,2 +1,1 @@
-"""Mock data stores before PostgreSQL is connected."""
-
+"""Static metadata helpers used by the database-backed API."""

@@ -59,6 +59,72 @@ def scoreline_distribution(home_xg: float, away_xg: float, max_goals: int = 7) -
     return scorelines
 
 
+def outcome_key(home_goals: int, away_goals: int) -> str:
+    if home_goals > away_goals:
+        return "home_win"
+    if home_goals < away_goals:
+        return "away_win"
+    return "draw"
+
+
+def normalize_outcome_probabilities(probabilities: dict[str, float]) -> dict[str, float]:
+    home = max(0.0, float(probabilities.get("home_win", 0.0) or 0.0))
+    draw_value = max(0.0, float(probabilities.get("draw", 0.0) or 0.0))
+    away = max(0.0, float(probabilities.get("away_win", 0.0) or 0.0))
+    total = home + draw_value + away
+    if total <= 0:
+        return {"home_win": 1 / 3, "draw": 1 / 3, "away_win": 1 / 3}
+    return {"home_win": home / total, "draw": draw_value / total, "away_win": away / total}
+
+
+def calibrated_scoreline_distribution(
+    home_xg: float,
+    away_xg: float,
+    outcome_probabilities: dict[str, float],
+    max_goals: int = 7,
+) -> list[dict]:
+    base_scorelines = scoreline_distribution(home_xg, away_xg, max_goals=max_goals)
+    target = normalize_outcome_probabilities(outcome_probabilities)
+    outcome_totals = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
+    for item in base_scorelines:
+        outcome_totals[outcome_key(item["home_goals"], item["away_goals"])] += item["probability"]
+
+    calibrated = []
+    for item in base_scorelines:
+        outcome = outcome_key(item["home_goals"], item["away_goals"])
+        outcome_total = outcome_totals[outcome]
+        if outcome_total <= 0:
+            continue
+        calibrated.append(
+            {
+                "home_goals": item["home_goals"],
+                "away_goals": item["away_goals"],
+                "probability": item["probability"] / outcome_total * target[outcome],
+            }
+        )
+    calibrated.sort(key=lambda item: item["probability"], reverse=True)
+    return calibrated
+
+
+def expected_goals_from_scorelines(scorelines: list[dict]) -> tuple[float, float]:
+    total = sum(item["probability"] for item in scorelines) or 1.0
+    home_xg = sum(item["home_goals"] * item["probability"] for item in scorelines) / total
+    away_xg = sum(item["away_goals"] * item["probability"] for item in scorelines) / total
+    return round(home_xg, 2), round(away_xg, 2)
+
+
+def ranked_scorelines(scorelines: list[dict], limit: int = 4) -> list[dict]:
+    return [
+        {
+            "home_goals": item["home_goals"],
+            "away_goals": item["away_goals"],
+            "probability": round(item["probability"], 5),
+            "rank": index + 1,
+        }
+        for index, item in enumerate(scorelines[:limit])
+    ]
+
+
 def win_draw_loss_probabilities(home_xg: float, away_xg: float) -> dict[str, float]:
     scorelines = scoreline_distribution(home_xg, away_xg)
     home_win = sum(item["probability"] for item in scorelines if item["home_goals"] > item["away_goals"])
@@ -108,21 +174,13 @@ def key_factors(match: MatchInputs) -> list[dict]:
 def build_match_prediction(match: MatchInputs) -> dict:
     home_xg, away_xg = expected_goals(match)
     probabilities = win_draw_loss_probabilities(home_xg, away_xg)
-    top_scorelines = scoreline_distribution(home_xg, away_xg)[:4]
+    top_scorelines = scoreline_distribution(home_xg, away_xg)
     return {
         "probabilities": probabilities,
         "expected_goals": {"home": home_xg, "away": away_xg},
         "confidence": confidence_label(match),
         "key_factors": key_factors(match),
-        "scorelines": [
-            {
-                "home_goals": item["home_goals"],
-                "away_goals": item["away_goals"],
-                "probability": round(item["probability"], 5),
-                "rank": index + 1,
-            }
-            for index, item in enumerate(top_scorelines)
-        ],
+        "scorelines": ranked_scorelines(top_scorelines),
     }
 
 

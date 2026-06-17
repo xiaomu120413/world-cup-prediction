@@ -22,10 +22,15 @@ def test_latest_prediction_query_orders_by_generation_time():
     assert "LIMIT 1" in sql
 
 
+def test_scorelines_query_orders_by_probability():
+    sql = compile_query(PublicDataRepository.scorelines_query(uuid4()))
+    assert "ORDER BY scoreline_predictions.probability DESC, scoreline_predictions.rank ASC" in sql
+
+
 def test_rankings_query_filters_ranking_type():
     sql = compile_query(PublicDataRepository.rankings_query("champion", 20))
     assert "ranking_predictions.ranking_type = 'champion'" in sql
-    assert "ORDER BY ranking_predictions.rank ASC" in sql
+    assert "ORDER BY ranking_predictions.probability DESC, ranking_predictions.rank ASC" in sql
 
 
 def test_teams_query_filters_to_roster_teams():

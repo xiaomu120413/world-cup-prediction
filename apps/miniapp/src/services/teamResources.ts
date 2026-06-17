@@ -1,5 +1,3 @@
-import { emptyTeamProfile, type TeamProfile } from '@/services/mock'
-
 export type TeamResource = {
   id: string
   name: string
@@ -77,12 +75,6 @@ const teamByLookupKey = teamResources.reduce<Record<string, TeamResource>>((map,
   return map
 }, {})
 
-export const teamProfilesById: Record<string, TeamProfile> = {}
-
-export function getTeamIdByName(name?: string) {
-  return teamByLookupKey[normalizeTeamKey(name)]?.id || ''
-}
-
 export function getFlagCodeByTeamName(name: string) {
   return teamByLookupKey[normalizeTeamKey(name)]?.flagCode
 }
@@ -98,14 +90,4 @@ export function getTeamDisplayName(name?: string | null, nameEn?: string | null,
   if (byId) return byId.name
 
   return looksGarbled(name) ? nameEn || id || '球队待同步' : name || nameEn || id || '球队待同步'
-}
-
-export function getTeamProfileById(teamId = '') {
-  const resource = teamByLookupKey[normalizeTeamKey(teamId)]
-  return {
-    ...emptyTeamProfile,
-    id: teamId || emptyTeamProfile.id,
-    name: resource?.name || emptyTeamProfile.name,
-    subtitle: resource ? `${resource.nameEn} · 真实球队数据同步中` : emptyTeamProfile.subtitle
-  }
 }

@@ -23,6 +23,7 @@ services/api/.venv/
 services/api/.pytest_cache/
 services/api/**/__pycache__/
 services/api/exports/
+services/api/.tmp/
 
 # Logs
 npm-debug.log*

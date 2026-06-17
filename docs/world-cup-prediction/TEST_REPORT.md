@@ -102,7 +102,7 @@ H5 预览地址：`http://127.0.0.1:4173`
 | --- | --- |
 | `docker compose up -d postgres redis` | 通过，PostgreSQL 和 Redis 均 healthy |
 | `alembic upgrade head` | 通过，迁移到 `202606130001` |
-| `python scripts/init_db.py` | 通过，schema 幂等执行并插入 mock seed |
+| `python scripts/init_db.py` | 通过，schema 幂等执行，不插入 seed 数据 |
 | `RUN_DATABASE_TESTS=1 python -m pytest` | 通过，30 passed |
 | 临时 `DATA_BACKEND=database` API HTTP smoke | 通过 |
 
@@ -186,7 +186,7 @@ Test date: 2026-06-15
 | Test item | Result |
 | --- | --- |
 | `RUN_DATABASE_TESTS=1 python -m pytest` | Passed, 41 tests |
-| `python scripts/run_collector.py --source local_sample --source-type schedule` | Passed |
+| `python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run` | Passed |
 | `POST /api/admin/collectors/run` in database mode | 200, `status=completed` |
 | Idempotency check | Repeated schedule collector run did not duplicate `raw_snapshots` |
 
@@ -211,10 +211,10 @@ Test date: 2026-06-15
 | `python -m pytest tests/test_collectors.py` | Passed, 8 tests |
 | `python -m pytest` | Passed, 39 passed / 13 skipped |
 | `RUN_DATABASE_TESTS=1 python -m pytest tests/test_database_backend.py` | Passed, 13 tests |
-| `python scripts/run_collector.py --source local_sample --source-type schedule` | Passed, idempotent rerun |
-| `python scripts/run_collector.py --source local_sample --source-type standings` | Passed, idempotent rerun |
-| `python scripts/run_collector.py --source local_sample --source-type player_ranking` | Passed, idempotent rerun |
-| Canonical tables verified | `matches=1`, `group_standings=4`, `players=2`, `player_form_snapshots=2`, `team_aliases=13` |
+| `python scripts/run_collector.py --source thestatsapi --source-type fixtures --dry-run` | Passed |
+| `python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings --dry-run` | Passed |
+| `python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings --dry-run` | Passed |
+| Canonical tables verified | Real-source rows only; blocked source audit remains `0` |
 | Concurrent same collector job | Passed, advisory transaction lock prevents duplicate `group_standings` rows |
 
 Implementation notes:

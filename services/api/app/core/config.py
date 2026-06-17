@@ -9,11 +9,11 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     environment: str = "local"
     admin_token: str = "change-me"
-    allowed_origins: str = "http://127.0.0.1:4173,http://localhost:4173"
+    allowed_origins: str = "http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:5173,http://localhost:5173"
     data_backend: str = "database"
     database_url: str = "postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
-    cache_enabled: bool = False
-    cache_ttl_seconds: int = 60
+    cache_enabled: bool = True
+    cache_ttl_seconds: int = 300
     redis_url: str = "redis://127.0.0.1:6379/0"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

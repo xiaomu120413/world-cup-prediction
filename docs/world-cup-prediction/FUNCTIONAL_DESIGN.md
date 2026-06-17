@@ -406,7 +406,7 @@ MVP 不做复杂后台，先做命令和 admin API。
 步骤：
 
 ```text
-导入 mock/seed 数据
+导入真实赛程、积分榜、球员和历史比赛数据
 运行预测任务
 运行 AI 解读任务
 调用 GET /api/v1/home
@@ -468,9 +468,9 @@ collector_runs 成功
 
 1. 建 `services/api` FastAPI 骨架。
 2. 建 PostgreSQL schema 和 Alembic 迁移。
-3. 写 seed 数据导入脚本，把当前小程序 mock 数据入库。
+3. 写真实数据采集和历史数据导入脚本。
 4. 实现 public API。
-5. 小程序 service 层从 mock 切 API。
+5. 小程序 service 层接入真实 API。
 6. 实现采集任务框架。
 7. 实现 baseline 预测任务。
 8. 实现 AI 情报和解读任务。
@@ -484,4 +484,3 @@ collector_runs 成功
 - 复杂管理后台。
 - 完整球员详情页。
 - 盘口、赔率、下注相关功能。
-

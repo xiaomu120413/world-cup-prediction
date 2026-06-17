@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+import app.collectors.runner as collector_runner_module
 from app.collectors.adapters import RawSnapshot
 from app.collectors.runner import CollectorRunner
 from app.core.config import Settings
@@ -30,6 +31,68 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+TEST_FIXTURE_PAYLOADS = {
+    "schedule": {
+        "matches": [
+            {
+                "public_id": "usa-paraguay-2026-06-13",
+                "home": "USA",
+                "away": "PAR",
+                "kickoff_at": "2026-06-13T01:00:00+08:00",
+                "status": "scheduled",
+            }
+        ]
+    },
+    "standings": {
+        "groups": [
+            {
+                "code": "group-a",
+                "teams": [
+                    {"code": "FRA", "rank": 1, "points": 3},
+                    {"code": "BRA", "rank": 2, "points": 3},
+                    {"code": "USA", "rank": 3, "points": 0},
+                    {"code": "PAR", "rank": 4, "points": 0},
+                ],
+            }
+        ]
+    },
+    "player_ranking": {
+        "players": [
+            {"name": "fixture_forward", "team": "FRA", "goals": 3, "assists": 1},
+            {"name": "fixture_midfielder", "team": "BRA", "goals": 1, "assists": 2},
+        ]
+    },
+}
+
+
+class _FixtureAdapter:
+    source = "test_fixture"
+
+    def __init__(self, source_type: str):
+        self.source_type = source_type
+
+    def fetch(self) -> RawSnapshot:
+        return RawSnapshot(
+            source=self.source,
+            source_type=self.source_type,
+            source_url=None,
+            payload=TEST_FIXTURE_PAYLOADS[self.source_type],
+            parser_version="test_fixture_v1",
+        )
+
+
+@pytest.fixture(autouse=True)
+def test_fixture_collector_adapter(monkeypatch):
+    original_build_adapter = collector_runner_module.build_adapter
+
+    def build_adapter(source: str, source_type: str):
+        if source == "test_fixture":
+            return _FixtureAdapter(source_type)
+        return original_build_adapter(source, source_type)
+
+    monkeypatch.setattr(collector_runner_module, "build_adapter", build_adapter)
+
+
 def database_settings() -> Settings:
     return Settings(data_backend="database", database_url=os.environ["DATABASE_URL"])
 
@@ -47,9 +110,9 @@ def fixture_database_client():
         app.dependency_overrides.clear()
 
 
-def ensure_sample_match_with_prediction() -> None:
+def ensure_fixture_match_with_prediction() -> None:
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "schedule")
+        CollectorRunner(db).run("test_fixture", "schedule")
         BaselinePredictionService(db).recompute(
             scope="test",
             match_ids=["usa-paraguay-2026-06-13"],
@@ -58,7 +121,7 @@ def ensure_sample_match_with_prediction() -> None:
 
 
 def test_database_match_detail_contract(database_client):
-    ensure_sample_match_with_prediction()
+    ensure_fixture_match_with_prediction()
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13")
     assert response.status_code == 200
     body = response.json()["data"]
@@ -67,7 +130,7 @@ def test_database_match_detail_contract(database_client):
 
 
 def test_database_prediction_contract(database_client):
-    ensure_sample_match_with_prediction()
+    ensure_fixture_match_with_prediction()
     response = database_client.get("/api/v1/matches/usa-paraguay-2026-06-13/prediction")
     assert response.status_code == 200
     body = response.json()["data"]
@@ -92,8 +155,8 @@ def test_database_home_contract(database_client):
 
 def test_database_data_status_contract(database_client):
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "schedule")
-        CollectorRunner(db).run("local_sample", "player_ranking")
+        CollectorRunner(db).run("test_fixture", "schedule")
+        CollectorRunner(db).run("test_fixture", "player_ranking")
 
     response = database_client.get("/api/v1/data-status")
     assert response.status_code == 200
@@ -128,7 +191,7 @@ def test_database_rankings_contract(database_client):
 
 def test_database_team_profile_uses_player_form(database_client):
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "player_ranking")
+        CollectorRunner(db).run("test_fixture", "player_ranking")
 
     response = database_client.get("/api/v1/teams/france/profile")
     assert response.status_code == 200
@@ -155,8 +218,8 @@ def test_database_baseline_recompute_writes_outputs():
 
 def test_database_collector_writes_idempotent_raw_snapshot():
     with SessionLocal() as db:
-        first = CollectorRunner(db).run("local_sample", "schedule")
-        second = CollectorRunner(db).run("local_sample", "schedule")
+        first = CollectorRunner(db).run("test_fixture", "schedule")
+        second = CollectorRunner(db).run("test_fixture", "schedule")
 
     assert first["status"] == "completed"
     assert first["records_written"] in (0, 1)
@@ -167,7 +230,7 @@ def test_database_collector_writes_idempotent_raw_snapshot():
 
 def test_database_collector_normalizes_schedule_to_canonical_tables():
     with SessionLocal() as db:
-        result = CollectorRunner(db).run("local_sample", "schedule")
+        result = CollectorRunner(db).run("test_fixture", "schedule")
         match_exists = db.execute(
             select(func.count()).select_from(matches).where(matches.c.public_id == "usa-paraguay-2026-06-13")
         ).scalar_one()
@@ -182,12 +245,12 @@ def test_database_collector_normalizes_schedule_to_canonical_tables():
 
 def test_database_collector_records_schedule_source_links():
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "schedule")
+        CollectorRunner(db).run("test_fixture", "schedule")
         match_source = db.execute(
             select(data_source_links).where(
                 data_source_links.c.entity_type == "match",
                 data_source_links.c.entity_key == "usa-paraguay-2026-06-13",
-                data_source_links.c.source == "local_sample",
+                data_source_links.c.source == "test_fixture",
                 data_source_links.c.source_type == "schedule",
             )
         ).mappings().first()
@@ -196,7 +259,7 @@ def test_database_collector_records_schedule_source_links():
             .select_from(data_source_links)
             .where(
                 data_source_links.c.entity_type == "team",
-                data_source_links.c.source == "local_sample",
+                data_source_links.c.source == "test_fixture",
                 data_source_links.c.source_type == "schedule",
             )
         ).scalar_one()
@@ -209,9 +272,9 @@ def test_database_collector_records_schedule_source_links():
 
 def test_database_collector_normalizes_standings_idempotently():
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "standings")
+        CollectorRunner(db).run("test_fixture", "standings")
         first_count = db.execute(select(func.count()).select_from(group_standings)).scalar_one()
-        CollectorRunner(db).run("local_sample", "standings")
+        CollectorRunner(db).run("test_fixture", "standings")
         second_count = db.execute(select(func.count()).select_from(group_standings)).scalar_one()
 
     assert first_count >= 4
@@ -220,10 +283,10 @@ def test_database_collector_normalizes_standings_idempotently():
 
 def test_database_collector_normalizes_player_rankings_idempotently():
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "player_ranking")
+        CollectorRunner(db).run("test_fixture", "player_ranking")
         first_players = db.execute(select(func.count()).select_from(players)).scalar_one()
         first_forms = db.execute(select(func.count()).select_from(player_form_snapshots)).scalar_one()
-        CollectorRunner(db).run("local_sample", "player_ranking")
+        CollectorRunner(db).run("test_fixture", "player_ranking")
         second_players = db.execute(select(func.count()).select_from(players)).scalar_one()
         second_forms = db.execute(select(func.count()).select_from(player_form_snapshots)).scalar_one()
 
@@ -235,13 +298,13 @@ def test_database_collector_normalizes_player_rankings_idempotently():
 
 def test_database_collector_records_player_source_links():
     with SessionLocal() as db:
-        CollectorRunner(db).run("local_sample", "player_ranking")
+        CollectorRunner(db).run("test_fixture", "player_ranking")
         player_source_count = db.execute(
             select(func.count())
             .select_from(data_source_links)
             .where(
                 data_source_links.c.entity_type == "player",
-                data_source_links.c.source == "local_sample",
+                data_source_links.c.source == "test_fixture",
                 data_source_links.c.source_type == "player_ranking",
             )
         ).scalar_one()
@@ -250,7 +313,7 @@ def test_database_collector_records_player_source_links():
             .select_from(data_source_links)
             .where(
                 data_source_links.c.entity_type == "player_form",
-                data_source_links.c.source == "local_sample",
+                data_source_links.c.source == "test_fixture",
                 data_source_links.c.source_type == "player_ranking",
             )
         ).scalar_one()
@@ -262,7 +325,7 @@ def test_database_collector_records_player_source_links():
 def test_database_collector_serializes_concurrent_same_job():
     def run_job():
         with SessionLocal() as db:
-            return CollectorRunner(db).run("local_sample", "standings")
+            return CollectorRunner(db).run("test_fixture", "standings")
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: run_job(), range(2)))

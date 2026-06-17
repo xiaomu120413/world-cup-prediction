@@ -1,19 +1,14 @@
 import Taro from '@tarojs/taro'
 
-import {
-  championRankings,
-  championTop,
-  darkHorseRankings,
-  featuredMatch,
-  groupATeams,
-  semiFinalRankings,
-  upcomingMatches,
-  type GroupTeam,
-  type Match,
-  type RankingTeam,
-  type TeamProfile
-} from '@/services/mock'
-import { getTeamDisplayName, getTeamProfileById } from '@/services/teamResources'
+import type {
+  ChampionTopTeam,
+  GroupTeam,
+  Match,
+  RankingTeam,
+  TeamProfile,
+  UpcomingMatch
+} from '@/services/types'
+import { getTeamDisplayName } from '@/services/teamResources'
 
 type Envelope<T> = {
   data: T
@@ -216,7 +211,7 @@ type ApiGroupSimulation = {
 
 type ApiDataStatus = {
   backend: string
-  mode: 'mock' | 'database'
+  mode: 'database'
   canonical_ready: boolean
   player_form_ready: boolean
   primary_source?: string
@@ -243,8 +238,8 @@ export type DataSourceStatus = {
 
 export type HomeData = {
   featuredMatch: Match
-  upcomingMatches: Array<(typeof upcomingMatches)[number] & { status?: string; meta?: string }>
-  championTop: Array<(typeof championTop)[number] & { teamId?: string; meta?: string }>
+  upcomingMatches: Array<UpcomingMatch & { status?: string; meta?: string }>
+  championTop: Array<ChampionTopTeam & { teamId?: string; meta?: string }>
   updatedAt: string
   dataSourceStatus: DataSourceStatus
 }
@@ -274,16 +269,16 @@ export type GroupSummary = {
   summary?: string
 }
 
+export type TeamListItem = {
+  id: string
+  name: string
+  nameEn?: string
+  meta: string
+  probability?: number
+}
+
 const apiBaseUrl = __API_BASE_URL__.replace(/\/$/, '')
 const defaultMatchId = ''
-const mockDataSourceStatus: DataSourceStatus = {
-  label: '离线',
-  detail: '未连接后端',
-  isDatabase: false,
-  audit: '真实数据未同步',
-  counts: '无本地比赛数据',
-  freshness: '离线'
-}
 const homeDataCache = new Map<string, Promise<HomeData>>()
 const rankingDataCache = new Map<string, Promise<RankingData>>()
 const teamProfileCache = new Map<string, Promise<TeamProfile>>()
@@ -304,6 +299,12 @@ function shouldUseApi() {
   return Boolean(apiBaseUrl)
 }
 
+function requireApi() {
+  if (!shouldUseApi()) {
+    throw new Error('Real API base URL is required. Set TARO_APP_API_BASE_URL.')
+  }
+}
+
 function percent(value: number) {
   return Number((value * 100).toFixed(1))
 }
@@ -313,6 +314,10 @@ function percentFromApi(value?: number | null) {
   return value > 1 ? Number(value.toFixed(1)) : percent(value)
 }
 
+function sortApiRankingsByProbability(items: ApiRanking[]) {
+  return [...items].sort((a, b) => b.probability - a.probability || a.rank - b.rank)
+}
+
 function formatPercentText(value?: number | null) {
   return value === undefined || value === null ? '-' : `${percentFromApi(value)}%`
 }
@@ -320,13 +325,14 @@ function formatPercentText(value?: number | null) {
 function formatKickoff(iso: string) {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) {
-    return featuredMatch.time
+    return iso
   }
-  const month = date.getMonth() + 1
-  const day = date.getDate()
-  const hour = String(date.getHours()).padStart(2, '0')
-  const minute = String(date.getMinutes()).padStart(2, '0')
-  return `${month}月${day}日 ${hour}:${minute}`
+  const beijingDate = new Date(date.getTime() + 8 * 60 * 60 * 1000)
+  const month = beijingDate.getUTCMonth() + 1
+  const day = beijingDate.getUTCDate()
+  const hour = String(beijingDate.getUTCHours()).padStart(2, '0')
+  const minute = String(beijingDate.getUTCMinutes()).padStart(2, '0')
+  return `北京时间 ${month}月${day}日 ${hour}:${minute}`
 }
 
 function formatUpdatedAt(iso?: string) {
@@ -464,7 +470,16 @@ function formatEvidenceLabel(value: string) {
     roster_value: '阵容身价',
     lineup_stability: '阵容稳定',
     coach_record: '教练战绩',
-    historical_matchups: '历史交锋'
+    historical_matchups: '历史交锋',
+    scoreline_model: '比分模型',
+    model_xg_diff: '预期进球差',
+    context_market_value: '身价修正',
+    context_roster_output: '阵容输出',
+    context_home_availability: '主队可用性',
+    context_away_availability: '客队可用性',
+    context_home_unavailable: '主队缺阵',
+    context_away_unavailable: '客队缺阵',
+    context_weather_total: '天气影响'
   }
   return labelMap[value] || value
 }
@@ -483,7 +498,16 @@ function formatEvidenceNote(item: { label: string; note?: string }) {
     roster_value: '来自球员身价与阵容深度',
     lineup_stability: '来自阵容稳定性与出勤记录',
     coach_record: '来自主教练带队战绩',
-    historical_matchups: '来自双方历史交锋'
+    historical_matchups: '来自双方历史交锋',
+    scoreline_model: '独立比分模型生成比分矩阵',
+    model_xg_diff: '比分模型给出的双方预期进球差',
+    context_market_value: '结合双方阵容与市场身价差异',
+    context_roster_output: '结合球员近期进球和助攻贡献',
+    context_home_availability: '结合主队伤停和新闻信号',
+    context_away_availability: '结合客队伤停和新闻信号',
+    context_home_unavailable: '结合主队不可用球员数量',
+    context_away_unavailable: '结合客队不可用球员数量',
+    context_weather_total: '结合风速、降水和温度对总进球的影响'
   }
   return noteMap[item.label] || item.note || '来自赛前特征快照'
 }
@@ -496,8 +520,36 @@ function mapEvidenceItem(item: { label: string; value?: number; note?: string })
   }
 }
 
+function formatMatchInsight(
+  apiMatch: ApiMatch,
+  prediction: ApiPrediction | undefined,
+  report: ApiReport | undefined,
+  homeName: string,
+  awayName: string,
+  hasPrediction: boolean
+) {
+  const reportContent = report?.content
+  if (reportContent && !isMostlyEnglish(reportContent)) return reportContent
+  if (prediction?.probabilities && prediction.expected_goals) {
+    const probabilities = prediction.probabilities
+    const expectedGoals = prediction.expected_goals
+    return `${homeName} vs ${awayName} 的赛前模型已完成：${homeName}胜 ${percentFromApi(probabilities.home_win)}%，平局 ${percentFromApi(probabilities.draw)}%，${awayName}胜 ${percentFromApi(probabilities.away_win)}%；预期进球 ${expectedGoals.home.toFixed(2)}-${expectedGoals.away.toFixed(2)}。关键证据来自比分模型、阵容身价、球员输出、伤停信号和天气快照。`
+  }
+  if (apiMatch.ai_summary && !isMostlyEnglish(apiMatch.ai_summary)) return apiMatch.ai_summary
+  return hasPrediction
+    ? `${homeName} vs ${awayName} 已基于历史比分模型和真实上下文特征生成赛前预测。`
+    : `${homeName} vs ${awayName} 已从真实赛程源同步，预测、比分分布和 AI 证据等待后续任务生成。`
+}
+
 function formatOptionalPercent(value?: number | null) {
   return formatPercentText(value)
+}
+
+function isMostlyEnglish(value?: string) {
+  if (!value) return false
+  const asciiLetters = (value.match(/[A-Za-z]/g) || []).length
+  const chineseChars = (value.match(/[\u4e00-\u9fff]/g) || []).length
+  return asciiLetters > 20 && chineseChars === 0
 }
 
 function formatStatus(status: string, homeScore?: number | null, awayScore?: number | null) {
@@ -582,8 +634,7 @@ function formatQuality(value?: string | null) {
   const qualityMap: Record<string, string> = {
     source: '真实源',
     derived: '派生',
-    manual_verified: '人工核验',
-    mock: '测试样本'
+    manual_verified: '人工核验'
   }
   return value ? qualityMap[value] || value : '质量待标注'
 }
@@ -623,6 +674,14 @@ function formatPlayerRole(value?: string | null) {
     D: '后卫'
   }
   return roleMap[normalized] || value || '-'
+}
+
+function playerRoleIcon(value?: string | null): 'ball' | 'defense' | 'shield' | 'stability' {
+  const normalized = (value || '').trim().toUpperCase()
+  if (['FW', 'FORWARD', 'ST', 'LW', 'RW', 'F'].includes(normalized)) return 'ball'
+  if (['DF', 'DEFENDER', 'CB', 'LB', 'RB', 'D'].includes(normalized)) return 'defense'
+  if (['GK', 'GOALKEEPER'].includes(normalized)) return 'shield'
+  return 'stability'
 }
 
 function playerDataPoints(player: ApiTeamProfile['key_players'][number]) {
@@ -738,10 +797,12 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
   const homeWin = probabilities?.home_win ?? embeddedPrediction?.home_win_prob
   const draw = probabilities?.draw ?? embeddedPrediction?.draw_prob
   const awayWin = probabilities?.away_win ?? embeddedPrediction?.away_win_prob
-  const scorelines = prediction?.scorelines?.map(item => ({
-    score: item.score || `${item.home_goals ?? '-'}-${item.away_goals ?? '-'}`,
-    probability: item.probability > 1 ? item.probability : percent(item.probability)
-  })) || []
+  const scorelines = prediction?.scorelines
+    ?.map(item => ({
+      score: item.score || `${item.home_goals ?? '-'}-${item.away_goals ?? '-'}`,
+      probability: item.probability > 1 ? item.probability : percent(item.probability)
+    }))
+    .sort((a, b) => b.probability - a.probability) || []
   const score = formatScore(apiMatch.home_score, apiMatch.away_score)
   const expectedGoals = prediction?.expected_goals
     ? `预期进球 ${prediction.expected_goals.home.toFixed(2)}-${prediction.expected_goals.away.toFixed(2)}`
@@ -755,7 +816,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     home: homeName,
     away: awayName,
     time: formatKickoff(apiMatch.kickoff_at),
-    stage: formatStageLabel(apiMatch.stage || featuredMatch.stage),
+    stage: formatStageLabel(apiMatch.stage),
     venue: formatVenue(apiMatch),
     status: formatStatus(apiMatch.status, apiMatch.home_score, apiMatch.away_score),
     versionLabel: formatPredictionVersion(hasPrediction, apiMatch.status),
@@ -766,7 +827,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     sourceConfidence: sourceConfidence === undefined ? undefined : percentFromApi(sourceConfidence),
     modelStatus,
     expectedGoals,
-    insight: report?.content || apiMatch.ai_summary || (hasPrediction ? `${homeName} vs ${awayName} 已基于历史赛果小模型和上下文特征校准生成预测。` : `${homeName} vs ${awayName} 已从真实赛程源同步，预测、比分分布和 AI 证据等待后续任务生成。`),
+    insight: formatMatchInsight(apiMatch, prediction, report, homeName, awayName, hasPrediction),
     dataPoints: [
       { label: '赛程状态', value: `${formatStatus(apiMatch.status, apiMatch.home_score, apiMatch.away_score)} · ${formatSourceConfidence(sourceConfidence)}` },
       { label: homeName, value: formatTeamMeta(apiMatch.home_team) },
@@ -784,24 +845,13 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
 }
 
 export async function getDataStatus(): Promise<DataSourceStatus> {
-  if (!shouldUseApi()) {
-    return mockDataSourceStatus
-  }
-
+  requireApi()
   const response = await requestData<ApiDataStatus>('/api/v1/data-status')
   return mapDataStatus(response.data)
 }
 
 async function loadHomeData(): Promise<HomeData> {
-  if (!shouldUseApi()) {
-    return {
-      featuredMatch,
-      upcomingMatches,
-      championTop,
-      dataSourceStatus: mockDataSourceStatus,
-      updatedAt: '更新时间待同步'
-    }
-  }
+  requireApi()
 
   const [response, status] = await Promise.all([
     requestData<{
@@ -827,12 +877,13 @@ async function loadHomeData(): Promise<HomeData> {
         meta: formatStageLabel(match.stage)
       }
     }),
-    championTop: response.data.champion_rankings.map(item => ({
-      teamId: item.team.id,
-      name: displayTeam(item.team),
-      probability: percentFromApi(item.probability),
-      meta: formatTeamMeta(item.team)
-    })),
+    championTop: sortApiRankingsByProbability(response.data.champion_rankings)
+      .map(item => ({
+        teamId: item.team.id,
+        name: displayTeam(item.team),
+        probability: percentFromApi(item.probability),
+        meta: formatTeamMeta(item.team)
+      })),
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
     dataSourceStatus: status
   }
@@ -843,12 +894,7 @@ export async function getHomeData(): Promise<HomeData> {
 }
 
 export async function getMatchData(matchId = defaultMatchId): Promise<{ match: Match; updatedAt: string }> {
-  if (!shouldUseApi()) {
-    return {
-      match: featuredMatch,
-      updatedAt: '更新时间待同步'
-    }
-  }
+  requireApi()
 
   let resolvedMatchId = matchId
   if (!resolvedMatchId) {
@@ -869,18 +915,12 @@ export async function getMatchData(matchId = defaultMatchId): Promise<{ match: M
 }
 
 async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Promise<RankingData> {
-  if (!shouldUseApi()) {
-    const rankings = type === 'semifinal' ? semiFinalRankings : type === 'darkhorse' ? darkHorseRankings : championRankings
-    return {
-      rankings,
-      updatedAt: '更新时间待同步',
-      source: '等待后端真实预测'
-    }
-  }
+  requireApi()
 
   const response = await requestData<ApiRanking[]>(`/api/v1/predictions/rankings?type=${type}`)
+  const rankings = sortApiRankingsByProbability(response.data)
   return {
-    rankings: response.data.map((item, index) => ({
+    rankings: rankings.map((item, index) => ({
       teamId: item.team.id,
       rank: index + 1,
       name: displayTeam(item.team),
@@ -899,9 +939,7 @@ export async function getRankingData(type: 'champion' | 'semifinal' | 'darkhorse
 }
 
 export async function getGroupList(): Promise<GroupSummary[]> {
-  if (!shouldUseApi()) {
-    return []
-  }
+  requireApi()
 
   const response = await requestData<ApiGroupSummary[]>('/api/v1/groups')
   return response.data
@@ -915,26 +953,37 @@ export async function getGroupList(): Promise<GroupSummary[]> {
     .sort((a, b) => groupSortValue(a.id) - groupSortValue(b.id))
 }
 
-async function resolveTeamId(teamId = '') {
-  if (teamId) {
-    return teamId
-  }
+export async function getTeamList(): Promise<TeamListItem[]> {
+  requireApi()
 
-  const response = await requestData<ApiTeam[]>('/api/v1/teams')
-  return response.data[0]?.id || ''
+  const [teamsResponse, rankings] = await Promise.all([
+    requestData<ApiTeam[]>('/api/v1/teams'),
+    getRankingData('champion')
+  ])
+  const probabilityById = new Map<string, number>()
+  rankings.rankings.forEach(team => {
+    if (team.teamId) {
+      probabilityById.set(team.teamId, team.probability)
+    }
+  })
+
+  return teamsResponse.data.map(team => ({
+    id: team.id,
+    name: displayTeam(team),
+    nameEn: team.name_en || undefined,
+    meta: formatTeamMeta(team),
+    probability: probabilityById.get(team.id)
+  }))
 }
 
 async function loadTeamProfile(teamId = ''): Promise<TeamProfile> {
-  if (!shouldUseApi()) {
-    return getTeamProfileById(teamId)
+  requireApi()
+
+  if (!teamId) {
+    throw new Error('A real team id is required.')
   }
 
-  const resolvedTeamId = await resolveTeamId(teamId)
-  if (!resolvedTeamId) {
-    return getTeamProfileById(teamId)
-  }
-
-  const response = await requestData<ApiTeamProfile>(`/api/v1/teams/${resolvedTeamId}/profile`)
+  const response = await requestData<ApiTeamProfile>(`/api/v1/teams/${teamId}/profile`)
   const group = response.data.group
   const teamName = displayTeam(response.data.team)
   const groupName = group?.name ? formatGroupName(group.id, group.name) : response.data.team.confederation || '小组待同步'
@@ -990,6 +1039,7 @@ async function loadTeamProfile(teamId = ''): Promise<TeamProfile> {
     players: response.data.key_players.map(player => ({
       name: player.name,
       role: formatPlayerRole(player.role || player.position),
+      roleIcon: playerRoleIcon(player.role || player.position),
       form: normalizePlayerScore(player.form || player.recent_form?.form_score || player.recent_form?.rating),
       avatarUrl: player.avatar_url || undefined,
       meta: player.name_en || undefined,
@@ -1026,16 +1076,7 @@ export async function getTeamProfile(teamId = ''): Promise<TeamProfile> {
 }
 
 export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
-  if (!shouldUseApi()) {
-    return {
-      id: groupId,
-      title: '小组形势',
-      subtitle: '真实积分榜待同步',
-      summary: '连接后端后展示真实积分榜和出线模拟；当前仅显示小组数据待同步空态。',
-      teams: groupATeams,
-      updatedAt: '更新时间待同步'
-    }
-  }
+  requireApi()
 
   const [detailResponse, simulationResponse] = await Promise.all([
     requestData<ApiGroupDetail>(`/api/v1/groups/${groupId}`),

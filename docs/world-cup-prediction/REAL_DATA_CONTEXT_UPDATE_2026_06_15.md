@@ -94,7 +94,7 @@ python scripts/audit_real_data.py
 Current audit result:
 
 - `status=pass`
-- `local_sample_records=0`
+- `blocked_source_records=0`
 - all `*_without_source=0`
 - `team_stat_snapshots_without_source=0`
 - `ai_insights_without_source=0`

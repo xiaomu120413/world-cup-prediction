@@ -1,7 +1,8 @@
+from datetime import UTC, datetime
+
 from app.collectors.adapters import (
     DongqiudiHomepageAdapter,
     DongqiudiWorldCupDataAdapter,
-    LocalSampleAdapter,
     RawSnapshot,
     TheStatsApiFixturesAdapter,
     build_adapter,
@@ -9,20 +10,82 @@ from app.collectors.adapters import (
 from app.collectors.catalog import COLLECTOR_CATALOG, collection_catalog_summary
 from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
 from app.collectors.runner import CollectorRunner, snapshot_checksum
+from scripts.collect_dongqiudi_match_context import parse_kickoff
 
 
-def test_local_sample_adapter_fetches_schedule_snapshot():
-    snapshot = LocalSampleAdapter("schedule").fetch()
+def schedule_snapshot() -> RawSnapshot:
+    return RawSnapshot(
+        source="test_fixture",
+        source_type="schedule",
+        source_url=None,
+        payload={
+            "matches": [
+                {
+                    "public_id": "usa-paraguay-2026-06-13",
+                    "home": "USA",
+                    "away": "PAR",
+                    "kickoff_at": "2026-06-13T01:00:00+08:00",
+                    "status": "scheduled",
+                }
+            ]
+        },
+        parser_version="test_fixture_v1",
+    )
 
-    assert snapshot.source == "local_sample"
+
+def standings_snapshot() -> RawSnapshot:
+    return RawSnapshot(
+        source="test_fixture",
+        source_type="standings",
+        source_url=None,
+        payload={
+            "groups": [
+                {
+                    "code": "group-a",
+                    "teams": [
+                        {"code": "FRA", "rank": 1, "points": 3},
+                        {"code": "BRA", "rank": 2, "points": 3},
+                        {"code": "USA", "rank": 3, "points": 0},
+                        {"code": "PAR", "rank": 4, "points": 0},
+                    ],
+                }
+            ]
+        },
+        parser_version="test_fixture_v1",
+    )
+
+
+def player_ranking_snapshot() -> RawSnapshot:
+    return RawSnapshot(
+        source="test_fixture",
+        source_type="player_ranking",
+        source_url=None,
+        payload={
+            "players": [
+                {"name": "fixture_forward", "team": "FRA", "goals": 3, "assists": 1},
+                {"name": "fixture_midfielder", "team": "BRA", "goals": 1, "assists": 2},
+            ]
+        },
+        parser_version="test_fixture_v1",
+    )
+
+
+def test_test_fixture_schedule_snapshot_shape():
+    snapshot = schedule_snapshot()
+
+    assert snapshot.source == "test_fixture"
     assert snapshot.source_type == "schedule"
     assert len(snapshot.payload["matches"]) == 1
 
 
 def test_snapshot_checksum_is_stable():
-    snapshot = LocalSampleAdapter("schedule").fetch()
+    snapshot = schedule_snapshot()
 
     assert snapshot_checksum(snapshot) == snapshot_checksum(snapshot)
+
+
+def test_dongqiudi_schedule_start_play_is_parsed_as_utc():
+    assert parse_kickoff("2026-06-16 22:00:00") == datetime(2026, 6, 16, 22, 0, tzinfo=UTC)
 
 
 def test_runner_counts_all_top_level_list_records():
@@ -339,7 +402,7 @@ def test_news_items_from_dongqiudi_snapshot():
 
 
 def test_canonical_records_from_schedule_snapshot():
-    snapshot = LocalSampleAdapter("schedule").fetch()
+    snapshot = schedule_snapshot()
 
     records = canonical_records_from_snapshot(snapshot)
 
@@ -383,7 +446,7 @@ def test_canonical_records_from_dongqiudi_homepage_matches():
 
 
 def test_canonical_records_from_standings_snapshot():
-    snapshot = LocalSampleAdapter("standings").fetch()
+    snapshot = standings_snapshot()
 
     records = canonical_records_from_snapshot(snapshot)
 
@@ -431,7 +494,7 @@ def test_canonical_records_from_real_standings_create_team_forms():
 
 
 def test_canonical_records_from_player_ranking_snapshot():
-    snapshot = LocalSampleAdapter("player_ranking").fetch()
+    snapshot = player_ranking_snapshot()
 
     records = canonical_records_from_snapshot(snapshot)
 

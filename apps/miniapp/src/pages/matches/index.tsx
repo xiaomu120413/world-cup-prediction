@@ -7,24 +7,7 @@ import { ProbabilitySummary } from '@/components/ProbabilitySummary'
 import { ProgressRow } from '@/components/ProgressRow'
 import { Section } from '@/components/Section'
 import { getHomeData, type HomeData, type LoadState } from '@/services/data'
-import { championTop, featuredMatch, upcomingMatches } from '@/services/mock'
-import { getTeamIdByName } from '@/services/teamResources'
 import { goTo, routes } from '@/utils/navigation'
-
-const fallbackHome: HomeData = {
-  featuredMatch,
-  upcomingMatches,
-  championTop,
-  dataSourceStatus: {
-    label: '本地样例',
-    detail: '设计稿还原',
-    isDatabase: false,
-    audit: '用于布局验收',
-    counts: '5屏样例数据',
-    freshness: '数据更新于 18:00'
-  },
-  updatedAt: '数据更新于 18:00'
-}
 
 function splitKickoff(value: string) {
   const match = value.match(/^(.+)\s+(\d{2}:\d{2})$/)
@@ -34,12 +17,8 @@ function splitKickoff(value: string) {
   return { date: match[1], clock: match[2] }
 }
 
-function shouldUseDesignMatch(match: HomeData['featuredMatch']) {
-  return !match.probabilities.length || match.id === 'pending-match' || match.home.includes('待')
-}
-
 export default function MatchesPage() {
-  const [homeData, setHomeData] = useState<HomeData>(fallbackHome)
+  const [homeData, setHomeData] = useState<HomeData | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('idle')
 
   useEffect(() => {
@@ -53,7 +32,7 @@ export default function MatchesPage() {
       })
       .catch(() => {
         if (!mounted) return
-        setHomeData(fallbackHome)
+        setHomeData(null)
         setLoadState('error')
       })
 
@@ -63,20 +42,26 @@ export default function MatchesPage() {
   }, [])
 
   const display = useMemo(() => {
-    const focus = shouldUseDesignMatch(homeData.featuredMatch) ? featuredMatch : homeData.featuredMatch
+    if (!homeData) return null
     return {
-      match: focus,
-      upcoming: homeData.upcomingMatches.length ? homeData.upcomingMatches : upcomingMatches,
-      champions: homeData.championTop.length ? homeData.championTop : championTop,
-      updatedAt: homeData.updatedAt && !homeData.updatedAt.includes('待') ? homeData.updatedAt : '数据更新于 18:00'
+      match: homeData.featuredMatch,
+      upcoming: homeData.upcomingMatches,
+      champions: homeData.championTop,
+      updatedAt: homeData.updatedAt
     }
   }, [homeData])
+
+  const openMatchDetail = () => {
+    if (display?.match.id) {
+      goTo(`${routes.matchDetail}?matchId=${display.match.id}`)
+    }
+  }
 
   return (
     <View className='page page--matchday design-page'>
       <View className='app-header app-header--home'>
         <Text className='app-title'>世界杯预测</Text>
-        <View className='header-ai' onClick={() => goTo(`${routes.matchDetail}?matchId=${display.match.id}`)}>
+        <View className='header-ai' onClick={openMatchDetail}>
           <Icon name='ai' color='#2563eb' size={30} />
           <Text>AI 赛前报告</Text>
         </View>
@@ -85,56 +70,62 @@ export default function MatchesPage() {
       <View className='home-meta-row'>
         <View className='subline'>
           <View className='subline__bar' />
-          <Text>今日赛程 · 6月13日</Text>
+          <Text>真实赛程</Text>
         </View>
         <View className='updated-line updated-line--right'>
           <Icon name='clock' color='#6b7280' size={26} />
-          <Text>{display.updatedAt}</Text>
+          <Text>{display?.updatedAt || (loadState === 'loading' ? '加载真实数据' : '等待真实数据')}</Text>
         </View>
       </View>
 
-      <View className='focus-card' onClick={() => goTo(`${routes.matchDetail}?matchId=${display.match.id}`)}>
-        <View className='focus-card__top'>
-          <Text className='card-eyebrow'>今日重点</Text>
-        </View>
-
-        <View className='fixture fixture--hero'>
-          <View className='fixture__team'>
-            <Flag team={display.match.home} size='lg' />
-            <Text className='fixture__name'>{display.match.home}</Text>
+      {display?.match ? (
+        <View className='focus-card' onClick={openMatchDetail}>
+          <View className='focus-card__top'>
+            <Text className='card-eyebrow'>今日重点</Text>
           </View>
-          <View className='fixture__middle'>
-            <Text className='match-version-pill'>{display.match.versionLabel || '最终赛前版'}</Text>
-            <Text className='fixture__vs'>VS</Text>
-            <Text className='fixture__time'>{display.match.time}</Text>
-            <Text className='fixture__venue'>{display.match.venue}</Text>
-          </View>
-          <View className='fixture__team fixture__team--away'>
-            <Flag team={display.match.away} size='lg' />
-            <Text className='fixture__name'>{display.match.away}</Text>
-          </View>
-        </View>
 
-        <ProbabilitySummary probabilities={display.match.probabilities} />
-
-        <View className='home-report-strip'>
-          <View className='home-report-strip__head'>
-            <View className='report-mini-icon'>
-              <Icon name='chart' color='#2563eb' size={32} />
+          <View className='fixture fixture--hero'>
+            <View className='fixture__team'>
+              <Flag team={display.match.home} size='lg' />
+              <Text className='fixture__name'>{display.match.home}</Text>
             </View>
-            <Text className='home-report-strip__confidence'>{display.match.confidence}</Text>
-            <View className='home-report-strip__divider' />
-            <Text className='home-report-strip__text'>{display.match.insight}</Text>
+            <View className='fixture__middle'>
+              <Text className='match-version-pill'>{display.match.versionLabel || display.match.status}</Text>
+              <Text className='fixture__vs'>VS</Text>
+              <Text className='fixture__time'>{display.match.time}</Text>
+              <Text className='fixture__venue'>{display.match.venue}</Text>
+            </View>
+            <View className='fixture__team fixture__team--away'>
+              <Flag team={display.match.away} size='lg' />
+              <Text className='fixture__name'>{display.match.away}</Text>
+            </View>
           </View>
-          <View className='report-link report-link--plain'>
-            <Text>查看 AI 赛前报告</Text>
-            <Icon name='chevron' color='#2563eb' size={30} />
+
+          <ProbabilitySummary probabilities={display.match.probabilities} />
+
+          <View className='home-report-strip'>
+            <View className='home-report-strip__head'>
+              <View className='report-mini-icon'>
+                <Icon name='chart' color='#2563eb' size={32} />
+              </View>
+              <Text className='home-report-strip__confidence'>{display.match.confidence}</Text>
+              <View className='home-report-strip__divider' />
+              <Text className='home-report-strip__text'>{display.match.insight}</Text>
+            </View>
+            <View className='report-link report-link--plain'>
+              <Text>查看 AI 赛前报告</Text>
+              <Icon name='chevron' color='#2563eb' size={30} />
+            </View>
           </View>
         </View>
-      </View>
+      ) : (
+        <View className='empty-state'>
+          <Text>{loadState === 'loading' ? '正在加载真实首页数据' : '真实首页数据不可用'}</Text>
+        </View>
+      )}
 
       <Section title='即将开始' action='全部赛程' onAction={() => goTo(routes.matches)}>
-        {display.upcoming.map(item => {
+        {display?.upcoming.length ? display.upcoming.map(item => {
           const kickoff = splitKickoff(item.time)
           return (
             <View className='match-row match-row--schedule' key={item.id} onClick={() => goTo(`${routes.matchDetail}?matchId=${item.id}`)}>
@@ -159,15 +150,19 @@ export default function MatchesPage() {
               </View>
             </View>
           )
-        })}
+        }) : <View className='empty-state'><Text>暂无真实赛程数据</Text></View>}
       </Section>
 
       <Section title='冠军概率' action='查看完整榜单' onAction={() => goTo(routes.predictions)}>
-        {display.champions.map((team, index) => (
+        {display?.champions.length ? display.champions.map((team, index) => (
           <View
             className='champion-row'
-            key={team.name}
-            onClick={() => goTo(`${routes.teamDetail}?teamId=${team.teamId || getTeamIdByName(team.name)}&source=home&rankingType=champion`)}
+            key={team.teamId || team.name}
+            onClick={() => {
+              if (team.teamId) {
+                goTo(`${routes.teamDetail}?teamId=${team.teamId}&source=home&rankingType=champion`)
+              }
+            }}
           >
             <View className={`rank-medal rank-medal--${index + 1}`}>
               <Text>{index + 1}</Text>
@@ -184,11 +179,11 @@ export default function MatchesPage() {
               {team.delta !== undefined ? `${team.delta >= 0 ? '▲' : '▼'} ${Math.abs(team.delta)}%` : ''}
             </Text>
           </View>
-        ))}
-        <Text className='section-footnote'>较昨日变化</Text>
+        )) : <View className='empty-state'><Text>暂无真实冠军概率数据</Text></View>}
+        <Text className='section-footnote'>来自后端真实预测快照</Text>
       </Section>
 
-      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
       <BottomNav active='matches' />
     </View>
   )

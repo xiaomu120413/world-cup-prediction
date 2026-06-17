@@ -14,16 +14,7 @@ import {
   type HomeData,
   type LoadState
 } from '@/services/data'
-import { getTeamIdByName } from '@/services/teamResources'
-import {
-  getFallbackGroupData,
-  getFallbackGroupMatches,
-  getFallbackGroupSummaries
-} from '@/services/tournamentStructure'
 import { goTo, routes } from '@/utils/navigation'
-
-const fallbackGroup = getFallbackGroupData()
-const fallbackMatches = getFallbackGroupMatches()
 
 function getRouteGroupId() {
   const params = Taro.getCurrentInstance().router?.params
@@ -37,32 +28,33 @@ function qualificationTone(value: number) {
   return 'danger'
 }
 
+function compactBeijingTime(value: string) {
+  return value.replace(/^北京时间\s*(\d{1,2})月(\d{1,2})日\s*/, (_match, month, day) => `北京 ${month}/${day} `)
+}
+
 export default function GroupsPage() {
   const [activeGroupId, setActiveGroupId] = useState(getRouteGroupId)
   const [groups, setGroups] = useState<GroupSummary[]>([])
-  const [groupData, setGroupData] = useState<GroupData>(fallbackGroup)
-  const [keyMatches, setKeyMatches] = useState<HomeData['upcomingMatches']>(fallbackMatches)
+  const [groupData, setGroupData] = useState<GroupData | null>(null)
+  const [keyMatches, setKeyMatches] = useState<HomeData['upcomingMatches']>([])
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const mountedRef = useRef(true)
 
   const refreshGroupData = useCallback((groupId = activeGroupId) => {
-    const fallbackForGroup = getFallbackGroupData(groupId)
-    const fallbackMatchesForGroup = getFallbackGroupMatches(groupId)
     setLoadState('loading')
     Promise.all([getGroupData(groupId), getHomeData()])
       .then(([data, home]) => {
         if (!mountedRef.current) return
-        const resolvedGroup = data.teams.length && !data.summary.includes('待同步') ? data : fallbackForGroup
-        setGroupData(resolvedGroup)
-        const teamNames = new Set(resolvedGroup.teams.map(team => team.name))
+        setGroupData(data)
+        const teamNames = new Set(data.teams.map(team => team.name))
         const filtered = home.upcomingMatches.filter(match => teamNames.has(match.home) || teamNames.has(match.away)).slice(0, 2)
-        setKeyMatches(filtered.length ? filtered : fallbackMatchesForGroup)
+        setKeyMatches(filtered)
         setLoadState('ready')
       })
       .catch(() => {
         if (!mountedRef.current) return
-        setGroupData(fallbackForGroup)
-        setKeyMatches(fallbackMatchesForGroup)
+        setGroupData(null)
+        setKeyMatches([])
         setLoadState('error')
       })
   }, [activeGroupId])
@@ -73,7 +65,7 @@ export default function GroupsPage() {
       .then(list => {
         if (!mountedRef.current) return
         setGroups(list)
-        if (list.length && !list.some(group => group.id === activeGroupId) && !getFallbackGroupSummaries().some(group => group.id === activeGroupId)) {
+        if (list.length && !list.some(group => group.id === activeGroupId)) {
           setActiveGroupId(list[0].id)
         }
       })
@@ -90,32 +82,12 @@ export default function GroupsPage() {
     refreshGroupData(activeGroupId)
   }, [activeGroupId, refreshGroupData])
 
-  const displayGroup = useMemo(() => {
-    const fallbackForGroup = getFallbackGroupData(activeGroupId)
-    const completed = groupData.matchesFinished ?? fallbackForGroup.matchesFinished ?? 2
-    const total = groupData.matchesTotal ?? fallbackForGroup.matchesTotal ?? 6
-    return {
-      ...groupData,
-      teams: groupData.teams.length ? groupData.teams : fallbackForGroup.teams,
-      subtitle: `小组赛 · 已完成 ${completed}/${total} 场`,
-      updatedAt: groupData.updatedAt && !groupData.updatedAt.includes('待') ? groupData.updatedAt : fallbackForGroup.updatedAt,
-      summary: groupData.summary && !groupData.summary.includes('待') ? groupData.summary : fallbackForGroup.summary
-    }
-  }, [activeGroupId, groupData])
-
-  const groupOptions = useMemo(() => {
-    const merged = new Map(getFallbackGroupSummaries().map(group => [group.id, group]))
-    groups.forEach(group => {
-      const fallback = merged.get(group.id)
-      merged.set(group.id, fallback ? { ...fallback, ...group } : group)
-    })
-    return getFallbackGroupSummaries().map(group => merged.get(group.id) || group)
-  }, [groups])
+  const displayGroup = useMemo(() => groupData, [groupData])
 
   const selectGroup = useCallback((group: GroupSummary) => {
     setActiveGroupId(group.id)
-    setGroupData(getFallbackGroupData(group.id))
-    setKeyMatches(getFallbackGroupMatches(group.id))
+    setGroupData(null)
+    setKeyMatches([])
   }, [])
 
   return (
@@ -125,9 +97,9 @@ export default function GroupsPage() {
           <Icon name='back' color='#0f172a' size={34} />
         </View>
         <View className='top-bar__title'>
-          <Text className='app-title app-title--sm'>{displayGroup.title}</Text>
-          <Text className='page-head__subtitle'>{displayGroup.subtitle}</Text>
-          <Text className='page-head__subtitle'>{displayGroup.updatedAt}</Text>
+          <Text className='app-title app-title--sm'>{displayGroup?.title || '小组形势'}</Text>
+          <Text className='page-head__subtitle'>{displayGroup?.subtitle || '等待真实小组数据'}</Text>
+          <Text className='page-head__subtitle'>{displayGroup?.updatedAt || '-'}</Text>
         </View>
         <View className='icon-button icon-button--plain' onClick={() => refreshGroupData(activeGroupId)}>
           <Icon name='refresh' color='#0f172a' size={34} />
@@ -137,10 +109,10 @@ export default function GroupsPage() {
       <View className='group-hub'>
         <View className='group-hub__head'>
           <Text className='group-hub__title'>全部小组</Text>
-          <Text className='group-hub__meta'>点击查看具体小组形势</Text>
+          <Text className='group-hub__meta'>来自后端真实小组列表</Text>
         </View>
         <View className='group-switcher group-switcher--compact'>
-          {groupOptions.map(group => (
+          {groups.length ? groups.map(group => (
             <View
               key={group.id}
               className={`group-switcher__item ${activeGroupId === group.id ? 'group-switcher__item--active' : ''}`}
@@ -149,7 +121,7 @@ export default function GroupsPage() {
               <Text className='group-switcher__name'>{group.name}</Text>
               <Text className='group-switcher__progress'>{group.matchesFinished}/{group.matchesTotal}</Text>
             </View>
-          ))}
+          )) : <View className='empty-state'><Text>暂无真实小组列表</Text></View>}
         </View>
       </View>
 
@@ -159,7 +131,7 @@ export default function GroupsPage() {
             <Icon name='spark' color='#2563eb' size={38} />
             <Text>AI 小组判断</Text>
           </View>
-          <Text className='group-ai-card__text'>{displayGroup.summary}</Text>
+          <Text className='group-ai-card__text'>{displayGroup?.summary || '暂无真实小组判断数据。'}</Text>
         </View>
         <View className='group-ai-card__badge'>
           <Icon name='ai' color='#2563eb' size={54} />
@@ -170,17 +142,16 @@ export default function GroupsPage() {
         <View className='table-header table-header--group'>
           <Text>排名</Text>
           <Text>球队</Text>
-          <Text>胜/平/负</Text>
+          <Text>胜 平 负</Text>
           <Text>积分</Text>
-          <Text>进/失</Text>
+          <Text>进 失</Text>
         </View>
-        {displayGroup.teams.map(team => (
+        {displayGroup?.teams.length ? displayGroup.teams.map(team => (
           <View
             className='table-row table-row--group'
-            key={team.name}
+            key={team.teamId || team.name}
             onClick={() => {
-              const teamId = team.teamId || getTeamIdByName(team.name)
-              if (teamId) goTo(`${routes.teamDetail}?teamId=${teamId}&source=groups&groupId=${activeGroupId}`)
+              if (team.teamId) goTo(`${routes.teamDetail}?teamId=${team.teamId}&source=groups&groupId=${activeGroupId}`)
             }}
           >
             <Text className='table-row__rank'>{team.rank}</Text>
@@ -192,13 +163,13 @@ export default function GroupsPage() {
             <Text className='table-row__points'>{team.points}</Text>
             <Text className='table-row__meta'>{team.goals}</Text>
           </View>
-        ))}
+        )) : <View className='empty-state'><Text>暂无真实积分榜数据</Text></View>}
       </Section>
 
       <Section title='出线概率' action='晋级规则'>
         <View className='qualification-list'>
-          {displayGroup.teams.map(team => (
-            <View className='qualification-row' key={team.name}>
+          {displayGroup?.teams.length ? displayGroup.teams.map(team => (
+            <View className='qualification-row' key={team.teamId || team.name}>
               <View className='qualification-row__team'>
                 <Flag team={team.name} size='sm' />
                 <Text>{team.name}</Text>
@@ -211,18 +182,12 @@ export default function GroupsPage() {
               </View>
               <Text className={`qualification-row__value qualification-row__value--${qualificationTone(team.qualification)}`}>{team.qualification}%</Text>
             </View>
-          ))}
-        </View>
-        <View className='legend-row legend-row--design'>
-          <Text className='legend-dot legend-dot--safe'>优势显著</Text>
-          <Text className='legend-dot legend-dot--warn'>形势胶着</Text>
-          <Text className='legend-dot legend-dot--danger'>出线困难</Text>
-          <Text className='legend-dot legend-dot--muted'>基本无望</Text>
+          )) : <View className='empty-state'><Text>暂无真实出线概率数据</Text></View>}
         </View>
       </Section>
 
       <Section title='关键赛程' action='全部赛程' onAction={() => goTo(routes.matches)}>
-        {(keyMatches.length ? keyMatches : fallbackMatches).map(match => (
+        {keyMatches.length ? keyMatches.map(match => (
           <View className='group-match-row' key={match.id} onClick={() => goTo(`${routes.matchDetail}?matchId=${match.id}`)}>
             <View className='group-match-row__team'>
               <Flag team={match.home} size='sm' />
@@ -234,15 +199,15 @@ export default function GroupsPage() {
               <Flag team={match.away} size='sm' />
             </View>
             <View className='group-match-row__time'>
-              <Text>{match.meta || match.tendency || '第3轮'}</Text>
-              <Text>{match.time}</Text>
+              <Text>{match.meta || match.tendency}</Text>
+              <Text>{compactBeijingTime(match.time)}</Text>
             </View>
           </View>
-        ))}
-        <Text className='section-footnote section-footnote--center'>赛程时间均为当地时间</Text>
+        )) : <View className='empty-state'><Text>暂无该小组真实关键赛程</Text></View>}
+        <Text className='section-footnote section-footnote--center'>赛程来自后端真实接口</Text>
       </Section>
 
-      {loadState === 'error' ? <Text className='data-note'>后端未连接，当前使用设计稿样例数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
       <BottomNav active='groups' />
     </View>
   )

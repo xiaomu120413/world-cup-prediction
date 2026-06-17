@@ -26,7 +26,7 @@
 - 场地、天气、海拔、草皮
 - AI 新闻结构化情报
 
-原则：所有“还没真实来源”的数据，页面和模型都要标记为 `sample_or_partial` 或 `missing_real_source`，不能伪装成真实数据。
+原则：所有“还没真实来源”的数据，页面和模型都要标记为 `unverified_records` 或 `missing_real_source`，不能伪装成真实数据。
 
 ## 2. 数据分层
 
@@ -373,9 +373,9 @@ $env:RUN_DATABASE_TESTS="1"; python -m pytest tests/test_database_backend.py
 ```powershell
 python scripts/run_collector.py --source dongqiudi --source-type homepage --dry-run
 python scripts/run_collector.py --source dongqiudi --source-type homepage
-python scripts/run_collector.py --source local_sample --source-type schedule
-python scripts/run_collector.py --source local_sample --source-type standings
-python scripts/run_collector.py --source local_sample --source-type player_ranking
+python scripts/run_collector.py --source thestatsapi --source-type fixtures --dry-run
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_standings --dry-run
+python scripts/run_collector.py --source dongqiudi --source-type world_cup_player_rankings --dry-run
 ```
 
 API smoke：
@@ -397,7 +397,7 @@ select source, count(*) from news_items group by 1;
 
 ## 11. 下一步执行顺序
 
-1. 保持现有懂球帝首页采集稳定，补解析测试样本。
+1. 保持现有懂球帝首页采集稳定，补解析测试用例。
 2. TheStatsAPI fixtures 已接入；下一步补官方/人工校验字段，包括 stadium 容量、海拔、草皮。
 3. 懂球帝世界杯积分榜已接入；后续接官方/授权积分源做交叉校验。
 4. 懂球帝球员榜已接入；下一步补球员分钟、评分、可用状态和国家队名单。
@@ -414,7 +414,7 @@ select source, count(*) from news_items group by 1;
 
 - `matches`、`venues`、`players`、`player_form_snapshots`、`team_form_snapshots`、`group_standings`、`news_items` 不允许存在没有来源链接的记录。
 - 每条来源链接必须包含 `entity_type`、`entity_key`、`source`、`source_type`、`source_url`、`raw_snapshot_id`、`confidence`。
-- 测试样例源 `local_sample` 只能用于自动化测试，不能保留在本地真实数据验收库。
+- 阻断源写入必须为 `0`；上线库只能包含批准的真实来源。
 - 采集或历史导入后必须运行 `services/api/scripts/backfill_data_source_links.py`，确认所有 `*_without_source` 检查为 `0`。
 
 当前本地真实库快照：
@@ -428,7 +428,7 @@ select source, count(*) from news_items group by 1;
 - `team_stat_snapshots=868`、`team_stat_metrics=45`：懂球帝 `cid=61` 球队榜指标结构化落库，覆盖红牌、黄牌、犯规、射门、传球、评分、身价等模型候选特征。
 - `news_items=221`：懂球帝首页、Guardian、BBC、ESPN、FOX Sports。
 - `ai_insights=67`：由 `build_ai_news_insights.py` 从已入库新闻抽取，包含伤病、停赛、阵容、名单、教练、训练和战术信号，其中 `8` 条达到 `is_model_eligible=true`。
-- `data_source_links=12471`，`local_sample_source_links=0`。
+- `data_source_links=12471`，阻断源记录为 `0`。
 
 ## 2026-06-15 Foundation Data Enrichment
 
@@ -464,11 +464,9 @@ python services/api/scripts/audit_real_data.py
 - `public_api`：Open-Meteo 等公开 API，默认置信度约 `0.85`。
 - `public_source`：懂球帝页面或 sport-data，默认置信度约 `0.80`，适合中文补充和状态榜单。
 - `manual_verified`：人工核验后的场馆静态信息，默认置信度约 `0.90`。
-- `sample_for_tests_only`：`local_sample` 只能用于自动化测试，真实库中必须为 `0`。
-
 当前硬性约束：
 
-- `local_sample` 在真实库中的 raw/source links/collector runs 必须为 `0`。
+- 阻断源在真实库中的 raw/source links/collector runs 必须为 `0`。
 - 所有 canonical 数据必须能在 `data_source_links` 查到来源。
 - `data_source_links.confidence` 必须随来源写入，接口 `/api/v1/data-status` 返回 `real_data_audit.source_quality`。
 - 伤停/停赛只有在可信新闻或授权源达到阈值后才写入 `injury_reports`，不能用猜测补齐。

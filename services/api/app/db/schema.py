@@ -494,7 +494,7 @@ match_predictions = Table(
     Column("feature_missing_count", Integer),
     Column("feature_sources", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("generated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
-    CheckConstraint("inference_mode in ('baseline', 'context_calibrated', 'history_core_fallback', 'history_core')", name="inference_mode_valid"),
+    CheckConstraint("inference_mode in ('baseline', 'context_calibrated', 'history_core_fallback', 'history_core', 'scoreline_model')", name="inference_mode_valid"),
     CheckConstraint("home_win_prob >= 0 and home_win_prob <= 1", name="home_win_prob_range"),
     CheckConstraint("draw_prob >= 0 and draw_prob <= 1", name="draw_prob_range"),
     CheckConstraint("away_win_prob >= 0 and away_win_prob <= 1", name="away_win_prob_range"),

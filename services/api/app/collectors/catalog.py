@@ -212,17 +212,17 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             },
             {
                 "domain": "standings",
-                "status": "partial_real" if dongqiudi_standings > 0 else ("sample_or_partial" if standings > 0 else "missing_real_source"),
+                "status": "partial_real" if dongqiudi_standings > 0 else ("unverified_records" if standings > 0 else "missing_real_source"),
                 "current_source": "dongqiudi/world_cup_standings"
                 if dongqiudi_standings > 0
-                else ("local_sample_or_seed" if standings > 0 else None),
+                else ("unverified_database_records" if standings > 0 else None),
                 "target_tables": ["group_standings"],
             },
             {
                 "domain": "player_form",
                 "status": "partial_real"
                 if dongqiudi_player_rankings > 0 or dongqiudi_roster_players > 0
-                else ("sample_or_partial" if players > 0 and player_forms > 0 else "missing_real_source"),
+                else ("unverified_records" if players > 0 and player_forms > 0 else "missing_real_source"),
                 "current_source": ", ".join(
                     value
                     for value in [
@@ -232,7 +232,7 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
                     if value
                 )
                 if dongqiudi_player_rankings > 0 or dongqiudi_roster_players > 0
-                else ("local_sample_or_seed" if players > 0 and player_forms > 0 else None),
+                else ("unverified_database_records" if players > 0 and player_forms > 0 else None),
                 "target_tables": ["players", "player_form_snapshots"],
             },
             {

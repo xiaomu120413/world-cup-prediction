@@ -1,5 +1,5 @@
 import { Text, View } from '@tarojs/components'
-import type { Scoreline } from '@/services/mock'
+import type { Scoreline } from '@/services/types'
 
 export function ScorelineDistribution({ items }: { items: Scoreline[] }) {
   if (!items.length) {

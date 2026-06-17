@@ -60,10 +60,10 @@ alembic upgrade head
 Or initialize the schema directly:
 
 ```bash
-python scripts/init_db.py --no-seed
+python scripts/init_db.py
 ```
 
-The first migration reuses `db/migrations/001_initial_schema.sql`. Mock seed data remains available only for isolated local experiments and contract-test fixtures.
+The first migration reuses `db/migrations/001_initial_schema.sql`. Runtime data must come from real collectors, historical imports or recomputation scripts.
 
 Run PostgreSQL-backed integration tests:
 
@@ -75,23 +75,24 @@ python -m pytest tests/test_database_backend.py
 
 ## Cache
 
-Public database-backed read routes support optional Redis JSON caching.
+Public database-backed read routes cache JSON responses by default. Redis is preferred when available; if Redis is unavailable, the API uses a short in-process TTL cache so hot UI reads do not repeatedly hit PostgreSQL.
 
-The cache is disabled by default:
+Default local values:
 
 ```text
-CACHE_ENABLED=false
+CACHE_ENABLED=true
+CACHE_TTL_SECONDS=300
 ```
 
-To enable it with the bundled Docker Compose Redis service:
+With the bundled Docker Compose Redis service:
 
 ```powershell
 $env:CACHE_ENABLED="true"
-$env:CACHE_TTL_SECONDS="60"
+$env:CACHE_TTL_SECONDS="300"
 $env:REDIS_URL="redis://127.0.0.1:63791/0"
 ```
 
-If Redis is unavailable, the API falls back to direct repository reads.
+If Redis is unavailable, the in-process cache is used for the same TTL.
 
 ## Prediction Recompute
 
@@ -119,20 +120,7 @@ curl -X POST http://127.0.0.1:8000/api/admin/predictions/recompute `
 
 ## Collectors
 
-Run the local sample collector to verify the raw snapshot and collector run flow:
-
-```powershell
-$env:DATABASE_URL="postgresql+psycopg://worldcup:worldcup@127.0.0.1:54321/worldcup_prediction"
-python scripts/run_collector.py --source local_sample --source-type schedule
-```
-
-Supported sample source types:
-
-```text
-schedule
-standings
-player_ranking
-```
+Collectors write source snapshots and normalized records into PostgreSQL. Public API routes do not run collectors; they only read already ingested data.
 
 The first real low-frequency source adapter is also available:
 
@@ -318,16 +306,16 @@ The scheduler writes its own `collector_runs` records with `source=scheduler` an
 Admin API trigger:
 
 ```powershell
-curl -X POST http://127.0.0.1:8000/api/admin/collectors/run `
+curl -X POST http://127.0.0.1:8001/api/admin/collectors/run `
   -H "Authorization: Bearer change-me" `
   -H "Content-Type: application/json" `
-  -d '{"source":"local_sample","source_type":"schedule"}'
+  -d '{"source":"dongqiudi","source_type":"homepage","dry_run":true}'
 ```
 
 Refresh scheduler API trigger:
 
 ```powershell
-curl -X POST http://127.0.0.1:8000/api/admin/refresh/run `
+curl -X POST http://127.0.0.1:8001/api/admin/refresh/run `
   -H "Authorization: Bearer change-me" `
   -H "Content-Type: application/json" `
   -d '{"cadence":"daily_12","dry_run":true}'
@@ -335,4 +323,4 @@ curl -X POST http://127.0.0.1:8000/api/admin/refresh/run `
 
 ## Notes
 
-Set `DATA_BACKEND=database` to read supported routes from PostgreSQL after schema and seed data are initialized.
+Set `DATA_BACKEND=database` to read supported routes from PostgreSQL after schema and real source data are initialized.
