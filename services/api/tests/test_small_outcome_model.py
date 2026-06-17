@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.predictions.service import DEFAULT_PREDICTION_MODEL_VERSION, DEFAULT_SMALL_MODEL_VERSION
+from app.predictions.service import DEFAULT_PREDICTION_MODEL_VERSION, DEFAULT_SCORELINE_MODEL_VERSION, DEFAULT_SMALL_MODEL_VERSION
 from app.predictions.small_outcome_model import (
     HistoricalMatch,
     FEATURE_NAMES,
@@ -183,9 +183,9 @@ def test_calibration_gate_accepts_model_no_worse_than_elo_baseline():
     assert gate["reason"] is None
 
 
-def test_default_prediction_model_uses_p0_small_outcome_pipeline():
-    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SMALL_MODEL_VERSION
-    assert DEFAULT_PREDICTION_MODEL_VERSION.startswith("small_outcome")
+def test_small_outcome_pipeline_remains_available_when_scoreline_is_default():
+    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SCORELINE_MODEL_VERSION
+    assert DEFAULT_SMALL_MODEL_VERSION.startswith("small_outcome")
 
 
 def make_state():

@@ -199,6 +199,18 @@ def test_health():
     assert response.json()["status"] == "ok"
 
 
+def test_local_h5_preview_origin_is_allowed():
+    response = client.options(
+        "/api/v1/home",
+        headers={
+            "Origin": "http://127.0.0.1:5174",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5174"
+
+
 def test_home_contract():
     response = client.get("/api/v1/home")
     assert response.status_code == 200

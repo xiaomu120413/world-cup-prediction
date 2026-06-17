@@ -514,6 +514,42 @@ scoreline_predictions = Table(
     UniqueConstraint("match_prediction_id", "home_goals", "away_goals", name="uq_scoreline_predictions_match_score"),
 )
 
+prediction_reviews = Table(
+    "prediction_reviews",
+    metadata,
+    uuid_pk(),
+    Column("match_prediction_id", UUID(as_uuid=True), ForeignKey("match_predictions.id", ondelete="CASCADE"), nullable=False),
+    Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id", ondelete="CASCADE"), nullable=False),
+    Column("prediction_snapshot_id", UUID(as_uuid=True), ForeignKey("prediction_snapshots.id", ondelete="CASCADE"), nullable=False),
+    Column("model_version_id", UUID(as_uuid=True), ForeignKey("model_versions.id"), nullable=False),
+    Column("actual_outcome", VARCHAR(16), nullable=False),
+    Column("actual_home_goals", Integer, nullable=False),
+    Column("actual_away_goals", Integer, nullable=False),
+    Column("home_win_prob", Numeric(6, 5), nullable=False),
+    Column("draw_prob", Numeric(6, 5), nullable=False),
+    Column("away_win_prob", Numeric(6, 5), nullable=False),
+    Column("actual_outcome_prob", Numeric(8, 6), nullable=False),
+    Column("predicted_outcome", VARCHAR(16), nullable=False),
+    Column("predicted_outcome_prob", Numeric(8, 6), nullable=False),
+    Column("predicted_outcome_correct", Boolean, nullable=False),
+    Column("log_loss", Numeric(10, 6), nullable=False),
+    Column("brier_score", Numeric(10, 6), nullable=False),
+    Column("calibration_bucket", Integer, nullable=False),
+    Column("actual_scoreline_prob", Numeric(8, 6)),
+    Column("top_scoreline_hit", Boolean),
+    Column("review_metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("reviewed_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("actual_outcome in ('home_win', 'draw', 'away_win')", name="actual_outcome_valid"),
+    CheckConstraint("predicted_outcome in ('home_win', 'draw', 'away_win')", name="predicted_outcome_valid"),
+    CheckConstraint("actual_outcome_prob >= 0 and actual_outcome_prob <= 1", name="actual_outcome_prob_range"),
+    CheckConstraint("predicted_outcome_prob >= 0 and predicted_outcome_prob <= 1", name="predicted_outcome_prob_range"),
+    CheckConstraint("calibration_bucket >= 0 and calibration_bucket <= 9", name="calibration_bucket_range"),
+    UniqueConstraint("match_prediction_id", name="uq_prediction_reviews_match_prediction"),
+)
+Index("idx_prediction_reviews_model", prediction_reviews.c.model_version_id, prediction_reviews.c.reviewed_at.desc())
+Index("idx_prediction_reviews_snapshot", prediction_reviews.c.prediction_snapshot_id)
+Index("idx_prediction_reviews_match", prediction_reviews.c.match_id)
+
 group_standings = Table(
     "group_standings",
     metadata,
@@ -587,12 +623,17 @@ ai_insights = Table(
     Column("player_id", UUID(as_uuid=True), ForeignKey("players.id")),
     Column("match_id", UUID(as_uuid=True), ForeignKey("matches.id")),
     Column("impact_area", VARCHAR(64), nullable=False),
+    Column("importance", VARCHAR(32), nullable=False, server_default=text("'rotation'")),
+    Column("impact_direction", VARCHAR(16), nullable=False, server_default=text("'neutral'")),
     Column("impact_score", Numeric(5, 2), nullable=False),
+    Column("impact_value_source", VARCHAR(32), nullable=False, server_default=text("'rule_mapping'")),
     Column("confidence", Numeric(4, 3), nullable=False),
     Column("evidence_text", Text, nullable=False),
     Column("source_url", Text),
     Column("is_model_eligible", Boolean, nullable=False, server_default=text("false")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("importance in ('core', 'key', 'rotation')", name="ai_insights_importance_valid"),
+    CheckConstraint("impact_direction in ('positive', 'negative', 'neutral')", name="ai_insights_impact_direction_valid"),
 )
 
 ai_explanations = Table(

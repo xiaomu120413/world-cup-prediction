@@ -100,6 +100,7 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
             ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_player_rankings"),
             "Current tournament player ranking stats",
         ),
+        RefreshTask("prediction_review", ("scripts/review_predictions.py",), "Review finished-match predictions"),
         RefreshTask("world_cup_team_details", ("scripts/collect_dongqiudi_team_details.py",), "Roster, market values, coaches and team ranking metrics", 1800),
         RefreshTask("fifa_mens_world_ranking", ("scripts/collect_fifa_rankings.py",), "FIFA rankings"),
         RefreshTask("verified_injuries", ("scripts/collect_verified_injuries.py",), "Verified injury and suspension signals"),
@@ -124,6 +125,7 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
             ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_player_rankings"),
             "Midday tournament player ranking stats",
         ),
+        RefreshTask("prediction_review", ("scripts/review_predictions.py",), "Review finished-match predictions"),
         RefreshTask("venue_weather", ("scripts/enrich_foundation_data.py",), "Venue weather snapshots and foundation enrichment"),
         RefreshTask(
             "world_cup_48_national_team_matches",
@@ -159,6 +161,7 @@ REFRESH_PLANS: dict[Cadence, tuple[RefreshTask, ...]] = {
             ("scripts/run_collector.py", "--source", "dongqiudi", "--source-type", "world_cup_player_rankings"),
             "Post-match player ranking stats",
         ),
+        RefreshTask("prediction_review", ("scripts/review_predictions.py",), "Review finished-match predictions"),
         RefreshTask("public_news_rss", ("scripts/collect_public_news.py", "--mode", "matchday"), "Matchday news refresh"),
         RefreshTask("ai_news_insights", ("scripts/build_ai_news_insights.py", "--limit", "120"), "Structured AI news insights"),
         RefreshTask("identity_mapping_backfill", ("scripts/backfill_identity_mappings.py",), "Backfill canonical team and player identity mappings"),

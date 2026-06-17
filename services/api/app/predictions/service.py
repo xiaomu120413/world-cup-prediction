@@ -65,7 +65,7 @@ from scripts.train_small_outcome_model import (
 API_TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_17"
 DEFAULT_SCORELINE_MODEL_VERSION = "scoreline_poisson_context_2026_06_17"
-DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SMALL_MODEL_VERSION
+DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SCORELINE_MODEL_VERSION
 TRAIN_END = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 TEST_START = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")

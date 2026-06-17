@@ -32,6 +32,8 @@ class EventRule:
     event_type: str
     impact_area: str
     keywords: tuple[str, ...]
+    importance: str
+    impact_direction: str
     impact_score: float
     base_confidence: float
     model_eligible: bool
@@ -61,6 +63,8 @@ EVENT_RULES = (
             "退出",
             "无缘",
         ),
+        "key",
+        "negative",
         -0.8,
         0.72,
         True,
@@ -69,6 +73,8 @@ EVENT_RULES = (
         "suspension",
         "availability",
         ("suspended", "suspension", "ban", "banned", "red card", "停赛", "禁赛", "红牌"),
+        "key",
+        "negative",
         -0.7,
         0.72,
         True,
@@ -77,6 +83,8 @@ EVENT_RULES = (
         "fitness",
         "availability",
         ("fit", "fitness", "returned to training", "back in training", "恢复训练", "复出", "伤愈"),
+        "rotation",
+        "positive",
         0.25,
         0.64,
         False,
@@ -85,6 +93,8 @@ EVENT_RULES = (
         "lineup",
         "lineup",
         ("lineup", "line-up", "starting xi", "starting lineup", "bench", "首发", "阵容", "替补"),
+        "rotation",
+        "neutral",
         0.2,
         0.62,
         False,
@@ -93,6 +103,8 @@ EVENT_RULES = (
         "squad",
         "squad",
         ("squad", "call up", "called up", "replacement", "roster", "名单", "征召", "补招", "大名单"),
+        "rotation",
+        "positive",
         0.15,
         0.62,
         False,
@@ -101,6 +113,8 @@ EVENT_RULES = (
         "coach_comment",
         "coach",
         ("coach", "manager", "press conference", "主教练", "教练", "发布会"),
+        "rotation",
+        "neutral",
         0.05,
         0.58,
         False,
@@ -109,6 +123,8 @@ EVENT_RULES = (
         "training",
         "preparation",
         ("training", "trained", "session", "训练", "合练", "备战"),
+        "rotation",
+        "neutral",
         0.05,
         0.58,
         False,
@@ -117,6 +133,8 @@ EVENT_RULES = (
         "tactic",
         "tactic",
         ("tactic", "formation", "pressing", "defensive", "attacking", "战术", "阵型", "高压", "防守", "进攻"),
+        "rotation",
+        "neutral",
         0.05,
         0.58,
         False,
@@ -218,6 +236,16 @@ def impact_for(rule: EventRule, player: dict | None) -> float:
     return round(max(-2.0, min(2.0, impact)), 2)
 
 
+def insight_classification(rule: EventRule, player: dict | None) -> tuple[str, str]:
+    importance = rule.importance
+    if player and rule.event_type in {"injury", "suspension"}:
+        if player.get("is_key_player"):
+            importance = "core"
+        elif player.get("market_value_eur") is not None and float(player["market_value_eur"]) >= 20_000_000:
+            importance = "key"
+    return importance, rule.impact_direction
+
+
 def extract_insights_from_news(news: dict, player_rows: list[dict], source_confidence: float | None = None) -> list[dict]:
     text_value = f"{news['title']} {news.get('summary') or ''}"
     normalized_text = normalize_ascii(text_value)
@@ -234,6 +262,7 @@ def extract_insights_from_news(news: dict, player_rows: list[dict], source_confi
         for team_id in team_ids[:3]:
             confidence = confidence_for(rule, matched_keywords, team_id, player, source_confidence)
             eligible = is_model_eligible(rule, confidence, matched_keywords, player)
+            importance, impact_direction = insight_classification(rule, player)
             values.append(
                 {
                     "news_item_id": news["id"],
@@ -242,7 +271,10 @@ def extract_insights_from_news(news: dict, player_rows: list[dict], source_confi
                     "player_id": player["id"] if player else None,
                     "match_id": None,
                     "impact_area": rule.impact_area,
+                    "importance": importance,
+                    "impact_direction": impact_direction,
                     "impact_score": impact_for(rule, player),
+                    "impact_value_source": "rule_mapping",
                     "confidence": confidence,
                     "evidence_text": evidence_text(news["title"], news.get("summary")),
                     "source_url": news["source_url"],
@@ -250,6 +282,9 @@ def extract_insights_from_news(news: dict, player_rows: list[dict], source_confi
                     "metadata": {
                         "extractor_version": EXTRACTOR_VERSION,
                         "matched_keywords": matched_keywords,
+                        "importance": importance,
+                        "impact_direction": impact_direction,
+                        "impact_value_source": "rule_mapping",
                         "title": news["title"],
                         "source": news["source"],
                         "player_name": player.get("name_en") or player.get("name_zh") if player else None,

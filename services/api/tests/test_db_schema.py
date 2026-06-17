@@ -27,6 +27,7 @@ def test_metadata_contains_core_tables():
         "prediction_snapshots",
         "match_predictions",
         "scoreline_predictions",
+        "prediction_reviews",
         "group_standings",
         "group_simulations",
         "ranking_predictions",
@@ -50,6 +51,33 @@ def test_model_features_declares_idempotent_feature_key():
     assert "uq_model_features_entity_feature_set_as_of" in constraints
     assert "ck_model_features_quality_status_valid" in constraints
     assert {"entity_type", "entity_key", "feature_set", "as_of_at"}.issubset(table.c.keys())
+
+
+def test_prediction_reviews_declares_scoring_metrics():
+    table = metadata.tables["prediction_reviews"]
+    constraints = {constraint.name for constraint in table.constraints}
+
+    assert "uq_prediction_reviews_match_prediction" in constraints
+    assert "ck_prediction_reviews_actual_outcome_valid" in constraints
+    assert "ck_prediction_reviews_predicted_outcome_valid" in constraints
+    assert {
+        "match_prediction_id",
+        "prediction_snapshot_id",
+        "model_version_id",
+        "actual_outcome_prob",
+        "log_loss",
+        "brier_score",
+        "calibration_bucket",
+    }.issubset(table.c.keys())
+
+
+def test_ai_insights_declares_categorical_impact_fields():
+    table = metadata.tables["ai_insights"]
+    constraints = {constraint.name for constraint in table.constraints}
+
+    assert "ck_ai_insights_ai_insights_importance_valid" in constraints
+    assert "ck_ai_insights_ai_insights_impact_direction_valid" in constraints
+    assert {"importance", "impact_direction", "impact_score", "impact_value_source"}.issubset(table.c.keys())
 
 
 def test_player_aliases_declares_source_identity_key():

@@ -2,13 +2,13 @@ from types import SimpleNamespace
 
 from app.predictions.service import (
     DEFAULT_PREDICTION_MODEL_VERSION,
-    DEFAULT_SMALL_MODEL_VERSION,
+    DEFAULT_SCORELINE_MODEL_VERSION,
     BaselinePredictionService,
 )
 
 
-def test_default_prediction_model_keeps_p0_small_outcome_pipeline():
-    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SMALL_MODEL_VERSION
+def test_default_prediction_model_keeps_scoreline_distribution_enabled():
+    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SCORELINE_MODEL_VERSION
 
 
 def test_tournament_ranking_score_rewards_live_group_form():

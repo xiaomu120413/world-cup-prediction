@@ -33,6 +33,9 @@ def test_extracts_model_eligible_injury_signal_for_matched_player():
     assert injury["team_id"] == team_id
     assert injury["player_id"] == player_id
     assert injury["impact_area"] == "availability"
+    assert injury["importance"] == "core"
+    assert injury["impact_direction"] == "negative"
+    assert injury["impact_value_source"] == "rule_mapping"
     assert injury["impact_score"] < -0.8
     assert injury["confidence"] >= 0.65
     assert injury["is_model_eligible"] is True
@@ -53,6 +56,8 @@ def test_coach_comment_signal_is_not_model_eligible_by_default():
 
     coach = next(item for item in insights if item["event_type"] == "coach_comment")
     assert coach["team_id"] == team_id
+    assert coach["importance"] == "rotation"
+    assert coach["impact_direction"] == "neutral"
     assert coach["is_model_eligible"] is False
 
 

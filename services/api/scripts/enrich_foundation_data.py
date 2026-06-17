@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import data_source_links, raw_snapshots, teams, venues, weather_snapshots
+from app.db.schema import data_source_links, matches, raw_snapshots, teams, venues, weather_snapshots
 from app.db.session import SessionLocal
 
 API_TZ = ZoneInfo("Asia/Shanghai")
@@ -40,8 +40,8 @@ VENUE_ENRICHMENT = [
         "roof_type": "retractable_roof",
     },
     {
-        "code": "bc-place",
-        "capacity": 54000,
+        "code": "bc-place-stadium",
+        "capacity": 59687,
         "latitude": 49.2768,
         "longitude": -123.1119,
         "surface": "natural grass (tournament)",
@@ -72,7 +72,7 @@ VENUE_ENRICHMENT = [
         "roof_type": "open_air",
     },
     {
-        "code": "estadio-bbva",
+        "code": "estadio-bbva-bancomer",
         "capacity": 53500,
         "latitude": 25.6687,
         "longitude": -100.2447,
@@ -269,8 +269,36 @@ def enrich_venues(db) -> dict:
             }
         )
 
-    db.execute(data_source_links.delete().where(data_source_links.c.entity_key == "los-angeles"))
-    db.execute(delete(venues).where(venues.c.code == "los-angeles"))
+    unused_legacy_codes = ["bc-place", "estadio-bbva", "los-angeles"]
+    db.execute(
+        data_source_links.delete().where(
+            data_source_links.c.entity_key.in_(unused_legacy_codes),
+            data_source_links.c.entity_type == "venue",
+        )
+    )
+    for legacy_code in unused_legacy_codes:
+        db.execute(
+            data_source_links.delete().where(
+                data_source_links.c.entity_type == "weather_snapshot",
+                data_source_links.c.entity_key.like(f"{legacy_code}:%"),
+            )
+        )
+    db.execute(
+        delete(weather_snapshots).where(
+            weather_snapshots.c.venue_id.in_(
+                select(venues.c.id).where(
+                    venues.c.code.in_(unused_legacy_codes),
+                    ~venues.c.id.in_(select(matches.c.venue_id).where(matches.c.venue_id.is_not(None))),
+                )
+            )
+        )
+    )
+    db.execute(
+        delete(venues).where(
+            venues.c.code.in_(unused_legacy_codes),
+            ~venues.c.id.in_(select(matches.c.venue_id).where(matches.c.venue_id.is_not(None))),
+        )
+    )
     source_links_written = write_source_links(db, snapshot_id, source_links)
     return {"venues_enriched": updated, "venue_source_links": source_links_written}
 

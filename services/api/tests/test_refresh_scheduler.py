@@ -28,6 +28,7 @@ def test_daily_12_plan_refreshes_live_inputs_before_predictions():
         ids.index("world_cup_schedule_lineups")
         < ids.index("group_standings")
         < ids.index("player_recent_form")
+        < ids.index("prediction_review")
         < ids.index("public_news_rss")
         < ids.index("ai_news_insights")
         < ids.index("identity_mapping_backfill")
@@ -58,6 +59,7 @@ def test_daily_00_plan_refreshes_core_match_data_and_news():
     assert "world_cup_schedule_lineups" in ids
     assert "group_standings" in ids
     assert "player_recent_form" in ids
+    assert ids.index("player_recent_form") < ids.index("prediction_review")
     assert "public_news_rss" in ids
     assert (
         ids.index("public_news_rss")
@@ -85,6 +87,13 @@ def test_scheduler_dry_run_returns_plan_without_db():
     assert result["status"] == "skipped"
     assert result["cadence"] == "post_match"
     assert result["reason"] == "no_recent_finished_matches"
+
+
+def test_post_match_plan_reviews_predictions_before_recompute():
+    ids = task_ids("post_match")
+
+    assert ids.index("group_standings") < ids.index("prediction_review")
+    assert ids.index("prediction_review") < ids.index("match_features") < ids.index("prediction_recompute")
 
 
 def test_pre_match_90m_plan_is_scoped_before_predictions():

@@ -29,6 +29,7 @@ from app.db.schema import (
     team_form_snapshots,
     team_match_results,
     teams,
+    venues,
 )
 from app.db.session import SessionLocal
 
@@ -38,6 +39,51 @@ SCHEDULE_URL = (
     "?season_id=26123&app=dqd&version=853&platform=ios&language=zh-cn&round_all=1"
 )
 LINEUP_URL_TEMPLATE = "https://sport-data.dongqiudi.com/soccer/biz/match/lineup/{match_id}?app=dqd&lang=zh-cn"
+MATCH_DETAIL_URL_TEMPLATE = "https://m.dongqiudi.com/matchDetail/{match_id}/analysis"
+VENUE_TIMEZONE_BY_CITY = {
+    "Atlanta": "America/New_York",
+    "Arlington": "America/Chicago",
+    "Boston": "America/New_York",
+    "Dallas": "America/Chicago",
+    "East Rutherford": "America/New_York",
+    "Foxborough, Massachusetts": "America/New_York",
+    "Guadalupe": "America/Monterrey",
+    "Guadalajara": "America/Mexico_City",
+    "Houston": "America/Chicago",
+    "Houston, Texas": "America/Chicago",
+    "Inglewood, California": "America/Los_Angeles",
+    "Kansas City": "America/Chicago",
+    "Kansas City, Missouri": "America/Chicago",
+    "Los Angeles": "America/Los_Angeles",
+    "Mexico City": "America/Mexico_City",
+    "Miami": "America/New_York",
+    "Miami Gardens, Florida": "America/New_York",
+    "Monterrey": "America/Monterrey",
+    "New York/New Jersey": "America/New_York",
+    "Philadelphia": "America/New_York",
+    "Philadelphia, Pennsylvania": "America/New_York",
+    "Santa Clara, California": "America/Los_Angeles",
+    "San Francisco Bay Area": "America/Los_Angeles",
+    "Seattle": "America/Los_Angeles",
+    "Seattle, Washington": "America/Los_Angeles",
+    "Toronto": "America/Toronto",
+    "Vancouver": "America/Vancouver",
+    "Vancouver, British Columbia": "America/Vancouver",
+    "Zapopan": "America/Mexico_City",
+}
+VENUE_TIMEZONE_BY_COUNTRY = {
+    "加拿大": "America/Toronto",
+    "墨西哥": "America/Mexico_City",
+    "美国": "America/New_York",
+    "Canada": "America/Toronto",
+    "Mexico": "America/Mexico_City",
+    "United States": "America/New_York",
+}
+VENUE_COUNTRY_LABELS = {
+    "加拿大": "Canada",
+    "墨西哥": "Mexico",
+    "美国": "United States",
+}
 
 
 def checksum(payload: dict) -> str:
@@ -108,6 +154,60 @@ def fetch_json(url: str) -> dict:
     )
     response.raise_for_status()
     return response.json()
+
+
+def fetch_text(url: str) -> str:
+    response = httpx.get(
+        url,
+        timeout=30.0,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; world-cup-prediction-bot/0.1; +low-frequency research collector)",
+            "Accept": "text/html,application/xhtml+xml",
+            "Referer": "https://m.dongqiudi.com/",
+        },
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def parse_match_detail_venue(html: str) -> dict | None:
+    match = re.search(r'"venue"\s*:\s*(\{[^{}]*\})', html)
+    if not match:
+        return None
+    try:
+        value = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, dict) or not value.get("name"):
+        return None
+    return value
+
+
+def split_venue_country(name: str | None) -> tuple[str | None, str | None]:
+    if not name:
+        return None, None
+    if "·" not in name:
+        return name, None
+    venue_name, country = name.rsplit("·", 1)
+    return venue_name.strip() or name, country.strip() or None
+
+
+def venue_code(value: dict) -> str:
+    return slugify(value.get("en_name") or value.get("name") or f"dongqiudi-venue-{value.get('id')}")
+
+
+def venue_timezone(city: str | None, country: str | None) -> str:
+    return VENUE_TIMEZONE_BY_CITY.get(city or "") or VENUE_TIMEZONE_BY_COUNTRY.get(country or "") or "UTC"
+
+
+def venue_country(value: str | None) -> str:
+    return VENUE_COUNTRY_LABELS.get(value or "", value or "Unknown")
+
+
+def venue_capacity(value: dict) -> int | None:
+    capacity = str(value.get("capacity") or "").replace(",", "").strip()
+    return int(capacity) if capacity.isdigit() else None
 
 
 def schedule_rows(payload: dict) -> list[dict]:
@@ -449,6 +549,148 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
     return {"matches_upserted": rows_written, "team_match_results_upserted": len(result_rows), "source_links": source_links_written}
 
 
+def collect_match_detail_venues(schedule: list[dict]) -> dict:
+    venues_by_match = []
+    errors = []
+    for item in schedule:
+        match_id = str(item.get("match_id") or "").strip()
+        if not match_id:
+            continue
+        url = MATCH_DETAIL_URL_TEMPLATE.format(match_id=match_id)
+        try:
+            html = fetch_text(url)
+            venue = parse_match_detail_venue(html)
+        except Exception as exc:
+            errors.append({"match_id": match_id, "url": url, "error": str(exc)[:240]})
+            continue
+        if not venue:
+            errors.append({"match_id": match_id, "url": url, "error": "venue_not_found"})
+            continue
+        display_name, country = split_venue_country(venue.get("name"))
+        venues_by_match.append(
+            {
+                "match_id": match_id,
+                "public_id": f"dongqiudi-{match_id}",
+                "source_url": url,
+                "source_venue_id": str(venue.get("id") or ""),
+                "venue": {
+                    "code": venue_code(venue),
+                    "name": display_name or venue.get("name"),
+                    "source_name": venue.get("name"),
+                    "en_name": venue.get("en_name"),
+                    "city": venue.get("city") or "",
+                    "country": venue_country(country),
+                    "source_country": country,
+                    "timezone": venue_timezone(venue.get("city"), country),
+                    "capacity": venue_capacity(venue),
+                },
+            }
+        )
+    return {"venues": venues_by_match, "errors": errors}
+
+
+def upsert_match_venues(db, detail_payload: dict, snapshot_id) -> dict:
+    values = detail_payload.get("venues") or []
+    if not values:
+        return {"match_detail_venues_read": 0, "venues_upserted": 0, "match_venues_linked": 0, "match_venue_source_links": 0}
+
+    venue_rows = {}
+    for item in values:
+        venue = item["venue"]
+        if not venue.get("code") or not venue.get("name") or not venue.get("city"):
+            continue
+        venue_rows[venue["code"]] = {
+            "code": venue["code"],
+            "name": venue["name"],
+            "city": venue["city"],
+            "country": venue["country"],
+            "timezone": venue["timezone"],
+            "capacity": venue.get("capacity"),
+        }
+    if venue_rows:
+        statement = pg_insert(venues).values(list(venue_rows.values()))
+        db.execute(
+            statement.on_conflict_do_update(
+                index_elements=["code"],
+                set_={
+                    "name": statement.excluded.name,
+                    "city": statement.excluded.city,
+                    "country": statement.excluded.country,
+                    "timezone": statement.excluded.timezone,
+                    "capacity": statement.excluded.capacity,
+                },
+            )
+        )
+
+    venue_ids = {
+        row.code: row.id
+        for row in db.execute(select(venues.c.code, venues.c.id).where(venues.c.code.in_(venue_rows.keys()))).all()
+    }
+    linked = 0
+    links = []
+    seen_link_keys = set()
+    for item in values:
+        venue = item["venue"]
+        venue_id = venue_ids.get(venue["code"])
+        if not venue_id:
+            continue
+        result = db.execute(
+            update(matches)
+            .where(matches.c.public_id == item["public_id"])
+            .values(venue_id=venue_id, updated_at=text("now()"))
+        )
+        if result.rowcount:
+            linked += int(result.rowcount)
+        venue_link_key = ("venue", venue["code"], "dongqiudi", "match_detail_venue")
+        if venue_link_key not in seen_link_keys:
+            links.append(
+                {
+                    "entity_type": "venue",
+                    "entity_key": venue["code"],
+                    "source": "dongqiudi",
+                    "source_type": "match_detail_venue",
+                    "source_url": item["source_url"],
+                    "raw_snapshot_id": snapshot_id,
+                    "source_record_id": item["source_venue_id"] or item["match_id"],
+                    "confidence": 0.86,
+                    "metadata": {
+                        "source_match_id": item["match_id"],
+                        "source_venue_id": item["source_venue_id"],
+                        "source_name": venue.get("source_name"),
+                        "en_name": venue.get("en_name"),
+                        "city": venue.get("city"),
+                        "source_country": venue.get("source_country"),
+                        "capacity": venue.get("capacity"),
+                    },
+                }
+            )
+            seen_link_keys.add(venue_link_key)
+        match_link_key = ("match_venue", item["public_id"], "dongqiudi", "match_detail_venue")
+        if match_link_key not in seen_link_keys:
+            links.append(
+                {
+                    "entity_type": "match_venue",
+                    "entity_key": item["public_id"],
+                    "source": "dongqiudi",
+                    "source_type": "match_detail_venue",
+                    "source_url": item["source_url"],
+                    "raw_snapshot_id": snapshot_id,
+                    "source_record_id": f"{item['match_id']}:{item['source_venue_id']}",
+                    "confidence": 0.86,
+                    "metadata": {"venue_code": venue["code"], "venue_name": venue.get("name")},
+                }
+            )
+            seen_link_keys.add(match_link_key)
+    links_written = write_source_links(db, links)
+    return {
+        "match_detail_venues_read": len(values),
+        "venues_upserted": len(venue_rows),
+        "match_venues_linked": linked,
+        "match_venue_source_links": links_written,
+        "match_venue_errors": (detail_payload.get("errors") or [])[:10],
+    }
+
+
 def cleanup_unresolved_placeholder_records(db) -> dict:
     non_roster_match_filter = """
         m.public_id like 'dongqiudi-%'
@@ -456,6 +698,10 @@ def cleanup_unresolved_placeholder_records(db) -> dict:
             not exists (select 1 from players hp where hp.team_id = m.home_team_id and hp.code like 'DQD-P%')
             or not exists (select 1 from players ap where ap.team_id = m.away_team_id and ap.code like 'DQD-P%')
         )
+    """
+    invalid_public_id_filter = """
+        m.public_id like 'dongqiudi-%'
+        and substring(m.public_id from 11) !~ '^[0-9]+$'
     """
     cleared_insights = db.execute(
         text(
@@ -507,6 +753,52 @@ def cleanup_unresolved_placeholder_records(db) -> dict:
     deleted_matches = db.execute(
         text(f"delete from matches m where {non_roster_match_filter}")
     ).rowcount or 0
+    cleared_invalid_insights = db.execute(
+        text(
+            f"""
+            update ai_insights
+            set match_id = null
+            where match_id in (
+                select m.id from matches m where {invalid_public_id_filter}
+            )
+            """
+        )
+    ).rowcount or 0
+    deleted_invalid_team_match_results = db.execute(
+        text(
+            f"""
+            delete from team_match_results tr
+            where exists (
+                select 1 from matches m
+                where {invalid_public_id_filter}
+                  and tr.source_match_id like replace(m.public_id, 'dongqiudi-', '') || ':%'
+            )
+            """
+        )
+    ).rowcount or 0
+    deleted_invalid_match_links = db.execute(
+        text(
+            f"""
+            delete from data_source_links l
+            where l.source = 'dongqiudi'
+              and (
+                exists (
+                    select 1 from matches m
+                    where {invalid_public_id_filter}
+                      and l.entity_key = m.public_id
+                )
+                or exists (
+                    select 1 from matches m
+                    where {invalid_public_id_filter}
+                      and l.source_record_id like replace(m.public_id, 'dongqiudi-', '') || ':%'
+                )
+              )
+            """
+        )
+    ).rowcount or 0
+    deleted_invalid_matches = db.execute(
+        text(f"delete from matches m where {invalid_public_id_filter}")
+    ).rowcount or 0
     deleted_teams = db.execute(
         text(
             """
@@ -538,6 +830,10 @@ def cleanup_unresolved_placeholder_records(db) -> dict:
         "unresolved_team_match_results_deleted": int(deleted_team_match_results),
         "unresolved_schedule_source_links_deleted": int(deleted_match_links),
         "unresolved_matches_deleted": int(deleted_matches),
+        "invalid_dongqiudi_match_ai_refs_cleared": int(cleared_invalid_insights),
+        "invalid_dongqiudi_team_match_results_deleted": int(deleted_invalid_team_match_results),
+        "invalid_dongqiudi_source_links_deleted": int(deleted_invalid_match_links),
+        "invalid_dongqiudi_matches_deleted": int(deleted_invalid_matches),
         "unused_placeholder_teams_deleted": int(deleted_teams),
     }
 
@@ -861,6 +1157,16 @@ def main() -> None:
         result["schedule_matches_resolved"] = len(resolved_schedule)
         result["schedule_matches_skipped_unresolved"] = len(schedule) - len(resolved_schedule)
         result.update(upsert_match_context(db, resolved_schedule, schedule_snapshot_id))
+        venue_detail_payload = collect_match_detail_venues(resolved_schedule)
+        venue_snapshot_id = write_raw_snapshot(
+            db,
+            "dongqiudi",
+            "match_detail_venues",
+            "https://m.dongqiudi.com/matchDetail/{match_id}/analysis",
+            venue_detail_payload,
+            "dongqiudi_match_detail_venues_v1",
+        )
+        result.update(upsert_match_venues(db, venue_detail_payload, venue_snapshot_id))
         result.update(upsert_lineups(db, resolved_schedule, include_scheduled=args.include_scheduled_lineups))
         result.update(cleanup_unresolved_placeholder_records(db))
         result["lineup_stability_teams_updated"] = update_lineup_stability(db)
