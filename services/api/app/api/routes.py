@@ -301,13 +301,17 @@ def run_collector(payload: dict, settings: Settings = Depends(get_settings)):
 @admin_router.post("/predictions/recompute", dependencies=[Depends(require_admin)])
 def recompute_predictions(payload: dict, settings: Settings = Depends(get_settings)):
     require_database_backend(settings)
+    model_version = payload.get("model_version", DEFAULT_PREDICTION_MODEL_VERSION)
+    model_kind = payload.get("model_kind") or (
+        "baseline" if model_version.startswith("baseline") else "scoreline" if model_version.startswith("scoreline") else "small_outcome"
+    )
     if not payload.get("dry_run", False):
         with SessionLocal() as db:
             result = BaselinePredictionService(db).recompute(
                 scope=payload.get("scope", "matchday"),
                 match_ids=payload.get("match_ids") or None,
-                model_version=payload.get("model_version", DEFAULT_PREDICTION_MODEL_VERSION),
-                model_kind=payload.get("model_kind"),
+                model_version=model_version,
+                model_kind=model_kind,
                 seed=payload.get("seed"),
             )
         return envelope(result)
@@ -317,8 +321,8 @@ def recompute_predictions(payload: dict, settings: Settings = Depends(get_settin
             "status": "accepted",
             "scope": payload.get("scope", "matchday"),
             "match_ids": payload.get("match_ids", []),
-            "model_version": payload.get("model_version", DEFAULT_PREDICTION_MODEL_VERSION),
-            "model_kind": payload.get("model_kind", "scoreline"),
+            "model_version": model_version,
+            "model_kind": model_kind,
             "queued_at": now_iso(),
         }
     )

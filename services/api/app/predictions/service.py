@@ -52,6 +52,7 @@ from scripts.train_small_outcome_model import (
     BASE_PROBABILITY_FEATURE_NAMES,
     base_probability_features,
     build_calibration_examples,
+    calibration_gate_result,
     examples_with_context_filter,
     load_current_context_feature_store,
     load_historical_matches,
@@ -61,9 +62,9 @@ from scripts.train_small_outcome_model import (
 )
 
 API_TZ = ZoneInfo("Asia/Shanghai")
-DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_16"
+DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_17"
 DEFAULT_SCORELINE_MODEL_VERSION = "scoreline_poisson_context_2026_06_17"
-DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SCORELINE_MODEL_VERSION
+DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SMALL_MODEL_VERSION
 TRAIN_END = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 TEST_START = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
@@ -363,10 +364,18 @@ class BaselinePredictionService:
             payload = existing.feature_schema["model"]
             history_core = SmallOutcomeModel.from_dict(payload["history_core"])
             active_model = SmallOutcomeModel.from_dict(payload.get("context_calibrator") or payload["active_model"])
+            model_family = existing.model_type
+            gate = (existing.metrics or {}).get("calibration_gate")
+            if model_family == "history_core_plus_context_calibrator":
+                gate = gate or calibration_gate_result(existing.metrics or {})
+                if not gate.get("accepted", False):
+                    active_model = history_core
+                    model_family = "history_core"
+                    context_store = None
             return SmallOutcomeRuntime(
                 model_version_id=existing.id,
                 model_version=model_version,
-                model_family=existing.model_type,
+                model_family=model_family,
                 active_model=active_model,
                 history_core=history_core,
                 context_store=context_store,
@@ -410,7 +419,6 @@ class BaselinePredictionService:
                 seed=seed,
                 feature_names=tuple(BASE_PROBABILITY_FEATURE_NAMES + context_store.feature_names),
             )
-            model_family = "history_core_plus_context_calibrator"
             metrics = {
                 "calibrated_model": evaluate_model(active_model, active_test_examples),
                 "history_core_on_same_subset": evaluate_model(history_core, raw_context_test_examples),
@@ -418,11 +426,27 @@ class BaselinePredictionService:
                 "history_core_full_test": evaluate_model(history_core, base_test_examples),
                 "class_prior_on_same_subset": evaluate_prior(active_train_examples, active_test_examples),
             }
-            model_payload = {
-                "history_core": history_core.to_dict(),
-                "context_calibrator": active_model.to_dict(),
-                "active_model": active_model.to_dict(),
-            }
+            gate = calibration_gate_result(metrics)
+            metrics["calibration_gate"] = gate
+            if gate["accepted"]:
+                model_family = "history_core_plus_context_calibrator"
+                model_payload = {
+                    "history_core": history_core.to_dict(),
+                    "context_calibrator": active_model.to_dict(),
+                    "active_model": active_model.to_dict(),
+                    "calibration_gate": gate,
+                }
+            else:
+                context_calibrator = active_model
+                active_model = history_core
+                context_store = None
+                model_family = "history_core"
+                model_payload = {
+                    "history_core": history_core.to_dict(),
+                    "rejected_context_calibrator": context_calibrator.to_dict(),
+                    "active_model": history_core.to_dict(),
+                    "calibration_gate": gate,
+                }
             active_train_count = len(active_train_examples)
             active_test_count = len(active_test_examples)
         else:

@@ -389,6 +389,39 @@ def label_distribution(examples) -> dict[str, int]:
     return {label: counts[index] for index, label in enumerate(LABELS)}
 
 
+def calibration_gate_result(metrics: dict[str, Any]) -> dict[str, Any]:
+    calibrated = metrics.get("calibrated_model") or {}
+    baseline = metrics.get("elo_baseline_on_same_subset") or {}
+    required = ("log_loss", "brier")
+    missing = [
+        f"{section}.{name}"
+        for section_name, section in (("calibrated_model", calibrated), ("elo_baseline_on_same_subset", baseline))
+        for name in required
+        if section.get(name) is None
+    ]
+    if missing:
+        return {
+            "accepted": False,
+            "reason": "missing_gate_metrics",
+            "missing_metrics": missing,
+        }
+
+    log_loss_delta = float(calibrated["log_loss"]) - float(baseline["log_loss"])
+    brier_delta = float(calibrated["brier"]) - float(baseline["brier"])
+    accepted = log_loss_delta <= 0.0 and brier_delta <= 0.0
+    return {
+        "accepted": accepted,
+        "reason": None if accepted else "calibrated_model_worse_than_elo_baseline",
+        "criteria": "calibrated log_loss and brier must be <= elo_baseline_on_same_subset",
+        "log_loss_delta": round(log_loss_delta, 6),
+        "brier_delta": round(brier_delta, 6),
+        "calibrated_log_loss": calibrated["log_loss"],
+        "baseline_log_loss": baseline["log_loss"],
+        "calibrated_brier": calibrated["brier"],
+        "baseline_brier": baseline["brier"],
+    }
+
+
 def top_coefficients(model, limit: int = 8) -> dict[str, list[dict[str, Any]]]:
     rows: dict[str, list[dict[str, Any]]] = {}
     for label_index, label in enumerate(LABELS):
@@ -562,6 +595,7 @@ def build_report(args) -> dict[str, Any]:
         core_model_for_current = None
         model = core_model
         model_family = "history_core"
+        prediction_context_store = None
         active_train_examples = base_train_examples
         active_test_examples = base_test_examples
         metrics = {
@@ -611,6 +645,7 @@ def build_report(args) -> dict[str, Any]:
                 "joint_model": model.to_dict(),
                 "active_model": model.to_dict(),
             }
+            prediction_context_store = context_store
 
         if mode == "calibrated":
             raw_context_examples = examples_with_context_filter(
@@ -636,7 +671,7 @@ def build_report(args) -> dict[str, Any]:
             if not active_train_examples or not active_test_examples:
                 raise RuntimeError("No calibration examples after applying train/test split.")
             feature_names = tuple(BASE_PROBABILITY_FEATURE_NAMES + context_store.feature_names)
-            model = train_multinomial_logistic(
+            context_calibrator = train_multinomial_logistic(
                 active_train_examples,
                 epochs=args.epochs,
                 learning_rate=args.learning_rate,
@@ -644,21 +679,39 @@ def build_report(args) -> dict[str, Any]:
                 seed=args.seed,
                 feature_names=feature_names,
             )
-            core_model_for_current = core_model
-            model_family = "history_core_plus_context_calibrator"
             metrics = {
-                "calibrated_model": evaluate_model(model, active_test_examples),
+                "calibrated_model": evaluate_model(context_calibrator, active_test_examples),
                 "history_core_on_same_subset": evaluate_model(core_model, raw_context_test_examples),
                 "elo_baseline_on_same_subset": evaluate_baseline(raw_context_test_examples),
                 "history_core_full_test": evaluate_model(core_model, base_test_examples),
                 "class_prior_on_same_subset": evaluate_prior(active_train_examples, active_test_examples),
             }
-            model_payload = {
-                "mode": model_family,
-                "history_core": core_model.to_dict(),
-                "context_calibrator": model.to_dict(),
-                "active_model": model.to_dict(),
-            }
+            gate = calibration_gate_result(metrics)
+            metrics["calibration_gate"] = gate
+            if gate["accepted"]:
+                model = context_calibrator
+                core_model_for_current = core_model
+                prediction_context_store = context_store
+                model_family = "history_core_plus_context_calibrator"
+                model_payload = {
+                    "mode": model_family,
+                    "history_core": core_model.to_dict(),
+                    "context_calibrator": context_calibrator.to_dict(),
+                    "active_model": context_calibrator.to_dict(),
+                    "calibration_gate": gate,
+                }
+            else:
+                model = core_model
+                core_model_for_current = None
+                prediction_context_store = None
+                model_family = "history_core"
+                model_payload = {
+                    "mode": model_family,
+                    "history_core": core_model.to_dict(),
+                    "rejected_context_calibrator": context_calibrator.to_dict(),
+                    "active_model": core_model.to_dict(),
+                    "calibration_gate": gate,
+                }
 
         scheduled_rows = load_scheduled_matches(db, args.current_limit)
 
@@ -714,9 +767,9 @@ def build_report(args) -> dict[str, Any]:
             "labels": list(LABELS),
             "positive_weight_note": "Positive weights increase the class logit after feature standardization; compare within the same label only.",
             "current_context_note": (
-                "Two-layer mode: history_core learns from leakage-safe historical features; context_calibrator adjusts those base probabilities "
-                "with current roster/player/team-board/coach/news features. Backtest metrics for current-only context remain directional until "
-                "daily pre-match snapshots accumulate."
+                "Two-layer mode: history_core learns from leakage-safe historical features. The context_calibrator is used only when it passes "
+                "the calibration gate against the same-subset Elo baseline; otherwise official predictions fall back to history_core. "
+                "Backtest metrics for current-only context remain directional until daily pre-match snapshots accumulate."
                 if context_store is not None
                 else "History-only model; no current roster/player/team-board context included."
             ),
@@ -725,7 +778,7 @@ def build_report(args) -> dict[str, Any]:
             model,
             final_states,
             scheduled_rows,
-            context_store=context_store,
+            context_store=prediction_context_store,
             core_model=core_model_for_current,
         ),
         "model": model_payload,

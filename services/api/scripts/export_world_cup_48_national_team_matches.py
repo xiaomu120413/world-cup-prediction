@@ -57,6 +57,30 @@ def refresh_historical_results(args: argparse.Namespace) -> dict[str, Any]:
             raise
 
 
+def use_existing_historical_results_after_refresh_error(exc: Exception) -> dict[str, Any]:
+    with SessionLocal() as db:
+        existing_count = int(db.scalar(select(func.count()).select_from(historical_international_matches)) or 0)
+        if existing_count <= 0:
+            raise exc
+
+        error_message = f"{type(exc).__name__}: {exc}"
+        record_collector_run(
+            db,
+            "partial",
+            records_read=existing_count,
+            records_written=0,
+            snapshot_ids=None,
+            error=f"Source refresh failed; continued with existing historical data. {error_message}",
+        )
+        db.commit()
+
+    return {
+        "status": "partial_existing_data",
+        "historical_matches_existing": existing_count,
+        "error": error_message,
+    }
+
+
 def result_label(home_score: int, away_score: int) -> str:
     if home_score > away_score:
         return "home_win"
@@ -290,7 +314,10 @@ def main() -> None:
 
     result: dict[str, Any] = {}
     if args.refresh_source:
-        result["refresh"] = refresh_historical_results(args)
+        try:
+            result["refresh"] = refresh_historical_results(args)
+        except Exception as exc:
+            result["refresh"] = use_existing_historical_results_after_refresh_error(exc)
     result["export"] = export_matches(args.output_dir, since=args.since, until=args.until)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

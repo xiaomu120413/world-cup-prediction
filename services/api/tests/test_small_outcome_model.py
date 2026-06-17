@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.predictions.service import DEFAULT_PREDICTION_MODEL_VERSION, DEFAULT_SMALL_MODEL_VERSION
 from app.predictions.small_outcome_model import (
     HistoricalMatch,
     FEATURE_NAMES,
@@ -11,7 +12,7 @@ from app.predictions.small_outcome_model import (
     evaluate_model,
     train_multinomial_logistic,
 )
-from scripts.train_small_outcome_model import CurrentContextFeatureStore, predict_scheduled_matches
+from scripts.train_small_outcome_model import CurrentContextFeatureStore, calibration_gate_result, predict_scheduled_matches
 
 
 def make_match(index: int, home: str, away: str, home_score: int, away_score: int) -> HistoricalMatch:
@@ -155,6 +156,36 @@ def test_prediction_uses_history_fallback_when_context_team_is_missing():
     assert predictions[0]["calibration_applied"] is False
     assert predictions[0]["fallback_reason"] == "missing_context_features"
     assert predictions[0]["probabilities"] == {"home_win": 0.5, "draw": 0.3, "away_win": 0.2}
+
+
+def test_calibration_gate_rejects_model_worse_than_elo_baseline():
+    gate = calibration_gate_result(
+        {
+            "calibrated_model": {"log_loss": 1.09, "brier": 0.66},
+            "elo_baseline_on_same_subset": {"log_loss": 1.06, "brier": 0.64},
+        }
+    )
+
+    assert gate["accepted"] is False
+    assert gate["reason"] == "calibrated_model_worse_than_elo_baseline"
+    assert gate["log_loss_delta"] == pytest.approx(0.03)
+
+
+def test_calibration_gate_accepts_model_no_worse_than_elo_baseline():
+    gate = calibration_gate_result(
+        {
+            "calibrated_model": {"log_loss": 1.05, "brier": 0.63},
+            "elo_baseline_on_same_subset": {"log_loss": 1.06, "brier": 0.64},
+        }
+    )
+
+    assert gate["accepted"] is True
+    assert gate["reason"] is None
+
+
+def test_default_prediction_model_uses_p0_small_outcome_pipeline():
+    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SMALL_MODEL_VERSION
+    assert DEFAULT_PREDICTION_MODEL_VERSION.startswith("small_outcome")
 
 
 def make_state():
