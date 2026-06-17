@@ -5644,36 +5644,38 @@
 }
 
 .page--matchday .match-row--schedule {
-  grid-template-columns: 96rpx minmax(0, 1fr) 108rpx;
+  grid-template-columns: 190rpx minmax(0, 1fr) 184rpx;
   grid-template-areas: 'time fixture trend';
-  gap: 10rpx;
-  min-height: 104rpx;
-  padding: 15rpx 18rpx;
+  gap: 6rpx;
+  min-height: 108rpx;
+  padding: 15rpx 14rpx;
 }
 
 .page--matchday .match-row__time {
   grid-area: time;
+  width: 100%;
   font-size: 29rpx;
 }
 
 .page--matchday .match-row__fixture {
   grid-area: fixture;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 30rpx minmax(0, 1fr);
-  gap: 6rpx;
+  grid-template-columns: minmax(0, 1fr) 26rpx minmax(0, 1fr);
+  gap: 4rpx;
 }
 
 .page--matchday .match-row__trend {
   grid-area: trend;
   justify-content: flex-end;
+  width: 100%;
   min-width: 0;
-  gap: 2rpx;
-  font-size: 23rpx;
+  gap: 0;
+  font-size: 24rpx;
 }
 
 .page--matchday .match-row__team {
   min-width: 0;
-  gap: 6rpx;
+  gap: 5rpx;
   font-size: 25rpx;
 }
 
@@ -5682,16 +5684,18 @@
 }
 
 .page--matchday .match-row__vs {
-  font-size: 24rpx;
-}
-
-.page--matchday .match-row__time text:last-child {
   font-size: 23rpx;
 }
 
+.page--matchday .match-row__time text:last-child {
+  overflow: visible;
+  font-size: 23rpx;
+  white-space: nowrap;
+}
+
 .page--matchday .match-row__team .flag--sm {
-  width: 40rpx;
-  height: 30rpx;
+  width: 36rpx;
+  height: 27rpx;
   border-radius: 6rpx;
 }
 
