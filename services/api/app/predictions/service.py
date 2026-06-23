@@ -6,7 +6,7 @@ from math import exp
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, desc, func, insert, or_, select, update
+from sqlalchemy import and_, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.db.schema import (
@@ -23,7 +23,7 @@ from app.db.schema import (
     teams,
 )
 from app.features.match_features import FEATURE_SET as MATCH_FEATURE_SET
-from app.features.match_features import DONGQIUDI_MATCH_PUBLIC_ID_PREFIX, PREDICTION_MATCH_STATUSES
+from app.features.match_features import DONGQIUDI_MATCH_PUBLIC_ID_PREFIX, PREDICTION_MATCH_STATUSES, STALE_SCHEDULE_GRACE_HOURS
 from app.features.match_features import MatchFeatureBuilder
 from app.predictions.baseline import (
     MatchInputs,
@@ -64,7 +64,7 @@ from scripts.train_small_outcome_model import (
 )
 
 API_TZ = ZoneInfo("Asia/Shanghai")
-DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_23_calibrated"
+DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_23_real_context_v2"
 DEFAULT_SCORELINE_MODEL_VERSION = "scoreline_poisson_context_2026_06_17"
 DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SMALL_MODEL_VERSION
 TRAIN_END = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
@@ -86,7 +86,12 @@ def prediction_match_filters(scope: str, public_ids: list[str] | None = None) ->
     statuses = prediction_match_statuses(scope)
     if statuses:
         filters.append(matches.c.status.in_(statuses))
-        filters.append(or_(matches.c.status == "live", matches.c.kickoff_at >= func.now()))
+        filters.append(
+            or_(
+                matches.c.status == "live",
+                matches.c.kickoff_at >= text(f"now() - interval '{STALE_SCHEDULE_GRACE_HOURS} hours'"),
+            )
+        )
     return filters
 
 

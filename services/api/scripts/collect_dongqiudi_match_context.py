@@ -20,6 +20,7 @@ from app.db.schema import (
     competition_stages,
     competitions,
     data_source_links,
+    historical_international_matches,
     lineup_snapshots,
     matches,
     player_aliases,
@@ -447,11 +448,74 @@ def rank_bucket(rank: int | None) -> str:
     return "other"
 
 
+def team_name_for_history(db, team_id) -> str:
+    row = db.execute(select(teams.c.name_en, teams.c.name_zh, teams.c.code).where(teams.c.id == team_id)).mappings().first()
+    if not row:
+        return str(team_id)
+    return row.name_en or row.name_zh or row.code
+
+
+def historical_match_context_rows(db, home: dict, away: dict, item: dict, home_score, away_score, snapshot_id) -> list[dict]:
+    if match_status_from_dongqiudi(item.get("status")) != "finished" or home_score is None or away_score is None:
+        return []
+    public_id = f"dongqiudi-{item['match_id']}"
+    kickoff = parse_kickoff(item["start_play"])
+    values = {
+        "source_match_id": public_id,
+        "match_date": kickoff.astimezone(API_TZ).date(),
+        "played_at": kickoff,
+        "home_team_id": home["id"],
+        "away_team_id": away["id"],
+        "home_team_name": team_name_for_history(db, home["id"]),
+        "away_team_name": team_name_for_history(db, away["id"]),
+        "home_score": home_score,
+        "away_score": away_score,
+        "tournament": "FIFA World Cup 2026",
+        "city": None,
+        "country": None,
+        "neutral": True,
+        "source": "dongqiudi",
+        "source_type": "world_cup_schedule",
+        "source_url": SCHEDULE_URL,
+        "source_line_number": None,
+        "source_confidence": 0.95,
+        "snapshot_id": snapshot_id,
+        "metadata": {
+            "source_match_id": item["match_id"],
+            "source_home_team_id": item.get("team_A_id"),
+            "source_away_team_id": item.get("team_B_id"),
+            "status": item.get("status"),
+        },
+    }
+    return [
+        {
+            "values": values,
+            "source_link": {
+                "entity_type": "historical_international_match",
+                "entity_key": public_id,
+                "source": "dongqiudi",
+                "source_type": "world_cup_schedule",
+                "source_url": SCHEDULE_URL,
+                "raw_snapshot_id": snapshot_id,
+                "source_record_id": str(item["match_id"]),
+                "confidence": 0.95,
+                "metadata": {
+                    "home_team_code": home["code"],
+                    "away_team_code": away["code"],
+                    "home_score": home_score,
+                    "away_score": away_score,
+                },
+            },
+        }
+    ]
+
+
 def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
     _, stage_id = ensure_competition(db)
     source_links = []
     rows_written = 0
     result_rows = []
+    historical_rows = []
     for item in schedule:
         home = ensure_team(db, item["team_A_name"], item.get("team_A_id"))
         away = ensure_team(db, item["team_B_name"], item.get("team_B_id"))
@@ -533,6 +597,7 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
                 "away",
             )
         )
+        historical_rows.extend(historical_match_context_rows(db, home, away, item, home_score, away_score, snapshot_id))
 
     if result_rows:
         db.execute(
@@ -554,8 +619,44 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
             )
         )
         source_links.extend(row["source_link"] for row in result_rows)
+    if historical_rows:
+        db.execute(
+            pg_insert(historical_international_matches)
+            .values([row["values"] for row in historical_rows])
+            .on_conflict_do_update(
+                index_elements=["source_match_id"],
+                set_={
+                    "match_date": pg_insert(historical_international_matches).excluded.match_date,
+                    "played_at": pg_insert(historical_international_matches).excluded.played_at,
+                    "home_team_id": pg_insert(historical_international_matches).excluded.home_team_id,
+                    "away_team_id": pg_insert(historical_international_matches).excluded.away_team_id,
+                    "home_team_name": pg_insert(historical_international_matches).excluded.home_team_name,
+                    "away_team_name": pg_insert(historical_international_matches).excluded.away_team_name,
+                    "home_score": pg_insert(historical_international_matches).excluded.home_score,
+                    "away_score": pg_insert(historical_international_matches).excluded.away_score,
+                    "tournament": pg_insert(historical_international_matches).excluded.tournament,
+                    "city": pg_insert(historical_international_matches).excluded.city,
+                    "country": pg_insert(historical_international_matches).excluded.country,
+                    "neutral": pg_insert(historical_international_matches).excluded.neutral,
+                    "source": pg_insert(historical_international_matches).excluded.source,
+                    "source_type": pg_insert(historical_international_matches).excluded.source_type,
+                    "source_url": pg_insert(historical_international_matches).excluded.source_url,
+                    "source_line_number": pg_insert(historical_international_matches).excluded.source_line_number,
+                    "source_confidence": pg_insert(historical_international_matches).excluded.source_confidence,
+                    "snapshot_id": pg_insert(historical_international_matches).excluded.snapshot_id,
+                    "metadata": pg_insert(historical_international_matches).excluded["metadata"],
+                    "updated_at": text("now()"),
+                },
+            )
+        )
+        source_links.extend(row["source_link"] for row in historical_rows)
     source_links_written = write_source_links(db, source_links)
-    return {"matches_upserted": rows_written, "team_match_results_upserted": len(result_rows), "source_links": source_links_written}
+    return {
+        "matches_upserted": rows_written,
+        "team_match_results_upserted": len(result_rows),
+        "historical_matches_upserted": len(historical_rows),
+        "source_links": source_links_written,
+    }
 
 
 def collect_match_detail_venues(schedule: list[dict]) -> dict:

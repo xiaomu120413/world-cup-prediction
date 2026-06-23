@@ -33,6 +33,7 @@ def test_daily_12_plan_refreshes_live_inputs_before_predictions():
         < ids.index("ai_news_insights")
         < ids.index("identity_mapping_backfill")
         < ids.index("identity_mapping_audit")
+        < ids.index("team_elo_ratings")
         < ids.index("match_features")
         < ids.index("prediction_recompute")
         < ids.index("source_link_backfill")
@@ -43,6 +44,7 @@ def test_daily_12_plan_refreshes_live_inputs_before_predictions():
         < ids.index("ai_news_insights")
         < ids.index("identity_mapping_backfill")
         < ids.index("identity_mapping_audit")
+        < ids.index("team_elo_ratings")
         < ids.index("match_features")
         < ids.index("prediction_recompute")
     )
@@ -93,7 +95,7 @@ def test_post_match_plan_reviews_predictions_before_recompute():
     ids = task_ids("post_match")
 
     assert ids.index("group_standings") < ids.index("prediction_review")
-    assert ids.index("prediction_review") < ids.index("match_features") < ids.index("prediction_recompute")
+    assert ids.index("prediction_review") < ids.index("team_elo_ratings") < ids.index("match_features") < ids.index("prediction_recompute")
 
 
 def test_pre_match_90m_plan_is_scoped_before_predictions():

@@ -271,6 +271,24 @@ def statistic_market_value(item: dict) -> int | None:
     return None
 
 
+def clamp_score(value: float, lower: float = 4.8, upper: float = 9.4) -> float:
+    return round(max(lower, min(upper, value)), 2)
+
+
+def player_form_score(
+    appearances: int | None,
+    goals: int | None,
+    assists: int | None,
+    market_value_eur: int | None,
+) -> float:
+    score = 5.6
+    score += min(appearances or 0, 20) * 0.04
+    score += min(goals or 0, 12) * 0.16
+    score += min(assists or 0, 10) * 0.12
+    score += min(float(market_value_eur or 0), 100_000_000) / 100_000_000 * 0.8
+    return clamp_score(score)
+
+
 def parse_birth_date(value: Any):
     if not value:
         return None
@@ -816,7 +834,7 @@ def upsert_roster_players(
                         "key_passes": None,
                         "rating": None,
                         "availability_status": "available",
-                        "form_score": None,
+                        "form_score": player_form_score(appearances, goals, assists, market_value),
                         "source_count": 1,
                         "source_link": source_link(
                             "player_form",

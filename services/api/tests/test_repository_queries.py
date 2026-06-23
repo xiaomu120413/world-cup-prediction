@@ -91,7 +91,7 @@ def test_prediction_matchday_filters_to_dongqiudi_open_matches():
 
     assert "matches.public_id LIKE 'dongqiudi-%%'" in sql
     assert "matches.status IN ('scheduled', 'live')" in sql
-    assert "matches.kickoff_at >= now()" in sql
+    assert "matches.kickoff_at >= now() - interval '6 hours'" in sql
 
 
 def test_prediction_explicit_match_ids_bypass_source_scope_filter():
@@ -100,7 +100,7 @@ def test_prediction_explicit_match_ids_bypass_source_scope_filter():
     assert "matches.public_id IN ('thestatsapi-match-1')" in sql
     assert "matches.public_id LIKE 'dongqiudi-%%'" not in sql
     assert "matches.status IN" not in sql
-    assert "matches.kickoff_at >= now()" not in sql
+    assert "matches.kickoff_at >= now() - interval '6 hours'" not in sql
 
 
 def test_groups_query_exposes_only_world_cup_letter_groups():

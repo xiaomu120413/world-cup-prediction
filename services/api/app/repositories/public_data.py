@@ -89,6 +89,11 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.65,
         "label": "Internal AI news insight extractor",
     },
+    "internal_model": {
+        "trust_level": "internal_derived",
+        "default_confidence": 0.9,
+        "label": "Internal derived model values from sourced match results",
+    },
     "foxsports": {
         "trust_level": "public_news",
         "default_confidence": 0.82,
@@ -112,6 +117,7 @@ APPROVED_REAL_SOURCES = {
     "bbc",
     "espn",
     "ai_news_extractor",
+    "internal_model",
     "foxsports",
     "martj42_international_results",
 }

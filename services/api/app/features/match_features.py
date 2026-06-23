@@ -6,7 +6,7 @@ from math import log1p
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ FEATURE_SCHEMA_VERSION = "2026-06-15.match-pre-v1"
 API_TZ = ZoneInfo("Asia/Shanghai")
 DONGQIUDI_MATCH_PUBLIC_ID_PREFIX = "dongqiudi-"
 PREDICTION_MATCH_STATUSES = ("scheduled", "live")
+STALE_SCHEDULE_GRACE_HOURS = 6
 
 TEAM_STAT_METRICS = (
     "goals",
@@ -185,7 +186,7 @@ class MatchFeatureBuilder:
             "roster_only": roster_only,
             "public_id_prefix": public_id_prefix,
             "statuses": list(statuses) if statuses else None,
-            "min_kickoff_at": min_kickoff_at.isoformat() if min_kickoff_at else "db_now",
+            "min_kickoff_at": min_kickoff_at.isoformat() if min_kickoff_at else f"db_now_minus_{STALE_SCHEDULE_GRACE_HOURS}h",
             "snapshot_as_of_at": snapshot_time.isoformat(),
             "quality_counts": quality_counts,
         }
@@ -244,7 +245,8 @@ class MatchFeatureBuilder:
                 query = query.where(matches.c.public_id.like(f"{public_id_prefix}%"))
             if statuses:
                 query = query.where(matches.c.status.in_(statuses))
-                query = query.where(or_(matches.c.status == "live", matches.c.kickoff_at >= (min_kickoff_at or func.now())))
+                kickoff_cutoff = min_kickoff_at or text(f"now() - interval '{STALE_SCHEDULE_GRACE_HOURS} hours'")
+                query = query.where(or_(matches.c.status == "live", matches.c.kickoff_at >= kickoff_cutoff))
         if roster_only:
             query = query.where(
                 text("exists (select 1 from players hp where hp.team_id = matches.home_team_id and hp.code like 'DQD-P%')"),

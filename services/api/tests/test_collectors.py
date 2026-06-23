@@ -17,6 +17,7 @@ from scripts.collect_dongqiudi_team_details import (
     parse_birth_date,
     person_detail_base_info,
     person_detail_market_value,
+    player_form_score,
     person_ids_from_team_payloads,
     statistic_market_value,
     statistic_value,
@@ -116,6 +117,10 @@ def test_dongqiudi_member_player_fields_are_parsed():
     assert POSITION_MAP[item["type"]] == "FW"
     assert statistic_value(item, "出场") == "22"
     assert statistic_market_value(item) == 7_000_000
+
+
+def test_dongqiudi_player_form_score_uses_source_stats_and_market_value():
+    assert player_form_score(22, 6, 4, 7_000_000) == 7.9
 
 
 def test_dongqiudi_person_detail_fields_are_parsed():
