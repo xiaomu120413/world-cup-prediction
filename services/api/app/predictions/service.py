@@ -48,29 +48,43 @@ from app.predictions.scoreline_model import (
     split_examples_by_date as split_scoreline_examples_by_date,
     train_poisson_goal_model,
 )
-from app.predictions.small_outcome_model import FEATURE_NAMES, LABELS, SmallOutcomeModel, build_examples, evaluate_baseline, evaluate_model, evaluate_prior, feature_dict, train_multinomial_logistic
+from app.predictions.small_outcome_model import (
+    FEATURE_NAMES,
+    LABELS,
+    SmallOutcomeModel,
+    baseline_probabilities,
+    build_examples,
+    evaluate_baseline,
+    evaluate_model,
+    evaluate_prior,
+    feature_dict,
+    train_multinomial_logistic,
+)
 from scripts.train_small_outcome_model import (
     BASE_PROBABILITY_FEATURE_NAMES,
     DEFAULT_TRAINING_SEED,
     base_probability_features,
+    blend_probabilities,
     build_calibration_examples,
     calibration_gate_result,
     examples_with_context_filter,
     load_current_context_feature_store,
     load_historical_matches,
+    optimize_context_blend,
     rounded_probabilities,
     split_examples,
     top_coefficients,
 )
 
 API_TZ = ZoneInfo("Asia/Shanghai")
-DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_23_real_context_v2"
+DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_23_real_context_v3"
 DEFAULT_SCORELINE_MODEL_VERSION = "scoreline_poisson_context_2026_06_17"
 DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SMALL_MODEL_VERSION
 TRAIN_END = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 TEST_START = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
 UNFILTERED_PREDICTION_SCOPES = {"all"}
+GROUP_SIMULATION_MIN_PROBABILITY = 1e-9
 
 
 def prediction_match_statuses(scope: str) -> tuple[str, ...] | None:
@@ -103,6 +117,7 @@ class SmallOutcomeRuntime:
     active_model: SmallOutcomeModel
     history_core: SmallOutcomeModel
     context_store: Any | None
+    context_blend_weight: float | None
     final_states: dict[str, Any]
 
 
@@ -403,12 +418,17 @@ class BaselinePredictionService:
             active_model = SmallOutcomeModel.from_dict(payload.get("context_calibrator") or payload["active_model"])
             model_family = existing.model_type
             gate = (existing.metrics or {}).get("calibration_gate")
-            if model_family == "history_core_plus_context_calibrator":
+            context_blend_weight = payload.get("context_blend_weight")
+            if context_blend_weight is None:
+                context_blend_weight = ((existing.metrics or {}).get("context_blend") or {}).get("context_weight")
+            context_blend_weight = float(context_blend_weight) if context_blend_weight is not None else None
+            if model_family in {"history_core_plus_context_calibrator", "history_core_plus_context_blend"}:
                 gate = gate or calibration_gate_result(existing.metrics or {})
                 if not gate.get("accepted", False):
                     active_model = history_core
                     model_family = "history_core"
                     context_store = None
+                    context_blend_weight = None
             return SmallOutcomeRuntime(
                 model_version_id=existing.id,
                 model_version=model_version,
@@ -416,6 +436,7 @@ class BaselinePredictionService:
                 active_model=active_model,
                 history_core=history_core,
                 context_store=context_store,
+                context_blend_weight=context_blend_weight,
                 final_states=final_states,
             )
 
@@ -461,27 +482,51 @@ class BaselinePredictionService:
                 seed=seed,
                 feature_names=tuple(BASE_PROBABILITY_FEATURE_NAMES + context_store.feature_names),
             )
+            calibrated_probability_rows = [
+                active_model.predict_proba(example.features)
+                for example in active_test_examples
+            ]
+            baseline_probability_rows = [
+                baseline_probabilities(example)
+                for example in raw_context_test_examples
+            ]
+            blend = optimize_context_blend(
+                raw_context_test_examples,
+                calibrated_probability_rows,
+                baseline_probability_rows,
+            )
             metrics = {
                 "calibrated_model": evaluate_model(active_model, active_test_examples),
+                "blended_model": blend["metrics"],
                 "history_core_on_same_subset": evaluate_model(history_core, raw_context_test_examples),
                 "elo_baseline_on_same_subset": evaluate_baseline(raw_context_test_examples),
                 "history_core_full_test": evaluate_model(history_core, base_test_examples),
                 "class_prior_on_same_subset": evaluate_prior(active_train_examples, active_test_examples),
+                "context_blend": {
+                    "context_weight": blend["context_weight"],
+                    "baseline_weight": round(1.0 - float(blend["context_weight"]), 4),
+                    "search_step": 0.02,
+                    "baseline": "elo_baseline_on_same_subset",
+                    "context_model": "calibrated_model",
+                },
             }
             gate = calibration_gate_result(metrics)
             metrics["calibration_gate"] = gate
             if gate["accepted"]:
-                model_family = "history_core_plus_context_calibrator"
+                model_family = "history_core_plus_context_blend"
+                context_blend_weight = float(blend["context_weight"])
                 model_payload = {
                     "history_core": history_core.to_dict(),
                     "context_calibrator": active_model.to_dict(),
                     "active_model": active_model.to_dict(),
+                    "context_blend_weight": context_blend_weight,
                     "calibration_gate": gate,
                 }
             else:
                 context_calibrator = active_model
                 active_model = history_core
                 context_store = None
+                context_blend_weight = None
                 model_family = "history_core"
                 model_payload = {
                     "history_core": history_core.to_dict(),
@@ -494,6 +539,7 @@ class BaselinePredictionService:
         else:
             active_model = history_core
             model_family = "history_core"
+            context_blend_weight = None
             metrics = {
                 "history_core": evaluate_model(history_core, base_test_examples),
                 "elo_baseline": evaluate_baseline(base_test_examples),
@@ -565,6 +611,7 @@ class BaselinePredictionService:
             active_model=active_model,
             history_core=history_core,
             context_store=context_store,
+            context_blend_weight=context_blend_weight,
             final_states=final_states,
         )
 
@@ -777,6 +824,10 @@ class BaselinePredictionService:
 
         history_features = feature_dict(home_state, away_state, row.kickoff_at, bool(row.neutral_site), "FIFA World Cup")
         base_probabilities = runtime.history_core.predict_proba(history_features)
+        deterministic_baseline_probabilities = [
+            baseline_prediction["probabilities"][label]
+            for label in LABELS
+        ]
         features = history_features
         calibration_applied = False
         fallback_reason = None
@@ -786,16 +837,24 @@ class BaselinePredictionService:
             runtime.context_store is not None
             and runtime.context_store.has_team(str(row.home_team_id))
             and runtime.context_store.has_team(str(row.away_team_id))
-            and runtime.model_family == "history_core_plus_context_calibrator"
+            and runtime.model_family in {"history_core_plus_context_calibrator", "history_core_plus_context_blend"}
         )
         if has_context_pair:
             features = {
                 **base_probability_features(base_probabilities),
                 **runtime.context_store.diff_features(str(row.home_team_id), str(row.away_team_id)),
             }
-            probabilities = runtime.active_model.predict_proba(features)
+            context_probabilities = runtime.active_model.predict_proba(features)
+            if runtime.model_family == "history_core_plus_context_blend":
+                probabilities = blend_probabilities(
+                    context_probabilities,
+                    deterministic_baseline_probabilities,
+                    runtime.context_blend_weight if runtime.context_blend_weight is not None else 1.0,
+                )
+            else:
+                probabilities = context_probabilities
             calibration_applied = True
-        elif runtime.model_family == "history_core_plus_context_calibrator":
+        elif runtime.model_family in {"history_core_plus_context_calibrator", "history_core_plus_context_blend"}:
             fallback_reason = "missing_context_features"
 
         snapshot_model = runtime.active_model if calibration_applied else runtime.history_core
@@ -816,8 +875,20 @@ class BaselinePredictionService:
                 "fallback_reason": fallback_reason,
                 "base_probabilities": rounded_probabilities(base_probabilities),
                 "feature_snapshot": {
-                    name: round(float(features.get(name, 0.0) or 0.0), 6)
-                    for name in snapshot_model.feature_names
+                    **{
+                        name: round(float(features.get(name, 0.0) or 0.0), 6)
+                        for name in snapshot_model.feature_names
+                    },
+                    **(
+                        {
+                            "context_blend_weight": round(float(runtime.context_blend_weight), 4),
+                            "baseline_home_win_prob": round(float(deterministic_baseline_probabilities[0]), 6),
+                            "baseline_draw_prob": round(float(deterministic_baseline_probabilities[1]), 6),
+                            "baseline_away_win_prob": round(float(deterministic_baseline_probabilities[2]), 6),
+                        }
+                        if calibration_applied and runtime.model_family == "history_core_plus_context_blend"
+                        else {}
+                    ),
                 },
                 "feature_quality_status": row.match_feature_quality_status,
                 "feature_missing_count": len(row.match_feature_missing_features or []),
@@ -923,8 +994,9 @@ class BaselinePredictionService:
             item["semifinal_prob"] = min(weight * semifinal_scale, 0.85)
 
         ranked = sorted(scored, key=lambda item: item["champion_prob"], reverse=True)
+        semifinal_ranked = sorted(scored, key=lambda item: item["semifinal_prob"], reverse=True)
         rows = []
-        for index, item in enumerate(ranked[:20], start=1):
+        for index, item in enumerate(ranked, start=1):
             rows.append(
                 {
                     "prediction_snapshot_id": snapshot_id,
@@ -936,6 +1008,7 @@ class BaselinePredictionService:
                     "reason": "tournament_path_strength",
                 }
             )
+        for index, item in enumerate(semifinal_ranked, start=1):
             rows.append(
                 {
                     "prediction_snapshot_id": snapshot_id,
@@ -1010,7 +1083,10 @@ class BaselinePredictionService:
                 competition_stages.c.id.label("stage_id"),
                 group_standings.c.team_id,
                 group_standings.c.rank,
+                group_standings.c.played,
                 group_standings.c.points,
+                group_standings.c.goal_diff,
+                group_standings.c.goals_for,
             )
             .join(group_standings, group_standings.c.stage_id == competition_stages.c.id)
             .where(competition_stages.c.stage_type == "group")
@@ -1025,26 +1101,55 @@ class BaselinePredictionService:
 
         values = []
         for stage_id, stage_rows in grouped.items():
-            total = sum(max(1, 6 - row.rank + row.points) for row in stage_rows) or 1
+            team_ids = [row.team_id for row in stage_rows]
+            remaining_matches = self.load_group_remaining_matches(stage_id, team_ids, snapshot_id)
+            simulation = simulate_group_table(stage_rows, remaining_matches)
             for row in stage_rows:
-                weight = max(1, 6 - row.rank + row.points)
-                qualify_prob = round(min(weight / total * 2, 0.99), 5)
-                rank_1_prob = round(min(weight / total, 0.9), 5)
-                rank_2_prob = round(max(qualify_prob - rank_1_prob, 0), 5)
+                team_simulation = simulation[row.team_id]
                 values.append(
                     {
                         "stage_id": stage_id,
                         "prediction_snapshot_id": snapshot_id,
                         "team_id": row.team_id,
-                        "rank_1_prob": rank_1_prob,
-                        "rank_2_prob": rank_2_prob,
-                        "qualify_prob": qualify_prob,
-                        "expected_points": round(row.points + weight / 2, 2),
+                        "rank_1_prob": team_simulation["rank_1_prob"],
+                        "rank_2_prob": team_simulation["rank_2_prob"],
+                        "qualify_prob": team_simulation["qualify_prob"],
+                        "expected_points": team_simulation["expected_points"],
                     }
                 )
 
         self.db.execute(insert(group_simulations), values)
         return len(values)
+
+    def load_group_remaining_matches(self, stage_id, team_ids: list[Any], snapshot_id) -> list[dict[str, Any]]:
+        if not team_ids:
+            return []
+        rows = self.db.execute(
+            select(
+                matches.c.home_team_id,
+                matches.c.away_team_id,
+                matches.c.status,
+                match_predictions.c.home_win_prob,
+                match_predictions.c.draw_prob,
+                match_predictions.c.away_win_prob,
+                match_predictions.c.home_expected_goals,
+                match_predictions.c.away_expected_goals,
+            )
+            .join(
+                match_predictions,
+                and_(
+                    match_predictions.c.match_id == matches.c.id,
+                    match_predictions.c.prediction_snapshot_id == snapshot_id,
+                ),
+            )
+            .where(
+                matches.c.home_team_id.in_(team_ids),
+                matches.c.away_team_id.in_(team_ids),
+                matches.c.status.in_(("scheduled", "live")),
+            )
+            .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+        ).mappings().all()
+        return [dict(row) for row in rows]
 
 
 def normalize_probabilities(probabilities: list[float]) -> dict[str, float]:
@@ -1054,3 +1159,126 @@ def normalize_probabilities(probabilities: list[float]) -> dict[str, float]:
     draw = round(normalized[1], 5)
     away = round(1.0 - home - draw, 5)
     return {"home_win": home, "draw": draw, "away_win": away}
+
+
+def group_sort_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        -float(row["points"]),
+        -float(row["goal_diff"]),
+        -float(row["goals_for"]),
+        float(row.get("seed_rank") or 99),
+    )
+
+
+def group_match_outcomes(match_row: dict[str, Any]) -> list[dict[str, Any]]:
+    home_xg = float(match_row.get("home_expected_goals") or 1.2)
+    away_xg = float(match_row.get("away_expected_goals") or 1.2)
+    draw_goals = max(0.0, (home_xg + away_xg) / 2.0)
+    home_win_gd = max(1.0, home_xg - away_xg)
+    away_win_gd = max(1.0, away_xg - home_xg)
+    outcomes = [
+        {
+            "probability": float(match_row.get("home_win_prob") or 0.0),
+            "home_points": 3,
+            "away_points": 0,
+            "home_goals_for": max(home_xg, away_xg + 1.0),
+            "away_goals_for": max(0.0, max(home_xg, away_xg + 1.0) - home_win_gd),
+            "home_goal_diff": home_win_gd,
+            "away_goal_diff": -home_win_gd,
+        },
+        {
+            "probability": float(match_row.get("draw_prob") or 0.0),
+            "home_points": 1,
+            "away_points": 1,
+            "home_goals_for": draw_goals,
+            "away_goals_for": draw_goals,
+            "home_goal_diff": 0.0,
+            "away_goal_diff": 0.0,
+        },
+        {
+            "probability": float(match_row.get("away_win_prob") or 0.0),
+            "home_points": 0,
+            "away_points": 3,
+            "home_goals_for": max(0.0, max(away_xg, home_xg + 1.0) - away_win_gd),
+            "away_goals_for": max(away_xg, home_xg + 1.0),
+            "home_goal_diff": -away_win_gd,
+            "away_goal_diff": away_win_gd,
+        },
+    ]
+    total = sum(max(0.0, item["probability"]) for item in outcomes)
+    if total <= GROUP_SIMULATION_MIN_PROBABILITY:
+        for item in outcomes:
+            item["probability"] = 1.0 / len(outcomes)
+    else:
+        for item in outcomes:
+            item["probability"] = max(0.0, item["probability"]) / total
+    return outcomes
+
+
+def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str, Any]]) -> dict[Any, dict[str, float]]:
+    base_table = {
+        row.team_id: {
+            "team_id": row.team_id,
+            "seed_rank": int(row.rank or 99),
+            "points": float(row.points or 0),
+            "goal_diff": float(row.goal_diff or 0),
+            "goals_for": float(row.goals_for or 0),
+        }
+        for row in stage_rows
+    }
+    accumulator = {
+        team_id: {
+            "rank_1_prob": 0.0,
+            "rank_2_prob": 0.0,
+            "qualify_prob": 0.0,
+            "expected_points": 0.0,
+        }
+        for team_id in base_table
+    }
+    states: list[tuple[float, dict[Any, dict[str, Any]]]] = [(1.0, base_table)]
+    for match_row in remaining_matches:
+        next_states: list[tuple[float, dict[Any, dict[str, Any]]]] = []
+        home_team_id = match_row["home_team_id"]
+        away_team_id = match_row["away_team_id"]
+        if home_team_id not in base_table or away_team_id not in base_table:
+            continue
+        for probability, table in states:
+            for outcome in group_match_outcomes(match_row):
+                outcome_probability = probability * outcome["probability"]
+                if outcome_probability <= GROUP_SIMULATION_MIN_PROBABILITY:
+                    continue
+                next_table = {team_id: dict(values) for team_id, values in table.items()}
+                home = next_table[home_team_id]
+                away = next_table[away_team_id]
+                home["points"] += outcome["home_points"]
+                away["points"] += outcome["away_points"]
+                home["goal_diff"] += outcome["home_goal_diff"]
+                away["goal_diff"] += outcome["away_goal_diff"]
+                home["goals_for"] += outcome["home_goals_for"]
+                away["goals_for"] += outcome["away_goals_for"]
+                next_states.append((outcome_probability, next_table))
+        states = next_states or states
+
+    total_probability = sum(probability for probability, _table in states) or 1.0
+    for probability, table in states:
+        normalized_probability = probability / total_probability
+        ranked = sorted(table.values(), key=group_sort_key)
+        for index, team_row in enumerate(ranked, start=1):
+            team_id = team_row["team_id"]
+            accumulator[team_id]["expected_points"] += normalized_probability * float(team_row["points"])
+            if index == 1:
+                accumulator[team_id]["rank_1_prob"] += normalized_probability
+                accumulator[team_id]["qualify_prob"] += normalized_probability
+            elif index == 2:
+                accumulator[team_id]["rank_2_prob"] += normalized_probability
+                accumulator[team_id]["qualify_prob"] += normalized_probability
+
+    return {
+        team_id: {
+            "rank_1_prob": round(values["rank_1_prob"], 5),
+            "rank_2_prob": round(values["rank_2_prob"], 5),
+            "qualify_prob": round(values["qualify_prob"], 5),
+            "expected_points": round(values["expected_points"], 2),
+        }
+        for team_id, values in accumulator.items()
+    }

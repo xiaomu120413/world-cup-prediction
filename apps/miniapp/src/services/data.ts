@@ -2,6 +2,7 @@ import Taro from '@tarojs/taro'
 
 import type {
   ChampionTopTeam,
+  Evidence,
   GroupTeam,
   Match,
   RankingTeam,
@@ -524,12 +525,45 @@ function formatEvidenceNote(item: { label: string; note?: string }) {
   return noteMap[item.label] || item.note || '来自赛前特征快照'
 }
 
-function mapEvidenceItem(item: { label: string; value?: number; note?: string }) {
+const hiddenEvidenceLabels = new Set(['model_mode', 'scoreline_model'])
+
+function formatSignedNumber(value: number, digits: number) {
+  const formatted = Math.abs(value).toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
+  if (value > 0) return `+${formatted}`
+  if (value < 0) return `-${formatted}`
+  return '0'
+}
+
+function formatEvidenceDisplayValue(item: { label: string; value?: number }) {
+  const value = Number(item.value || 0)
+  if (item.label === 'elo_diff') return `${formatSignedNumber(value, 0)} Elo`
+  if (item.label === 'fifa_rank_diff') return `${formatSignedNumber(value, 0)}名`
+  if (item.label === 'venue') return value === 0 ? '中立' : formatSignedNumber(value, 1)
+  if (Math.abs(value) >= 10) return formatSignedNumber(value, 0)
+  if (Math.abs(value) >= 1) return formatSignedNumber(value, 1)
+  return formatSignedNumber(value, 2)
+}
+
+function evidenceToneFromValue(value: number): 'positive' | 'negative' | 'neutral' {
+  if (value > 0) return 'positive'
+  if (value < 0) return 'negative'
+  return 'neutral'
+}
+
+function mapEvidenceItem(item: { label: string; value?: number; note?: string }): Evidence | null {
+  if (hiddenEvidenceLabels.has(item.label)) return null
+  const value = Number(item.value || 0)
   return {
     label: formatEvidenceLabel(item.label),
-    value: item.value || 0,
-    note: formatEvidenceNote(item)
+    value,
+    displayValue: formatEvidenceDisplayValue(item),
+    note: formatEvidenceNote(item),
+    tone: evidenceToneFromValue(value)
   }
+}
+
+function isEvidenceItem(item: Evidence | null): item is Evidence {
+  return item !== null
 }
 
 function formatMatchInsight(
@@ -821,7 +855,8 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     : undefined
   const sourceConfidence = apiMatch.source_confidence
   const modelStatus = hasPrediction ? '模型预测已生成' : '预测待重算'
-  const evidence = prediction?.key_factors?.map(mapEvidenceItem) || report?.evidence?.map(mapEvidenceItem) || []
+  const evidenceSource = prediction?.key_factors || report?.evidence || []
+  const evidence = evidenceSource.map(mapEvidenceItem).filter(isEvidenceItem)
 
   return {
     id: apiMatch.id,
@@ -935,7 +970,7 @@ export async function getMatchData(matchId = defaultMatchId): Promise<{ match: M
 async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Promise<RankingData> {
   requireApi()
 
-  const response = await requestData<ApiRanking[]>(`/api/v1/predictions/rankings?type=${type}`)
+  const response = await requestData<ApiRanking[]>(`/api/v1/predictions/rankings?type=${type}&limit=100`)
   const rankings = sortApiRankingsByProbability(response.data)
   return {
     rankings: rankings.map((item, index) => ({
@@ -1031,7 +1066,7 @@ async function loadTeamProfile(teamId = ''): Promise<TeamProfile> {
       qualifyProbability: formatOptionalPercent(group.qualify_prob),
       expectedPoints: formatOptionalNumber(group.expected_points, 1)
     } : undefined,
-    probabilities: response.data.probabilities.map(item => ({
+    probabilities: response.data.probabilities.filter(item => item.value !== undefined && item.value !== null).map(item => ({
       label: formatProbabilityLabel(item.label),
       value: formatOptionalPercent(item.value),
       delta: item.delta === undefined || item.delta === null ? undefined : `${item.delta >= 0 ? '+' : '-'}${Math.abs(percentFromApi(item.delta))}%`

@@ -14,7 +14,7 @@ from app.scheduler.refresh import RefreshScheduler
 
 router = APIRouter()
 admin_router = APIRouter()
-RANKING_ORDER_CACHE_VERSION = "probability-v2"
+RANKING_ORDER_CACHE_VERSION = "probability-v3"
 REAL_COLLECTOR_SOURCES = {"dongqiudi"}
 
 

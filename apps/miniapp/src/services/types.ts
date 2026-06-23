@@ -6,7 +6,9 @@ export type Probability = {
 export type Evidence = {
   label: string
   value: number
+  displayValue?: string
   note: string
+  tone?: 'positive' | 'negative' | 'neutral'
 }
 
 export type Scoreline = {

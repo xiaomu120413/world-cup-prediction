@@ -16,6 +16,7 @@ apps/miniapp/node_modules/
 apps/miniapp/dist/
 apps/miniapp/dist-weapp/
 apps/miniapp/.swc/
+apps/miniapp/.preview/
 apps/miniapp/screenshots/
 apps/miniapp/private*.key
 apps/miniapp/keys/

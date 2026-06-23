@@ -14,8 +14,10 @@ from app.predictions.small_outcome_model import (
 )
 from scripts.train_small_outcome_model import (
     CurrentContextFeatureStore,
+    blend_probabilities,
     calibration_gate_result,
     examples_with_context_filter,
+    optimize_context_blend,
     predict_scheduled_matches,
 )
 
@@ -257,6 +259,38 @@ def test_calibration_gate_accepts_model_no_worse_than_elo_baseline():
 
     assert gate["accepted"] is True
     assert gate["reason"] is None
+
+
+def test_context_blend_search_can_improve_over_raw_context_model():
+    examples = [
+        SimpleNamespace(label=0),
+        SimpleNamespace(label=1),
+        SimpleNamespace(label=2),
+    ]
+    raw_context = [
+        [0.75, 0.15, 0.10],
+        [0.55, 0.35, 0.10],
+        [0.20, 0.20, 0.60],
+    ]
+    baseline = [
+        [0.65, 0.20, 0.15],
+        [0.30, 0.45, 0.25],
+        [0.25, 0.25, 0.50],
+    ]
+
+    blend = optimize_context_blend(examples, raw_context, baseline, step=0.1)
+    blended_probs = blend_probabilities(raw_context[0], baseline[0], blend["context_weight"])
+
+    assert 0.0 <= blend["context_weight"] <= 1.0
+    assert sum(blended_probs) == pytest.approx(1.0)
+    gate = calibration_gate_result(
+        {
+            "blended_model": blend["metrics"],
+            "elo_baseline_on_same_subset": {"log_loss": 2.0, "brier": 2.0},
+        }
+    )
+    assert gate["accepted"] is True
+    assert gate["candidate"] == "blended_model"
 
 
 def test_small_outcome_pipeline_is_default_and_scoreline_remains_available():

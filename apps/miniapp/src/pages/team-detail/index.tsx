@@ -108,7 +108,7 @@ function TeamListRow({ team, index }: { team: TeamListItem; index: number }) {
         <Text className='team-index-row__meta'>{team.nameEn || team.meta}</Text>
       </View>
       <View className='team-index-row__right'>
-        {team.probability !== undefined ? <Text>{team.probability}%</Text> : <Text>{team.meta}</Text>}
+        {team.probability !== undefined ? <Text>{team.probability}%</Text> : <Text>待更新</Text>}
         <Icon name='chevron' color='#94a3b8' size={26} />
       </View>
     </View>
@@ -165,7 +165,7 @@ function TeamsIndexPage() {
         </View>
         <View className='team-index-ai-card__main'>
           <Text className='team-index-ai-card__title'>AI 球队索引</Text>
-          <Text className='team-index-ai-card__text'>球队列表来自后端真实接口，未使用本地静态 48 队样例。</Text>
+          <Text className='team-index-ai-card__text'>基于后端最新数据快照展示球队、概率和关键资料，点击球队进入完整分析。</Text>
         </View>
       </View>
 

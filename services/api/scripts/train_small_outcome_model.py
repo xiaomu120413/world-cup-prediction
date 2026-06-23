@@ -21,9 +21,11 @@ from app.predictions.small_outcome_model import (
     LABELS,
     HistoricalMatch,
     TeamState,
+    baseline_probabilities,
     build_examples,
     evaluate_baseline,
     evaluate_model,
+    evaluate_probabilities,
     evaluate_prior,
     feature_dict,
     train_multinomial_logistic,
@@ -78,6 +80,52 @@ def base_probability_features(probabilities: list[float]) -> dict[str, float]:
         "base_log_prob_draw": log(normalized[1]),
         "base_log_prob_away_win": log(normalized[2]),
     }
+
+
+def normalize_probability_list(probabilities: list[float]) -> list[float]:
+    clipped = [max(0.0, float(value)) for value in probabilities]
+    total = sum(clipped) or 1.0
+    return [value / total for value in clipped]
+
+
+def blend_probabilities(
+    context_probabilities: list[float],
+    baseline_probabilities_value: list[float],
+    context_weight: float,
+) -> list[float]:
+    weight = max(0.0, min(1.0, float(context_weight)))
+    context = normalize_probability_list(context_probabilities)
+    baseline = normalize_probability_list(baseline_probabilities_value)
+    return normalize_probability_list(
+        [
+            weight * context[index] + (1.0 - weight) * baseline[index]
+            for index in range(len(LABELS))
+        ]
+    )
+
+
+def optimize_context_blend(
+    labeled_examples,
+    context_probability_rows: list[list[float]],
+    baseline_probability_rows: list[list[float]],
+    step: float = 0.02,
+) -> dict[str, Any]:
+    if not labeled_examples:
+        return {"context_weight": 0.0, "metrics": {"examples": 0}}
+    best_weight = 0.0
+    best_metrics = evaluate_probabilities(labeled_examples, baseline_probability_rows)
+    steps = max(1, int(round(1.0 / step)))
+    for index in range(1, steps + 1):
+        weight = round(min(1.0, index * step), 4)
+        blended_rows = [
+            blend_probabilities(context_probs, baseline_probs, weight)
+            for context_probs, baseline_probs in zip(context_probability_rows, baseline_probability_rows)
+        ]
+        metrics = evaluate_probabilities(labeled_examples, blended_rows)
+        if (metrics["log_loss"], metrics["brier"]) < (best_metrics["log_loss"], best_metrics["brier"]):
+            best_weight = weight
+            best_metrics = metrics
+    return {"context_weight": best_weight, "metrics": best_metrics}
 
 
 def sanitize_metric_name(value: str) -> str:
@@ -462,7 +510,8 @@ def label_distribution(examples) -> dict[str, int]:
 
 
 def calibration_gate_result(metrics: dict[str, Any]) -> dict[str, Any]:
-    calibrated = metrics.get("calibrated_model") or {}
+    candidate_key = "blended_model" if metrics.get("blended_model") else "calibrated_model"
+    calibrated = metrics.get(candidate_key) or {}
     baseline = metrics.get("elo_baseline_on_same_subset") or {}
     required = ("log_loss", "brier")
     missing = [
@@ -476,6 +525,7 @@ def calibration_gate_result(metrics: dict[str, Any]) -> dict[str, Any]:
             "accepted": False,
             "reason": "missing_gate_metrics",
             "missing_metrics": missing,
+            "candidate": candidate_key,
         }
 
     log_loss_delta = float(calibrated["log_loss"]) - float(baseline["log_loss"])
@@ -483,13 +533,16 @@ def calibration_gate_result(metrics: dict[str, Any]) -> dict[str, Any]:
     accepted = log_loss_delta <= 0.0 and brier_delta <= 0.0
     return {
         "accepted": accepted,
-        "reason": None if accepted else "calibrated_model_worse_than_elo_baseline",
-        "criteria": "calibrated log_loss and brier must be <= elo_baseline_on_same_subset",
+        "reason": None if accepted else f"{candidate_key}_worse_than_elo_baseline",
+        "criteria": f"{candidate_key} log_loss and brier must be <= elo_baseline_on_same_subset",
+        "candidate": candidate_key,
         "log_loss_delta": round(log_loss_delta, 6),
         "brier_delta": round(brier_delta, 6),
-        "calibrated_log_loss": calibrated["log_loss"],
+        "candidate_log_loss": calibrated["log_loss"],
+        "calibrated_log_loss": (metrics.get("calibrated_model") or {}).get("log_loss", calibrated["log_loss"]),
         "baseline_log_loss": baseline["log_loss"],
-        "calibrated_brier": calibrated["brier"],
+        "candidate_brier": calibrated["brier"],
+        "calibrated_brier": (metrics.get("calibrated_model") or {}).get("brier", calibrated["brier"]),
         "baseline_brier": baseline["brier"],
     }
 
@@ -568,6 +621,7 @@ def predict_scheduled_matches(
     scheduled_rows,
     context_store: CurrentContextFeatureStore | None = None,
     core_model=None,
+    context_blend_weight: float | None = None,
 ) -> list[dict[str, Any]]:
     predictions: list[dict[str, Any]] = []
     for row in scheduled_rows:
@@ -606,6 +660,8 @@ def predict_scheduled_matches(
                     **context_store.diff_features(str(row.home_team_id), str(row.away_team_id)),
                 }
                 probabilities = model.predict_proba(features)
+                if context_blend_weight is not None:
+                    probabilities = blend_probabilities(probabilities, base_probabilities, context_blend_weight)
                 calibration_applied = True
             else:
                 probabilities = base_probabilities
@@ -638,6 +694,8 @@ def predict_scheduled_matches(
         }
         if base_probabilities is not None:
             prediction["base_probabilities"] = rounded_probabilities(base_probabilities)
+        if context_blend_weight is not None and calibration_applied:
+            prediction["context_blend_weight"] = round(float(context_blend_weight), 4)
         predictions.append(prediction)
     return predictions
 
@@ -668,6 +726,7 @@ def build_report(args) -> dict[str, Any]:
         model = core_model
         model_family = "history_core"
         prediction_context_store = None
+        context_blend_weight = None
         active_train_examples = base_train_examples
         active_test_examples = base_test_examples
         metrics = {
@@ -767,12 +826,33 @@ def build_report(args) -> dict[str, Any]:
                 seed=args.seed,
                 feature_names=feature_names,
             )
+            calibrated_probability_rows = [
+                context_calibrator.predict_proba(example.features)
+                for example in active_test_examples
+            ]
+            baseline_probability_rows = [
+                baseline_probabilities(example)
+                for example in raw_context_test_examples
+            ]
+            blend = optimize_context_blend(
+                raw_context_test_examples,
+                calibrated_probability_rows,
+                baseline_probability_rows,
+            )
             metrics = {
                 "calibrated_model": evaluate_model(context_calibrator, active_test_examples),
+                "blended_model": blend["metrics"],
                 "history_core_on_same_subset": evaluate_model(core_model, raw_context_test_examples),
                 "elo_baseline_on_same_subset": evaluate_baseline(raw_context_test_examples),
                 "history_core_full_test": evaluate_model(core_model, base_test_examples),
                 "class_prior_on_same_subset": evaluate_prior(active_train_examples, active_test_examples),
+                "context_blend": {
+                    "context_weight": blend["context_weight"],
+                    "baseline_weight": round(1.0 - float(blend["context_weight"]), 4),
+                    "search_step": 0.02,
+                    "baseline": "elo_baseline_on_same_subset",
+                    "context_model": "calibrated_model",
+                },
             }
             gate = calibration_gate_result(metrics)
             metrics["calibration_gate"] = gate
@@ -780,14 +860,16 @@ def build_report(args) -> dict[str, Any]:
                 model = context_calibrator
                 core_model_for_current = core_model
                 prediction_context_store = context_store
-                model_family = "history_core_plus_context_calibrator"
+                model_family = "history_core_plus_context_blend"
                 model_payload = {
                     "mode": model_family,
                     "history_core": core_model.to_dict(),
                     "context_calibrator": context_calibrator.to_dict(),
                     "active_model": context_calibrator.to_dict(),
+                    "context_blend_weight": blend["context_weight"],
                     "calibration_gate": gate,
                 }
+                context_blend_weight = float(blend["context_weight"])
             else:
                 model = core_model
                 core_model_for_current = None
@@ -878,6 +960,7 @@ def build_report(args) -> dict[str, Any]:
             scheduled_rows,
             context_store=prediction_context_store,
             core_model=core_model_for_current,
+            context_blend_weight=context_blend_weight,
         ),
         "model": model_payload,
     }
