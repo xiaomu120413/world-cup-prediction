@@ -44,6 +44,50 @@ TEAM_RANKING_TYPES_URL = (
     "https://sport-data.dongqiudi.com/soccer/biz/data/ranking/team"
     "?season_id=26123&app=dqd&version=853&platform=ios&language=zh-cn&app_type=&type=team"
 )
+ZERO_OMITTED_TEAM_STAT_METRICS = {
+    "aerials",
+    "aerials_won",
+    "assists",
+    "big_chance_created",
+    "big_chance_missed",
+    "box_shot_saves",
+    "claims_high",
+    "clearances",
+    "corners",
+    "crosses",
+    "dispossessed",
+    "dribbles_attempted",
+    "dribbles_won",
+    "error_lead_to_goal",
+    "error_lead_to_shot",
+    "fouls",
+    "goal_against",
+    "goal_own",
+    "goal_penalty",
+    "goals",
+    "ground_duels",
+    "ground_duels_won",
+    "hit_woodwork",
+    "interceptions",
+    "key_passes",
+    "last_man_tackle",
+    "long_balls",
+    "offsides",
+    "passes",
+    "punches",
+    "red_cards",
+    "runs_out",
+    "runs_out_success",
+    "saves",
+    "shots",
+    "shots_on_target",
+    "success_crosses",
+    "success_long_balls",
+    "tackles",
+    "touches",
+    "was_dribbled",
+    "yellow_cards",
+}
 MAX_WORKERS = 6
 PERSON_DETAIL_MAX_WORKERS = 36
 PLAYER_AVATAR_CACHE_PATH = Path(__file__).resolve().parents[1] / "app" / "data" / "dongqiudi_player_avatars.json"
@@ -820,38 +864,40 @@ def upsert_roster_players(
             appearances = to_int(statistic_value(item, "出场"))
             goals = to_int(statistic_value(item, "进球"))
             assists = to_int(statistic_value(item, "助攻"))
-            if appearances is not None or goals is not None or assists is not None:
-                form_rows.append(
-                    {
-                        "player_code": code,
-                        "team_id": team_row["id"],
-                        "as_of_at": AS_OF_AT,
-                        "recent_matches": appearances or 0,
-                        "minutes": None,
-                        "goals": goals,
-                        "assists": assists,
-                        "shots": None,
-                        "key_passes": None,
-                        "rating": None,
-                        "availability_status": "available",
-                        "form_score": player_form_score(appearances, goals, assists, market_value),
-                        "source_count": 1,
-                        "source_link": source_link(
-                            "player_form",
-                            f"{code}:{AS_OF_KEY}",
-                            "team_member_v2_statistic",
-                            source_url,
-                            snapshot_id,
-                            person_id,
-                            0.82,
-                            {
-                                "team_code": team_row["code"],
-                                "source_team_id": team_row["source_team_id"],
-                                "statistic": item.get("statistic") or [],
-                            },
-                        ),
-                    }
-                )
+            statistic_payload = item.get("statistic") or []
+            zero_omitted_statistic = appearances is None and goals is None and assists is None
+            form_rows.append(
+                {
+                    "player_code": code,
+                    "team_id": team_row["id"],
+                    "as_of_at": AS_OF_AT,
+                    "recent_matches": appearances or 0,
+                    "minutes": None,
+                    "goals": goals or 0,
+                    "assists": assists or 0,
+                    "shots": None,
+                    "key_passes": None,
+                    "rating": None,
+                    "availability_status": "available",
+                    "form_score": player_form_score(appearances, goals, assists, market_value),
+                    "source_count": 1,
+                    "source_link": source_link(
+                        "player_form",
+                        f"{code}:{AS_OF_KEY}",
+                        "team_member_v2_statistic",
+                        source_url,
+                        snapshot_id,
+                        person_id,
+                        0.82 if not zero_omitted_statistic else 0.78,
+                        {
+                            "team_code": team_row["code"],
+                            "source_team_id": team_row["source_team_id"],
+                            "statistic": statistic_payload,
+                            "zero_omitted_from_source_statistic": zero_omitted_statistic,
+                        },
+                    ),
+                }
+            )
 
     if player_rows:
         db.execute(
@@ -1198,6 +1244,78 @@ def team_stat_snapshot_rows(
     return rows
 
 
+def zero_omitted_team_stat_rows_and_links(
+    team_rankings: dict[str, Any],
+    team_rows_by_source_id: dict[str, dict],
+    snapshot_id,
+) -> tuple[list[dict], list[dict]]:
+    rows = []
+    links = []
+    canonical_team_rows = {
+        team_row["source_team_id"]: team_row
+        for source_id, team_row in team_rows_by_source_id.items()
+        if source_id == team_row["source_team_id"]
+    }
+    for metric in team_rankings.get("rankings") or []:
+        metric_type = metric.get("type")
+        if metric_type not in ZERO_OMITTED_TEAM_STAT_METRICS:
+            continue
+        metric_name = metric.get("name") or metric_type
+        source_url = metric.get("url") or TEAM_RANKING_TYPES_URL
+        present_ids = {str(item.get("team_id") or item.get("id") or "") for item in metric.get("rows") or []}
+        derived_rank = len(present_ids) + 1
+        for source_team_id, team_row in canonical_team_rows.items():
+            if source_team_id in present_ids or short_team_id(source_team_id) in present_ids:
+                continue
+            rows.append(
+                {
+                    "team_id": team_row["id"],
+                    "metric_type": metric_type,
+                    "metric_name": metric_name,
+                    "rank": derived_rank,
+                    "raw_value": "0",
+                    "numeric_value": Decimal("0"),
+                    "value_unit": "count",
+                    "source": "dongqiudi",
+                    "source_type": "world_cup_team_ranking",
+                    "source_team_id": source_team_id,
+                    "source_url": source_url,
+                    "source_confidence": Decimal("0.82"),
+                    "snapshot_id": snapshot_id,
+                    "as_of_at": AS_OF_AT,
+                    "metadata": {
+                        "team_code": team_row["code"],
+                        "team_name": team_row["name_zh"],
+                        "metric_type": metric_type,
+                        "metric_name": metric_name,
+                        "zero_omitted_from_source_leaderboard": True,
+                        "derived_rank": derived_rank,
+                    },
+                }
+            )
+            links.append(
+                source_link(
+                    "team_stat",
+                    f"{team_row['code']}:{metric_type}",
+                    "world_cup_team_ranking",
+                    source_url,
+                    snapshot_id,
+                    f"{source_team_id}:{metric_type}:zero",
+                    0.82,
+                    {
+                        "team_code": team_row["code"],
+                        "source_team_id": source_team_id,
+                        "metric_type": metric_type,
+                        "metric_name": metric_name,
+                        "count": 0,
+                        "rank": derived_rank,
+                        "zero_omitted_from_source_leaderboard": True,
+                    },
+                )
+            )
+    return rows, links
+
+
 def upsert_team_stat_snapshots(db, rows: list[dict]) -> int:
     db.execute(
         delete(team_stat_snapshots).where(
@@ -1427,10 +1545,16 @@ def run() -> dict:
                     )
                 )
 
+        zero_team_stat_rows, zero_team_stat_links = zero_omitted_team_stat_rows_and_links(
+            team_rankings,
+            team_rows_by_source_id,
+            team_ranking_snapshot_id,
+        )
         links.extend(team_stat_source_links(team_rankings, team_code_by_source_id, team_ranking_snapshot_id))
+        links.extend(zero_team_stat_links)
         team_stat_rows_written = upsert_team_stat_snapshots(
             db,
-            team_stat_snapshot_rows(team_rankings, team_rows_by_source_id, team_ranking_snapshot_id),
+            team_stat_snapshot_rows(team_rankings, team_rows_by_source_id, team_ranking_snapshot_id) + zero_team_stat_rows,
         )
 
         for team_data in team_payloads:

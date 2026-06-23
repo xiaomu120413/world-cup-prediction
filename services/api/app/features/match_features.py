@@ -36,8 +36,6 @@ TEAM_STAT_METRICS = (
     "pass_accuracy",
     "rating",
     "market_value",
-    "yellow_cards",
-    "red_cards",
     "fouls",
     "big_chance_created",
     "big_chance_missed",
