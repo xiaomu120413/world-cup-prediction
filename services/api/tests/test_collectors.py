@@ -12,7 +12,16 @@ from app.collectors.adapters import (
 from app.collectors.catalog import COLLECTOR_CATALOG, collection_catalog_summary
 from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
 from app.collectors.runner import CollectorRunner, snapshot_checksum
-from scripts.collect_dongqiudi_match_context import parse_kickoff
+from scripts.collect_dongqiudi_team_details import (
+    POSITION_MAP,
+    parse_birth_date,
+    person_detail_base_info,
+    person_detail_market_value,
+    person_ids_from_team_payloads,
+    statistic_market_value,
+    statistic_value,
+)
+from scripts.collect_dongqiudi_match_context import match_status_from_dongqiudi, parse_kickoff
 
 
 def schedule_snapshot() -> RawSnapshot:
@@ -88,6 +97,61 @@ def test_snapshot_checksum_is_stable():
 
 def test_dongqiudi_schedule_start_play_is_parsed_as_utc():
     assert parse_kickoff("2026-06-16 22:00:00") == datetime(2026, 6, 16, 22, 0, tzinfo=UTC)
+
+
+def test_dongqiudi_match_status_maps_live_matches():
+    assert match_status_from_dongqiudi("Played") == "finished"
+    assert match_status_from_dongqiudi("Playing") == "live"
+    assert match_status_from_dongqiudi("Fixture") == "scheduled"
+    assert match_status_from_dongqiudi(None) == "scheduled"
+
+
+def test_dongqiudi_member_player_fields_are_parsed():
+    item = {
+        "person_id": "50213371",
+        "type": "attacker",
+        "statistic": [{"出场": "22"}, {"进球": "6"}, {"助攻": "4"}, {"身价(欧)": "700万"}],
+    }
+
+    assert POSITION_MAP[item["type"]] == "FW"
+    assert statistic_value(item, "出场") == "22"
+    assert statistic_market_value(item) == 7_000_000
+
+
+def test_dongqiudi_person_detail_fields_are_parsed():
+    detail = {
+        "payload": {
+            "base_info": {
+                "date_of_birth": "1995-06-29",
+                "market_value": "700",
+                "position": "attacker",
+                "team_info": {"team_name": "RAMS巴萨克赛尔", "role": "前锋"},
+            }
+        }
+    }
+
+    base_info = person_detail_base_info(detail)
+
+    assert parse_birth_date(base_info["date_of_birth"]).isoformat() == "1995-06-29"
+    assert person_detail_market_value(base_info) == 7_000_000
+    assert POSITION_MAP[base_info["position"]] == "FW"
+
+
+def test_dongqiudi_person_ids_from_team_payloads_skips_coaches():
+    payloads = [
+        {
+            "member": {
+                "data": {
+                    "list": [
+                        {"title": "教练", "data": [{"person_id": "1", "type": "主教练"}]},
+                        {"title": "前锋", "data": [{"person_id": "2", "type": "attacker"}]},
+                    ]
+                }
+            }
+        }
+    ]
+
+    assert person_ids_from_team_payloads(payloads) == ["2"]
 
 
 def test_runner_counts_all_top_level_list_records():

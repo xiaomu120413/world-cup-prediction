@@ -12,7 +12,12 @@ from app.predictions.small_outcome_model import (
     evaluate_model,
     train_multinomial_logistic,
 )
-from scripts.train_small_outcome_model import CurrentContextFeatureStore, calibration_gate_result, predict_scheduled_matches
+from scripts.train_small_outcome_model import (
+    CurrentContextFeatureStore,
+    calibration_gate_result,
+    examples_with_context_filter,
+    predict_scheduled_matches,
+)
 
 
 def make_match(index: int, home: str, away: str, home_score: int, away_score: int) -> HistoricalMatch:
@@ -160,7 +165,7 @@ def test_prediction_uses_history_fallback_when_context_team_is_missing():
 
 def test_prediction_uses_history_fallback_when_context_features_are_incomplete():
     class FixedModel:
-        feature_names = ("ctx_avg_form_score",)
+        feature_names = ("ctx_team_market_value_log",)
 
         def __init__(self, probabilities):
             self.probabilities = probabilities
@@ -182,18 +187,18 @@ def test_prediction_uses_history_fallback_when_context_features_are_incomplete()
         home_team_code="A",
         away_team_code="B",
         match_feature_quality_status="partial",
-        match_feature_missing_features=["away_player_avg_form_score"],
+        match_feature_missing_features=["away_team_market_value"],
         match_feature_source_summary={},
     )
     states = {"team-a": make_state(), "team-b": make_state()}
     context_store = CurrentContextFeatureStore(
-        feature_names=("ctx_avg_form_score",),
+        feature_names=("ctx_team_market_value_log",),
         team_vectors={
-            "team-a": {"ctx_avg_form_score": 6.8},
-            "team-b": {"ctx_avg_form_score": 0.0},
+            "team-a": {"ctx_team_market_value_log": 20.0},
+            "team-b": {"ctx_team_market_value_log": 0.0},
         },
         roster_team_ids={"team-a", "team-b"},
-        team_missing_features={"team-b": {"ctx_avg_form_score"}},
+        team_missing_features={"team-b": {"ctx_team_market_value_log"}},
     )
 
     predictions = predict_scheduled_matches(
@@ -208,6 +213,25 @@ def test_prediction_uses_history_fallback_when_context_features_are_incomplete()
     assert predictions[0]["calibration_applied"] is False
     assert predictions[0]["fallback_reason"] == "missing_context_features"
     assert predictions[0]["probabilities"] == {"home_win": 0.5, "draw": 0.3, "away_win": 0.2}
+
+
+def test_context_training_filter_keeps_mapped_teams_with_incomplete_features():
+    example = SimpleNamespace(home_team_id="team-a", away_team_id="team-b")
+    context_store = CurrentContextFeatureStore(
+        feature_names=("ctx_team_market_value_log",),
+        team_vectors={
+            "team-a": {"ctx_team_market_value_log": 20.0},
+            "team-b": {"ctx_team_market_value_log": 0.0},
+        },
+        roster_team_ids={"team-a", "team-b"},
+        team_missing_features={"team-b": {"ctx_team_market_value_log"}},
+    )
+
+    filtered = examples_with_context_filter([example], context_store, roster_context_only=True)
+
+    assert filtered == [example]
+    assert context_store.has_mapped_team("team-b") is True
+    assert context_store.has_team("team-b") is False
 
 
 def test_calibration_gate_rejects_model_worse_than_elo_baseline():
@@ -235,9 +259,10 @@ def test_calibration_gate_accepts_model_no_worse_than_elo_baseline():
     assert gate["reason"] is None
 
 
-def test_small_outcome_pipeline_remains_available_when_scoreline_is_default():
-    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SCORELINE_MODEL_VERSION
+def test_small_outcome_pipeline_is_default_and_scoreline_remains_available():
+    assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SMALL_MODEL_VERSION
     assert DEFAULT_SMALL_MODEL_VERSION.startswith("small_outcome")
+    assert DEFAULT_SCORELINE_MODEL_VERSION.startswith("scoreline")
 
 
 def make_state():

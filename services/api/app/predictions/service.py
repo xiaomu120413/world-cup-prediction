@@ -51,6 +51,7 @@ from app.predictions.scoreline_model import (
 from app.predictions.small_outcome_model import FEATURE_NAMES, LABELS, SmallOutcomeModel, build_examples, evaluate_baseline, evaluate_model, evaluate_prior, feature_dict, train_multinomial_logistic
 from scripts.train_small_outcome_model import (
     BASE_PROBABILITY_FEATURE_NAMES,
+    DEFAULT_TRAINING_SEED,
     base_probability_features,
     build_calibration_examples,
     calibration_gate_result,
@@ -63,9 +64,9 @@ from scripts.train_small_outcome_model import (
 )
 
 API_TZ = ZoneInfo("Asia/Shanghai")
-DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_17"
+DEFAULT_SMALL_MODEL_VERSION = "small_outcome_2026_06_23_calibrated"
 DEFAULT_SCORELINE_MODEL_VERSION = "scoreline_poisson_context_2026_06_17"
-DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SCORELINE_MODEL_VERSION
+DEFAULT_PREDICTION_MODEL_VERSION = DEFAULT_SMALL_MODEL_VERSION
 TRAIN_END = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 TEST_START = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
@@ -154,7 +155,7 @@ class BaselinePredictionService:
         model_version: str = DEFAULT_SCORELINE_MODEL_VERSION,
         seed: int | None = None,
     ) -> dict:
-        seed_value = seed or int(datetime.now(API_TZ).strftime("%Y%m%d"))
+        seed_value = seed or DEFAULT_TRAINING_SEED
         statuses = prediction_match_statuses(scope)
         feature_result = MatchFeatureBuilder(self.db).build(
             public_ids=match_ids,
@@ -201,7 +202,7 @@ class BaselinePredictionService:
         model_version: str = DEFAULT_SMALL_MODEL_VERSION,
         seed: int | None = None,
     ) -> dict:
-        seed_value = seed or int(datetime.now(API_TZ).strftime("%Y%m%d"))
+        seed_value = seed or DEFAULT_TRAINING_SEED
         statuses = prediction_match_statuses(scope)
         feature_result = MatchFeatureBuilder(self.db).build(
             public_ids=match_ids,
@@ -426,6 +427,11 @@ class BaselinePredictionService:
             feature_names=FEATURE_NAMES,
         )
         raw_context_examples = examples_with_context_filter(examples, context_store, roster_context_only=True)
+        strict_context_examples_count = sum(
+            1
+            for example in examples
+            if context_store.has_team(example.home_team_id) and context_store.has_team(example.away_team_id)
+        )
         raw_context_train_examples, raw_context_test_examples = split_examples(
             raw_context_examples, train_end=TRAIN_END, test_start=TEST_START
         )
@@ -516,9 +522,15 @@ class BaselinePredictionService:
                 "training_examples_total": len(examples),
                 "base_train_examples": len(base_train_examples),
                 "base_test_examples": len(base_test_examples),
+                "mapped_context_examples": len(raw_context_examples),
+                "strict_context_examples": strict_context_examples_count,
                 "active_train_examples": active_train_count,
                 "active_test_examples": active_test_count,
                 "roster_context_team_count": 0 if context_store is None else len(context_store.roster_team_ids),
+                "context_training_policy": (
+                    "mapped_roster_team_context; missing numeric context is zero-filled for training, "
+                    "while current-match inference still requires critical context fields"
+                ),
             },
             "interpretation": {
                 "top_coefficients": top_coefficients(active_model),

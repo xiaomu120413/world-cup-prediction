@@ -14,12 +14,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from sqlalchemy import and_, delete, func, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.db.schema import (
+    ai_insights,
     coaches,
     data_source_links,
     player_aliases,
@@ -37,12 +38,14 @@ RANKING_TEAM_URL = "https://m.dongqiudi.com/stat/9/rankingTeam"
 TEAM_PAGE_URL = "https://pc.dongqiudi.com/team/{team_id}"
 TEAM_DETAIL_URL = "https://www.dongqiudi.com/api/data/v1/detail/team/{team_id}?app=dqd&lang=zh-cn"
 TEAM_MEMBER_URL = "https://www.dongqiudi.com/sport-data/soccer/biz/dqd/v1/team/member_v2/{team_id}?app=dqd"
+PERSON_DETAIL_URL = "https://sport-data.dongqiudi.com/soccer/biz/dqd/v1/person/detail/{person_id}?app=dqd&lang=zh-cn"
 PLAYER_PAGE_URL = "https://www.dongqiudi.com/player/{person_id}.html"
 TEAM_RANKING_TYPES_URL = (
     "https://sport-data.dongqiudi.com/soccer/biz/data/ranking/team"
     "?season_id=26123&app=dqd&version=853&platform=ios&language=zh-cn&app_type=&type=team"
 )
 MAX_WORKERS = 6
+PERSON_DETAIL_MAX_WORKERS = 36
 PLAYER_AVATAR_CACHE_PATH = Path(__file__).resolve().parents[1] / "app" / "data" / "dongqiudi_player_avatars.json"
 # Low-frequency roster pages are collected as daily snapshots; using midnight keeps
 # repeated local runs idempotent for player form rows on the same day.
@@ -175,23 +178,27 @@ def write_source_links(db, rows: list[dict]) -> int:
         current = deduped.get(key)
         if current is None or float(row["confidence"]) >= float(current["confidence"]):
             deduped[key] = row
-    statement = (
-        pg_insert(data_source_links)
-        .values(list(deduped.values()))
-        .on_conflict_do_update(
-            index_elements=["entity_type", "entity_key", "source", "source_type"],
-            set_={
-                "source_url": pg_insert(data_source_links).excluded.source_url,
-                "raw_snapshot_id": pg_insert(data_source_links).excluded.raw_snapshot_id,
-                "source_record_id": pg_insert(data_source_links).excluded.source_record_id,
-                "confidence": pg_insert(data_source_links).excluded.confidence,
-                "fetched_at": text("now()"),
-                "metadata": pg_insert(data_source_links).excluded["metadata"],
-            },
+    written = 0
+    values = list(deduped.values())
+    for index in range(0, len(values), 1000):
+        statement = (
+            pg_insert(data_source_links)
+            .values(values[index : index + 1000])
+            .on_conflict_do_update(
+                index_elements=["entity_type", "entity_key", "source", "source_type"],
+                set_={
+                    "source_url": pg_insert(data_source_links).excluded.source_url,
+                    "raw_snapshot_id": pg_insert(data_source_links).excluded.raw_snapshot_id,
+                    "source_record_id": pg_insert(data_source_links).excluded.source_record_id,
+                    "confidence": pg_insert(data_source_links).excluded.confidence,
+                    "fetched_at": text("now()"),
+                    "metadata": pg_insert(data_source_links).excluded["metadata"],
+                },
+            )
+            .returning(data_source_links.c.id)
         )
-        .returning(data_source_links.c.id)
-    )
-    return len(db.execute(statement).all())
+        written += len(db.execute(statement).all())
+    return written
 
 
 def normalize_name(value: str | None) -> str:
@@ -264,6 +271,30 @@ def statistic_market_value(item: dict) -> int | None:
     return None
 
 
+def parse_birth_date(value: Any):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def person_detail_base_info(person_detail: dict[str, Any] | None) -> dict[str, Any]:
+    payload = (person_detail or {}).get("payload") or {}
+    return payload.get("base_info") or {}
+
+
+def person_detail_market_value(base_info: dict[str, Any]) -> int | None:
+    value = base_info.get("market_value")
+    if value in {None, "", "0", 0}:
+        return None
+    try:
+        return int(Decimal(str(value)) * Decimal("10000"))
+    except InvalidOperation:
+        return None
+
+
 def player_profile_market_value(person_id: str) -> int | None:
     try:
         html = fetch_text(PLAYER_PAGE_URL.format(person_id=person_id), "https://www.dongqiudi.com/")
@@ -274,6 +305,50 @@ def player_profile_market_value(person_id: str) -> int | None:
         return None
     # Dongqiudi player profiles store market_value in ten-thousand EUR.
     return int(Decimal(match.group(1)) * Decimal("10000"))
+
+
+def collect_person_detail(person_id: str) -> dict[str, Any]:
+    detail_url = PERSON_DETAIL_URL.format(person_id=person_id)
+    last_error = None
+    for attempt in range(3):
+        try:
+            payload = fetch_json(detail_url, PLAYER_PAGE_URL.format(person_id=person_id))
+            return {"person_id": person_id, "source_url": detail_url, "payload": payload}
+        except Exception as exc:  # pragma: no cover - network retry path
+            last_error = str(exc)
+            time.sleep(0.25 * (attempt + 1))
+    return {"person_id": person_id, "source_url": detail_url, "error": last_error}
+
+
+def person_ids_from_team_payloads(team_payloads: list[dict[str, Any]]) -> list[str]:
+    person_ids = set()
+    for team_data in team_payloads:
+        groups = (((team_data.get("member") or {}).get("data") or {}).get("list") or [])
+        for group in groups:
+            if group.get("title") in {"教练", "工作人员"}:
+                continue
+            for item in group.get("data") or []:
+                person_id = str(item.get("person_id") or "").strip()
+                position = POSITION_MAP.get(item.get("type")) or POSITION_MAP.get(group.get("title")) or group.get("title")
+                if person_id and position in {"FW", "MF", "DF", "GK"}:
+                    person_ids.add(person_id)
+    return sorted(person_ids)
+
+
+def collect_person_details(team_payloads: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+    person_ids = person_ids_from_team_payloads(team_payloads)
+    details: dict[str, dict[str, Any]] = {}
+    errors: list[dict[str, str]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=PERSON_DETAIL_MAX_WORKERS) as executor:
+        future_map = {executor.submit(collect_person_detail, person_id): person_id for person_id in person_ids}
+        for future in concurrent.futures.as_completed(future_map):
+            result = future.result()
+            person_id = result["person_id"]
+            if result.get("error"):
+                errors.append({"person_id": person_id, "error": result["error"]})
+            else:
+                details[person_id] = result
+    return details, errors
 
 
 def load_player_avatar_cache() -> dict[str, str]:
@@ -533,13 +608,20 @@ def ensure_team(db, index: dict[str, Any], team_data: dict[str, Any]) -> dict:
         short_team_id(source_team_id),
         code,
     }
+    db.execute(
+        delete(team_aliases).where(
+            team_aliases.c.source == "dongqiudi",
+            team_aliases.c.source_team_id == source_team_id,
+            team_aliases.c.alias != source_team_id,
+        )
+    )
     for alias in {item.strip() for item in aliases if item and str(item).strip()}:
         db.execute(
             pg_insert(team_aliases)
             .values(
                 team_id=team_id,
                 source="dongqiudi",
-                source_team_id=source_team_id if alias == team_name else f"{source_team_id}:{alias}",
+                source_team_id=source_team_id if alias == source_team_id else f"{source_team_id}:{alias}",
                 alias=alias,
                 confidence=1.0,
                 is_primary=alias == team_name,
@@ -557,7 +639,13 @@ def ensure_team(db, index: dict[str, Any], team_data: dict[str, Any]) -> dict:
     return {"id": team_id, "code": code, "source_team_id": source_team_id, "name_zh": team_name, "name_en": team_en_name}
 
 
-def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapshot_id) -> dict:
+def upsert_roster_players(
+    db,
+    team_row: dict,
+    team_data: dict[str, Any],
+    snapshot_id,
+    person_details: dict[str, dict[str, Any]],
+) -> dict:
     member = team_data.get("member") or {}
     groups = ((member.get("data") or {}).get("list") or [])
     source_url = team_data["source_urls"]["member"]
@@ -576,25 +664,41 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
             if not person_id or not name:
                 continue
             code = f"DQD-P{person_id}"
+            person_detail = person_details.get(person_id)
+            base_info = person_detail_base_info(person_detail)
+            team_info = base_info.get("team_info") or {}
             market_value = statistic_market_value(item)
             market_source_type = "team_member_v2_market_value"
             market_source_url = source_url
             if market_value is None:
+                market_value = person_detail_market_value(base_info)
+                market_source_type = "person_detail_market_value"
+                market_source_url = (person_detail or {}).get("source_url") or PERSON_DETAIL_URL.format(person_id=person_id)
+            if market_value is None:
                 market_value = player_profile_market_value(person_id)
                 market_source_type = "player_profile_market_value"
                 market_source_url = PLAYER_PAGE_URL.format(person_id=person_id)
-            position = POSITION_MAP.get(item.get("type")) or POSITION_MAP.get(group_title) or group_title
+            position = (
+                POSITION_MAP.get(base_info.get("position"))
+                or POSITION_MAP.get(team_info.get("role"))
+                or POSITION_MAP.get(item.get("type"))
+                or POSITION_MAP.get(group_title)
+                or group_title
+            )
             if position not in {"FW", "MF", "DF", "GK"}:
                 continue
+            birth_date = parse_birth_date(base_info.get("date_of_birth"))
+            club_name = team_info.get("team_name") or item.get("nationality_name")
             player_rows.append(
                 {
                     "team_id": team_row["id"],
                     "code": code,
                     "name_zh": name,
-                    "name_en": item.get("person_en_name") or name,
+                    "name_en": base_info.get("person_en_name") or item.get("person_en_name") or name,
                     "position": position,
-                    "shirt_number": to_int(item.get("shirtnumber")),
-                    "club_name": item.get("nationality_name"),
+                    "shirt_number": to_int(team_info.get("shirtnumber") or item.get("shirtnumber")),
+                    "birth_date": birth_date,
+                    "club_name": club_name,
                     "market_value_eur": market_value,
                     "is_key_player": bool(item.get("captain_logo")),
                     "quality_status": "source",
@@ -626,11 +730,36 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
                         "source_team_id": team_row["source_team_id"],
                         "group": group_title,
                         "position_type": item.get("type"),
-                        "club_or_affiliation": item.get("nationality_name"),
+                        "club_or_affiliation": club_name,
+                        "birth_date": birth_date.isoformat() if birth_date else None,
+                        "detail_position": base_info.get("position"),
+                        "detail_url": (person_detail or {}).get("source_url"),
                         "scheme": item.get("scheme"),
                     },
                 )
             )
+            if person_detail and base_info:
+                links.append(
+                    source_link(
+                        "player",
+                        code,
+                        "person_detail",
+                        person_detail["source_url"],
+                        snapshot_id,
+                        person_id,
+                        0.9,
+                        {
+                            "team_code": team_row["code"],
+                            "source_team_id": team_row["source_team_id"],
+                            "date_of_birth": base_info.get("date_of_birth"),
+                            "height": base_info.get("height"),
+                            "weight": base_info.get("weight"),
+                            "position": base_info.get("position"),
+                            "club_name": club_name,
+                            "team_info": team_info,
+                        },
+                    )
+                )
             avatar_url = str(item.get("person_logo") or "").strip()
             if avatar_url.startswith("http"):
                 links.append(
@@ -718,7 +847,8 @@ def upsert_roster_players(db, team_row: dict, team_data: dict[str, Any], snapsho
                     "name_en": pg_insert(players).excluded.name_en,
                     "position": pg_insert(players).excluded.position,
                     "shirt_number": pg_insert(players).excluded.shirt_number,
-                    "club_name": pg_insert(players).excluded.club_name,
+                    "birth_date": func.coalesce(pg_insert(players).excluded.birth_date, players.c.birth_date),
+                    "club_name": func.coalesce(pg_insert(players).excluded.club_name, players.c.club_name),
                     "market_value_eur": func.coalesce(pg_insert(players).excluded.market_value_eur, players.c.market_value_eur),
                     "is_key_player": pg_insert(players).excluded.is_key_player,
                     "quality_status": pg_insert(players).excluded.quality_status,
@@ -1091,7 +1221,10 @@ def cleanup_non_player_roster_records(db) -> int:
         for row in db.execute(
             select(players.c.code).where(
                 players.c.code.like("DQD-P%"),
-                players.c.position.notin_(["FW", "MF", "DF", "GK"]),
+                or_(
+                    players.c.position.is_(None),
+                    players.c.position.notin_(["FW", "MF", "DF", "GK"]),
+                ),
             )
         ).mappings().all()
     ]
@@ -1130,6 +1263,44 @@ def cleanup_non_dongqiudi_player_rows(db) -> int:
     )
     db.execute(delete(players).where(players.c.code.in_(fifa_codes)))
     return len(fifa_codes)
+
+
+def cleanup_stale_dongqiudi_player_rows(db, current_person_ids: set[str]) -> int:
+    current_codes = {f"DQD-P{person_id}" for person_id in current_person_ids}
+    if not current_codes:
+        return 0
+    stale_codes = [
+        row.code
+        for row in db.execute(
+            select(players.c.code).where(
+                players.c.code.like("DQD-P%"),
+                players.c.code.notin_(current_codes),
+            )
+        ).mappings().all()
+    ]
+    for code in stale_codes:
+        db.execute(
+            delete(data_source_links).where(
+                data_source_links.c.source == "dongqiudi",
+                or_(
+                    data_source_links.c.entity_key == code,
+                    data_source_links.c.entity_key.like(f"{code}:%"),
+                ),
+            )
+        )
+    if stale_codes:
+        stale_player_ids = [
+            row.id
+            for row in db.execute(select(players.c.id).where(players.c.code.in_(stale_codes))).mappings().all()
+        ]
+        if stale_player_ids:
+            db.execute(
+                update(ai_insights)
+                .where(ai_insights.c.player_id.in_(stale_player_ids))
+                .values(player_id=None, is_model_eligible=False)
+            )
+        db.execute(delete(players).where(players.c.code.in_(stale_codes)))
+    return len(stale_codes)
 
 
 def cleanup_fifa_squad_only_coaches(db) -> int:
@@ -1175,6 +1346,8 @@ def run() -> dict:
     ranking_html = fetch_text(RANKING_TEAM_URL)
     team_refs = parse_world_cup_teams(ranking_html)
     team_payloads = collect_all_teams(team_refs)
+    current_person_ids = set(person_ids_from_team_payloads(team_payloads))
+    person_details, person_detail_errors = collect_person_details(team_payloads)
     team_rankings = fetch_team_rankings()
     payload = {"ranking_url": RANKING_TEAM_URL, "teams": team_payloads}
 
@@ -1203,7 +1376,7 @@ def run() -> dict:
         coaches_written = 0
         team_market_values = 0
         team_stat_rows_written = 0
-        errors = []
+        errors = [{"person_id": row["person_id"], "error": row["error"]} for row in person_detail_errors]
 
         for team_data in team_payloads:
             if team_data.get("error"):
@@ -1246,7 +1419,7 @@ def run() -> dict:
             team_row = team_rows_by_source_id.get(str((team_data.get("detail") or {}).get("base_info", {}).get("team_id") or team_data.get("team_id")))
             if team_data.get("error") or not team_row:
                 continue
-            roster_result = upsert_roster_players(db, team_row, team_data, snapshot_id)
+            roster_result = upsert_roster_players(db, team_row, team_data, snapshot_id, person_details)
             players_written += roster_result["players"]
             player_forms_written += roster_result["player_forms"]
             links.extend(roster_result["links"])
@@ -1258,6 +1431,7 @@ def run() -> dict:
         avatar_cache_result = update_player_avatar_cache(team_payloads)
         non_player_roster_records_removed = cleanup_non_player_roster_records(db)
         non_dongqiudi_player_rows_removed = cleanup_non_dongqiudi_player_rows(db)
+        stale_dongqiudi_player_rows_removed = cleanup_stale_dongqiudi_player_rows(db, current_person_ids)
         fifa_squad_only_coaches_removed = cleanup_fifa_squad_only_coaches(db)
         counts = db.execute(
             select(
@@ -1272,6 +1446,8 @@ def run() -> dict:
         "team_payloads_ok": len([team for team in team_payloads if not team.get("error")]),
         "teams_written": teams_written,
         "team_market_values": team_market_values,
+        "person_details_found": len(person_details),
+        "person_detail_errors": len(person_detail_errors),
         "roster_players_written": players_written,
         "player_form_rows_written": player_forms_written,
         "coaches_written": coaches_written,
@@ -1280,6 +1456,7 @@ def run() -> dict:
         **avatar_cache_result,
         "non_player_roster_records_removed": non_player_roster_records_removed,
         "non_dongqiudi_player_rows_removed": non_dongqiudi_player_rows_removed,
+        "stale_dongqiudi_player_rows_removed": stale_dongqiudi_player_rows_removed,
         "fifa_squad_only_coaches_removed": fifa_squad_only_coaches_removed,
         "source_links_written": links_written,
         "players_total": int(counts.players_total),

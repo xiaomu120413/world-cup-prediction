@@ -416,6 +416,15 @@ def parse_kickoff(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def match_status_from_dongqiudi(status: str | None) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized == "played":
+        return "finished"
+    if normalized in {"playing", "live", "inplay", "in_play", "half_time", "halftime", "ht"}:
+        return "live"
+    return "scheduled"
+
+
 def result_for(goals_for: int | None, goals_against: int | None, status: str) -> str:
     if status != "Played" or goals_for is None or goals_against is None:
         return "scheduled"
@@ -449,7 +458,7 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
         if not home or not away:
             continue
         public_id = f"dongqiudi-{item['match_id']}"
-        status = "finished" if item.get("status") == "Played" else "scheduled"
+        status = match_status_from_dongqiudi(item.get("status"))
         home_score = int(item["score_A"]) if str(item.get("score_A", "")).isdigit() else None
         away_score = int(item["score_B"]) if str(item.get("score_B", "")).isdigit() else None
         match_id = db.execute(

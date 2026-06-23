@@ -30,6 +30,7 @@ from app.predictions.small_outcome_model import (
 )
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "exports" / "small_outcome_model_latest.json"
+DEFAULT_TRAINING_SEED = 20260615
 FEATURE_CONTEXT_SET = "match_pre_match_v1"
 BASE_PROBABILITY_FEATURE_NAMES = (
     "base_prob_home_win",
@@ -85,12 +86,12 @@ def sanitize_metric_name(value: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in value.lower()).strip("_")
 
 
+# Gate inference on stable sourced identity/value fields; sparse player-form aggregates remain model features.
 CRITICAL_CONTEXT_FEATURE_NAMES = {
     "ctx_fifa_rank_strength",
     "ctx_team_market_value_log",
     "ctx_roster_market_value_log",
     "ctx_avg_player_market_value_log",
-    "ctx_avg_form_score",
 }
 
 
@@ -112,9 +113,12 @@ class CurrentContextFeatureStore:
         )
 
     def has_team(self, team_id: str | None) -> bool:
-        if not team_id or team_id not in self.roster_team_ids or team_id not in self.team_vectors:
+        if not self.has_mapped_team(team_id):
             return False
         return not (self.team_missing_features.get(team_id, set()) & self.required_feature_names)
+
+    def has_mapped_team(self, team_id: str | None) -> bool:
+        return bool(team_id and team_id in self.roster_team_ids and team_id in self.team_vectors)
 
     def missing_features(self, team_id: str | None) -> set[str]:
         if not team_id:
@@ -408,8 +412,8 @@ def augment_examples_with_current_context(
     output = []
     for example in examples:
         if roster_context_only and (
-            not context_store.has_team(example.home_team_id)
-            or not context_store.has_team(example.away_team_id)
+            not context_store.has_mapped_team(example.home_team_id)
+            or not context_store.has_mapped_team(example.away_team_id)
         ):
             continue
         context_features = context_store.diff_features(example.home_team_id, example.away_team_id)
@@ -427,7 +431,7 @@ def examples_with_context_filter(
     return [
         example
         for example in examples
-        if context_store.has_team(example.home_team_id) and context_store.has_team(example.away_team_id)
+        if context_store.has_mapped_team(example.home_team_id) and context_store.has_mapped_team(example.away_team_id)
     ]
 
 
@@ -681,6 +685,22 @@ def build_report(args) -> dict[str, Any]:
 
         if mode in {"calibrated", "joint"}:
             context_store = load_current_context_feature_store(db, include_all_team_stats=args.include_all_team_stats)
+        mapped_context_examples_count = (
+            len(examples_with_context_filter(examples, context_store, roster_context_only=True))
+            if context_store is not None
+            else 0
+        )
+        strict_context_examples_count = (
+            sum(
+                1
+                for example in examples
+                if context_store is not None
+                and context_store.has_team(example.home_team_id)
+                and context_store.has_team(example.away_team_id)
+            )
+            if context_store is not None
+            else 0
+        )
 
         if mode == "joint":
             active_examples = augment_examples_with_current_context(
@@ -829,6 +849,14 @@ def build_report(args) -> dict[str, Any]:
             "feature_count": len(model.feature_names),
             "context_feature_count": 0 if context_store is None else len(context_store.feature_names),
             "roster_context_team_count": 0 if context_store is None else len(context_store.roster_team_ids),
+            "mapped_context_examples": mapped_context_examples_count,
+            "strict_context_examples": strict_context_examples_count,
+            "context_training_policy": (
+                "mapped_roster_team_context; missing numeric context is zero-filled for training, "
+                "while current-match inference still requires critical context fields"
+                if context_store is not None
+                else "history_only"
+            ),
         },
         "metrics": metrics,
         "interpretation": {
@@ -839,7 +867,9 @@ def build_report(args) -> dict[str, Any]:
             "current_context_note": (
                 "Two-layer mode: history_core learns from leakage-safe historical features. The context_calibrator is used only when it passes "
                 "the calibration gate against the same-subset Elo baseline; otherwise official predictions fall back to history_core. "
-                "Backtest metrics for current-only context remain directional until daily pre-match snapshots accumulate."
+                "Training keeps mapped 48-team context rows even when non-core current fields are missing; current-match inference still falls "
+                "back when required context fields are incomplete. Backtest metrics for current-only context remain directional until daily "
+                "pre-match snapshots accumulate."
                 if context_store is not None
                 else "History-only model; no current roster/player/team-board context included."
             ),
@@ -863,7 +893,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--learning-rate", type=float, default=0.025)
     parser.add_argument("--l2", type=float, default=0.0008)
-    parser.add_argument("--seed", type=int, default=20260615)
+    parser.add_argument("--seed", type=int, default=DEFAULT_TRAINING_SEED)
     parser.add_argument("--current-limit", type=int, default=12)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
@@ -881,7 +911,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-missing-context-training",
         action="store_true",
-        help="Keep historical examples whose teams do not both have current Dongqiudi roster context, filling missing context with zero.",
+        help="Keep historical examples even when teams do not both map to the current Dongqiudi roster context, filling missing context with zero.",
     )
     args = parser.parse_args()
 
