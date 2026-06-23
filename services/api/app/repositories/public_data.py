@@ -1670,8 +1670,8 @@ class PublicDataRepository:
         result_summary = self.team_result_summary(team_row.id, team_form)
         coach_profile = self.team_coach_profile(team_row.id)
         related_matches = self.team_related_matches(team_row.id, team_id)
-        champion_probability = self.latest_team_ranking_probability(team_row.id, "champion")
-        semifinal_probability = self.latest_team_ranking_probability(team_row.id, "semifinal")
+        champion_ranking = self.latest_team_ranking_entry(team_row.id, "champion")
+        semifinal_ranking = self.latest_team_ranking_entry(team_row.id, "semifinal")
         team_news = self.list_team_news(team_row.id, team_row)
 
         return {
@@ -1681,12 +1681,14 @@ class PublicDataRepository:
             "probabilities": [
                 {
                     "label": "冠军概率",
-                    "value": champion_probability,
+                    "value": champion_ranking["probability"] if champion_ranking else None,
+                    "delta": champion_ranking["delta"] if champion_ranking else None,
                     "source": "ranking_predictions",
                 },
                 {
                     "label": "四强概率",
-                    "value": semifinal_probability,
+                    "value": semifinal_ranking["probability"] if semifinal_ranking else None,
+                    "delta": semifinal_ranking["delta"] if semifinal_ranking else None,
                     "source": "ranking_predictions",
                 },
                 {
@@ -2048,7 +2050,7 @@ class PublicDataRepository:
             "top5_market_share": f"{top5_market_share}%" if top5_market_share is not None else None,
         }
 
-    def latest_team_ranking_probability(self, team_uuid, ranking_type: str) -> float | None:
+    def latest_team_ranking_entry(self, team_uuid, ranking_type: str) -> dict | None:
         latest_snapshot = (
             select(prediction_snapshots.c.id.label("snapshot_id"))
             .join(ranking_predictions, ranking_predictions.c.prediction_snapshot_id == prediction_snapshots.c.id)
@@ -2058,12 +2060,21 @@ class PublicDataRepository:
             .subquery()
         )
         row = self.db.execute(
-            select(ranking_predictions.c.probability)
+            select(ranking_predictions.c.probability, ranking_predictions.c.delta)
             .join(latest_snapshot, ranking_predictions.c.prediction_snapshot_id == latest_snapshot.c.snapshot_id)
             .where(and_(ranking_predictions.c.team_id == team_uuid, ranking_predictions.c.ranking_type == ranking_type))
             .limit(1)
         ).first()
-        return float(row.probability) if row else None
+        if not row:
+            return None
+        return {
+            "probability": float(row.probability),
+            "delta": float(row.delta) if row.delta is not None else None,
+        }
+
+    def latest_team_ranking_probability(self, team_uuid, ranking_type: str) -> float | None:
+        entry = self.latest_team_ranking_entry(team_uuid, ranking_type)
+        return entry["probability"] if entry else None
 
     @staticmethod
     def team_profile_summary(team_row, form_stats: dict, result_summary: dict, group_profile: dict | None) -> str:

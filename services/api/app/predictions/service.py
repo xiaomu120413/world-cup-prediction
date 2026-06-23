@@ -85,6 +85,8 @@ TEST_START = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
 WORLD_CUP_GROUP_CODES = tuple(f"group-{letter}" for letter in "abcdefghijkl")
 UNFILTERED_PREDICTION_SCOPES = {"all"}
 GROUP_SIMULATION_MIN_PROBABILITY = 1e-9
+WORLD_CUP_DIRECT_GROUP_QUALIFIERS = 2
+WORLD_CUP_THIRD_PLACE_QUALIFIERS = 8
 
 
 def prediction_match_statuses(scope: str) -> tuple[str, ...] | None:
@@ -978,7 +980,11 @@ class BaselinePredictionService:
             .join(competition_stages, group_standings.c.stage_id == competition_stages.c.id)
             .where(competition_stages.c.code.in_(WORLD_CUP_GROUP_CODES))
         ).mappings().all()
-        scored = [self.tournament_team_score(row) for row in team_rows]
+        group_paths = {
+            row["team_id"]: row
+            for row in self.build_group_simulation_values(snapshot_id)
+        }
+        scored = [self.tournament_team_score(row, group_paths.get(row.team_id)) for row in team_rows]
         if not scored:
             return 0
 
@@ -995,27 +1001,32 @@ class BaselinePredictionService:
 
         ranked = sorted(scored, key=lambda item: item["champion_prob"], reverse=True)
         semifinal_ranked = sorted(scored, key=lambda item: item["semifinal_prob"], reverse=True)
+        previous_champion = self.previous_ranking_probabilities("champion")
+        previous_semifinal = self.previous_ranking_probabilities("semifinal")
+        previous_darkhorse = self.previous_ranking_probabilities("darkhorse")
         rows = []
         for index, item in enumerate(ranked, start=1):
+            probability = round(item["champion_prob"], 5)
             rows.append(
                 {
                     "prediction_snapshot_id": snapshot_id,
                     "ranking_type": "champion",
                     "team_id": item["team_id"],
-                    "probability": round(item["champion_prob"], 5),
-                    "delta": 0,
+                    "probability": probability,
+                    "delta": self.ranking_probability_delta(probability, previous_champion.get(item["team_id"])),
                     "rank": index,
                     "reason": "tournament_path_strength",
                 }
             )
         for index, item in enumerate(semifinal_ranked, start=1):
+            probability = round(item["semifinal_prob"], 5)
             rows.append(
                 {
                     "prediction_snapshot_id": snapshot_id,
                     "ranking_type": "semifinal",
                     "team_id": item["team_id"],
-                    "probability": round(item["semifinal_prob"], 5),
-                    "delta": 0,
+                    "probability": probability,
+                    "delta": self.ranking_probability_delta(probability, previous_semifinal.get(item["team_id"])),
                     "rank": index,
                     "reason": "tournament_path_strength",
                 }
@@ -1039,13 +1050,14 @@ class BaselinePredictionService:
             reverse=True,
         )
         for index, item in enumerate(darkhorse_ranked[:10], start=1):
+            probability = round(item["darkhorse_prob"], 5)
             rows.append(
                 {
                     "prediction_snapshot_id": snapshot_id,
                     "ranking_type": "darkhorse",
                     "team_id": item["team_id"],
-                    "probability": round(item["darkhorse_prob"], 5),
-                    "delta": 0,
+                    "probability": probability,
+                    "delta": self.ranking_probability_delta(probability, previous_darkhorse.get(item["team_id"])),
                     "rank": index,
                     "reason": "darkhorse_upside",
                 }
@@ -1056,7 +1068,29 @@ class BaselinePredictionService:
         return len(rows)
 
     @staticmethod
-    def tournament_team_score(row) -> dict:
+    def ranking_probability_delta(probability: float, previous_probability: float | None) -> float:
+        if previous_probability is None:
+            return 0.0
+        return round(probability - previous_probability, 5)
+
+    def previous_ranking_probabilities(self, ranking_type: str) -> dict[Any, float]:
+        latest_snapshot = (
+            select(prediction_snapshots.c.id.label("snapshot_id"))
+            .join(ranking_predictions, ranking_predictions.c.prediction_snapshot_id == prediction_snapshots.c.id)
+            .where(ranking_predictions.c.ranking_type == ranking_type)
+            .order_by(desc(prediction_snapshots.c.generated_at))
+            .limit(1)
+            .subquery()
+        )
+        rows = self.db.execute(
+            select(ranking_predictions.c.team_id, ranking_predictions.c.probability)
+            .join(latest_snapshot, ranking_predictions.c.prediction_snapshot_id == latest_snapshot.c.snapshot_id)
+            .where(ranking_predictions.c.ranking_type == ranking_type)
+        ).mappings().all()
+        return {row.team_id: float(row.probability) for row in rows}
+
+    @staticmethod
+    def tournament_team_score(row, group_path: dict[str, Any] | None = None) -> dict:
         fifa_rank = row.fifa_rank or 99
         group_rank = row.group_rank or 4
         group_points = row.group_points or 0
@@ -1071,13 +1105,28 @@ class BaselinePredictionService:
         if group_played > 0:
             live_form_component = min(max(group_goal_diff / group_played, -2.0), 3.0) * 0.012
             live_form_component += min(group_goals_for / group_played, 4.0) * 0.004
+        path_component = 0.0
+        if group_path:
+            qualify_prob = float(group_path.get("qualify_prob") or 0.0)
+            rank_1_prob = float(group_path.get("rank_1_prob") or 0.0)
+            expected_points = float(group_path.get("expected_points") or group_points)
+            path_component = (qualify_prob - 0.5) * 0.32
+            path_component += rank_1_prob * 0.16
+            path_component += min(max(expected_points - group_points, 0.0), 3.0) * 0.01
         return {
             "team_id": row.team_id,
-            "score": base_score + market_component + group_component + live_form_component,
+            "score": base_score + market_component + group_component + live_form_component + path_component,
             "fifa_rank": fifa_rank,
         }
 
     def write_group_simulations(self, snapshot_id) -> int:
+        values = self.build_group_simulation_values(snapshot_id)
+        if not values:
+            return 0
+        self.db.execute(insert(group_simulations), values)
+        return len(values)
+
+    def build_group_simulation_values(self, snapshot_id) -> list[dict[str, Any]]:
         rows = self.db.execute(
             select(
                 competition_stages.c.id.label("stage_id"),
@@ -1093,17 +1142,30 @@ class BaselinePredictionService:
             .order_by(competition_stages.c.code.asc(), group_standings.c.rank.asc())
         ).mappings().all()
         if not rows:
-            return 0
+            return []
 
         grouped: dict[object, list] = {}
         for row in rows:
             grouped.setdefault(row.stage_id, []).append(row)
 
-        values = []
+        group_states_by_stage: dict[Any, list[tuple[float, list[dict[str, Any]]]]] = {}
         for stage_id, stage_rows in grouped.items():
             team_ids = [row.team_id for row in stage_rows]
             remaining_matches = self.load_group_remaining_matches(stage_id, team_ids, snapshot_id)
-            simulation = simulate_group_table(stage_rows, remaining_matches)
+            group_states_by_stage[stage_id] = enumerate_group_table_states(stage_rows, remaining_matches)
+
+        third_place_qualifiers = third_place_state_qualifying_probabilities(group_states_by_stage)
+        values: list[dict[str, Any]] = []
+        for stage_id, stage_rows in grouped.items():
+            simulation = aggregate_group_simulation(
+                stage_rows,
+                group_states_by_stage[stage_id],
+                {
+                    state_index: probability
+                    for (qualifier_stage_id, state_index), probability in third_place_qualifiers.items()
+                    if qualifier_stage_id == stage_id
+                },
+            )
             for row in stage_rows:
                 team_simulation = simulation[row.team_id]
                 values.append(
@@ -1117,9 +1179,7 @@ class BaselinePredictionService:
                         "expected_points": team_simulation["expected_points"],
                     }
                 )
-
-        self.db.execute(insert(group_simulations), values)
-        return len(values)
+        return values
 
     def load_group_remaining_matches(self, stage_id, team_ids: list[Any], snapshot_id) -> list[dict[str, Any]]:
         if not team_ids:
@@ -1170,6 +1230,23 @@ def group_sort_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
     )
 
 
+def probability_at_most_successes(probabilities: list[float], max_successes: int) -> float:
+    if max_successes < 0:
+        return 0.0
+    if max_successes >= len(probabilities):
+        return 1.0
+
+    distribution = [1.0]
+    for probability in probabilities:
+        bounded_probability = min(max(float(probability), 0.0), 1.0)
+        next_distribution = [0.0] * (len(distribution) + 1)
+        for index, value in enumerate(distribution):
+            next_distribution[index] += value * (1.0 - bounded_probability)
+            next_distribution[index + 1] += value * bounded_probability
+        distribution = next_distribution
+    return sum(distribution[: max_successes + 1])
+
+
 def group_match_outcomes(match_row: dict[str, Any]) -> list[dict[str, Any]]:
     home_xg = float(match_row.get("home_expected_goals") or 1.2)
     away_xg = float(match_row.get("away_expected_goals") or 1.2)
@@ -1215,7 +1292,10 @@ def group_match_outcomes(match_row: dict[str, Any]) -> list[dict[str, Any]]:
     return outcomes
 
 
-def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str, Any]]) -> dict[Any, dict[str, float]]:
+def enumerate_group_table_states(
+    stage_rows: list[Any],
+    remaining_matches: list[dict[str, Any]],
+) -> list[tuple[float, list[dict[str, Any]]]]:
     base_table = {
         row.team_id: {
             "team_id": row.team_id,
@@ -1225,15 +1305,6 @@ def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str
             "goals_for": float(row.goals_for or 0),
         }
         for row in stage_rows
-    }
-    accumulator = {
-        team_id: {
-            "rank_1_prob": 0.0,
-            "rank_2_prob": 0.0,
-            "qualify_prob": 0.0,
-            "expected_points": 0.0,
-        }
-        for team_id in base_table
     }
     states: list[tuple[float, dict[Any, dict[str, Any]]]] = [(1.0, base_table)]
     for match_row in remaining_matches:
@@ -1260,9 +1331,118 @@ def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str
         states = next_states or states
 
     total_probability = sum(probability for probability, _table in states) or 1.0
-    for probability, table in states:
-        normalized_probability = probability / total_probability
-        ranked = sorted(table.values(), key=group_sort_key)
+    return [
+        (probability / total_probability, sorted(table.values(), key=group_sort_key))
+        for probability, table in states
+    ]
+
+
+def third_place_qualifying_probabilities(
+    group_states_by_stage: dict[Any, list[tuple[float, list[dict[str, Any]]]]],
+) -> dict[Any, float]:
+    third_entries_by_stage: dict[Any, list[dict[str, Any]]] = {}
+    for stage_id, states in group_states_by_stage.items():
+        entries = []
+        for probability, ranked in states:
+            if len(ranked) <= WORLD_CUP_DIRECT_GROUP_QUALIFIERS:
+                continue
+            third_team = ranked[WORLD_CUP_DIRECT_GROUP_QUALIFIERS]
+            entries.append(
+                {
+                    "team_id": third_team["team_id"],
+                    "probability": probability,
+                    "sort_key": group_sort_key(third_team),
+                }
+            )
+        third_entries_by_stage[stage_id] = entries
+
+    max_better_third_teams = WORLD_CUP_THIRD_PLACE_QUALIFIERS - 1
+    probabilities_by_team: dict[Any, float] = {}
+    for stage_id, entries in third_entries_by_stage.items():
+        other_stage_entries = [
+            other_entries
+            for other_stage_id, other_entries in third_entries_by_stage.items()
+            if other_stage_id != stage_id
+        ]
+        for candidate in entries:
+            better_probabilities = [
+                sum(
+                    other_entry["probability"]
+                    for other_entry in other_entries
+                    if other_entry["sort_key"] < candidate["sort_key"]
+                )
+                for other_entries in other_stage_entries
+            ]
+            qualify_given_candidate = probability_at_most_successes(
+                better_probabilities,
+                max_better_third_teams,
+            )
+            probabilities_by_team[candidate["team_id"]] = probabilities_by_team.get(candidate["team_id"], 0.0) + (
+                candidate["probability"] * qualify_given_candidate
+            )
+    return probabilities_by_team
+
+
+def third_place_state_qualify_probability(
+    group_states_by_stage: dict[Any, list[tuple[float, list[dict[str, Any]]]]],
+    stage_id: Any,
+    candidate_key: tuple[float, float, float, float],
+) -> float:
+    better_probabilities = []
+    for other_stage_id, other_states in group_states_by_stage.items():
+        if other_stage_id == stage_id:
+            continue
+        better_probability = 0.0
+        for probability, ranked in other_states:
+            if len(ranked) <= WORLD_CUP_DIRECT_GROUP_QUALIFIERS:
+                continue
+            other_third = ranked[WORLD_CUP_DIRECT_GROUP_QUALIFIERS]
+            if group_sort_key(other_third) < candidate_key:
+                better_probability += probability
+        better_probabilities.append(better_probability)
+    return probability_at_most_successes(better_probabilities, WORLD_CUP_THIRD_PLACE_QUALIFIERS - 1)
+
+
+def third_place_state_qualifying_probabilities(
+    group_states_by_stage: dict[Any, list[tuple[float, list[dict[str, Any]]]]],
+) -> dict[tuple[Any, int], float]:
+    probabilities: dict[tuple[Any, int], float] = {}
+    for stage_id, states in group_states_by_stage.items():
+        for state_index, (_probability, ranked) in enumerate(states):
+            if len(ranked) <= WORLD_CUP_DIRECT_GROUP_QUALIFIERS:
+                probabilities[(stage_id, state_index)] = 0.0
+                continue
+            third_team = ranked[WORLD_CUP_DIRECT_GROUP_QUALIFIERS]
+            probabilities[(stage_id, state_index)] = third_place_state_qualify_probability(
+                group_states_by_stage,
+                stage_id,
+                group_sort_key(third_team),
+            )
+    return probabilities
+
+
+def aggregate_group_simulation(
+    stage_rows: list[Any],
+    group_states: list[tuple[float, list[dict[str, Any]]]],
+    third_place_qualifiers: dict[int, float] | None = None,
+) -> dict[Any, dict[str, float]]:
+    accumulator = {
+        row.team_id: {
+            "rank_1_prob": 0.0,
+            "rank_2_prob": 0.0,
+            "qualify_prob": 0.0,
+            "expected_points": 0.0,
+        }
+        for row in stage_rows
+    }
+
+    for state_index, (normalized_probability, ranked) in enumerate(group_states):
+        rank_3_team_id = None
+        if len(ranked) > WORLD_CUP_DIRECT_GROUP_QUALIFIERS:
+            rank_3_team_id = ranked[WORLD_CUP_DIRECT_GROUP_QUALIFIERS]["team_id"]
+            rank_3_qualify_probability = (third_place_qualifiers or {}).get(state_index, 0.0)
+        else:
+            rank_3_qualify_probability = 0.0
         for index, team_row in enumerate(ranked, start=1):
             team_id = team_row["team_id"]
             accumulator[team_id]["expected_points"] += normalized_probability * float(team_row["points"])
@@ -1272,6 +1452,8 @@ def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str
             elif index == 2:
                 accumulator[team_id]["rank_2_prob"] += normalized_probability
                 accumulator[team_id]["qualify_prob"] += normalized_probability
+            elif index == 3 and team_id == rank_3_team_id:
+                accumulator[team_id]["qualify_prob"] += normalized_probability * rank_3_qualify_probability
 
     return {
         team_id: {
@@ -1282,3 +1464,15 @@ def simulate_group_table(stage_rows: list[Any], remaining_matches: list[dict[str
         }
         for team_id, values in accumulator.items()
     }
+
+
+def simulate_group_table(
+    stage_rows: list[Any],
+    remaining_matches: list[dict[str, Any]],
+    third_place_qualifiers: dict[Any, float] | None = None,
+) -> dict[Any, dict[str, float]]:
+    return aggregate_group_simulation(
+        stage_rows,
+        enumerate_group_table_states(stage_rows, remaining_matches),
+        third_place_qualifiers,
+    )
