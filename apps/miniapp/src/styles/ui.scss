@@ -3376,12 +3376,22 @@
   align-items: center;
   gap: 8rpx;
   min-height: 50rpx;
+  margin: 0;
   padding: 0 18rpx;
   border: 1rpx solid #d1d5db;
   border-radius: 28rpx;
   background: #ffffff;
   color: #111827;
   font-size: 24rpx;
+  line-height: 1;
+}
+
+.share-pill::after {
+  border: 0;
+}
+
+.share-pill--hover {
+  opacity: 0.72;
 }
 
 .match-card--report {

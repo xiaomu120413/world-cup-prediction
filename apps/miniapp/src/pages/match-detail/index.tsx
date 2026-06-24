@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Text, View } from '@tarojs/components'
-import Taro from '@tarojs/taro'
+import { Button, Text, View } from '@tarojs/components'
+import Taro, { useShareAppMessage } from '@tarojs/taro'
 import { BottomNav } from '@/components/BottomNav'
 import { EvidenceList } from '@/components/EvidenceList'
 import { Flag } from '@/components/Flag'
@@ -22,6 +22,14 @@ export default function MatchDetailPage() {
   const [match, setMatch] = useState<Match | null>(null)
   const [updatedAt, setUpdatedAt] = useState('')
   const [loadState, setLoadState] = useState<LoadState>('idle')
+  const [shareLabel, setShareLabel] = useState('分享报告')
+  const sharePath = `/pages/match-detail/index?matchId=${encodeURIComponent(match?.id || matchId || '')}`
+  const shareTitle = match ? `${match.home} vs ${match.away} AI 赛前报告` : '世界杯 AI 赛前报告'
+
+  useShareAppMessage(() => ({
+    title: shareTitle,
+    path: sharePath,
+  }))
 
   useEffect(() => {
     let mounted = true
@@ -44,6 +52,27 @@ export default function MatchDetailPage() {
       mounted = false
     }
   }, [matchId])
+
+  async function handleShareClick() {
+    if (process.env.TARO_ENV === 'weapp') {
+      return
+    }
+    const url = typeof window !== 'undefined' ? window.location.href : sharePath
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+      } else {
+        await Taro.setClipboardData({ data: url })
+      }
+      setShareLabel('已复制')
+      Taro.showToast({ title: '链接已复制', icon: 'success' })
+      window.setTimeout(() => setShareLabel('分享报告'), 1800)
+    } catch {
+      setShareLabel('复制失败')
+      Taro.showToast({ title: '复制失败', icon: 'none' })
+      window.setTimeout(() => setShareLabel('分享报告'), 1800)
+    }
+  }
 
   if (!match) {
     return (
@@ -73,10 +102,15 @@ export default function MatchDetailPage() {
           </View>
           <Text className='app-title'>AI 赛前报告</Text>
         </View>
-        <View className='share-pill'>
+        <Button
+          className='share-pill'
+          openType={process.env.TARO_ENV === 'weapp' ? 'share' : undefined}
+          hoverClass='share-pill--hover'
+          onClick={handleShareClick}
+        >
           <Icon name='share' color='#0f172a' size={28} />
-          <Text>分享报告</Text>
-        </View>
+          <Text>{shareLabel}</Text>
+        </Button>
       </View>
 
       <View className='match-card match-card--report'>
