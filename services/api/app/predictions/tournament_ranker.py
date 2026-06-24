@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import exp, log, log1p
 from random import Random
-from typing import Any
+from typing import Any, Callable
 
 from app.predictions.baseline import MatchInputs, TeamInputs, build_match_prediction
 
@@ -32,7 +32,7 @@ class TournamentRankingParams:
 
 
 DEFAULT_TOURNAMENT_RANKING_PARAMS = TournamentRankingParams(
-    version="tournament_ranker_2026_06_24_world_cup_backtest_context_v2",
+    version="tournament_ranker_2026_06_24_lightgbm_neutral_mc_v3",
     group_points_weight=0.02,
     live_goal_diff_per_match_weight=0.0,
     live_goals_for_per_match_weight=0.0,
@@ -111,7 +111,7 @@ SEMI_FINAL_MATCHES = (
 
 FINAL_MATCH = ("M103", "M101", "M102")
 
-DEFAULT_MONTE_CARLO_ITERATIONS = 12000
+DEFAULT_MONTE_CARLO_ITERATIONS = 30000
 
 
 def normalized_team_strength(row: Any) -> float:
@@ -250,13 +250,14 @@ def knockout_context_logit_adjustment(
     team_a: Any,
     team_b: Any,
     params: TournamentRankingParams = DEFAULT_TOURNAMENT_RANKING_PARAMS,
+    include_market: bool = True,
 ) -> float:
     market_a = max(safe_float(getattr(team_a, "market_value_eur", 0)), 0.0)
     market_b = max(safe_float(getattr(team_b, "market_value_eur", 0)), 0.0)
     market_edge = log1p(market_a) - log1p(market_b)
     form_a = tournament_form_features(team_a)
     form_b = tournament_form_features(team_b)
-    adjustment = market_edge * params.knockout_market_log_weight
+    adjustment = market_edge * params.knockout_market_log_weight if include_market else 0.0
     adjustment += (form_a["points_per_match"] - form_b["points_per_match"]) * params.knockout_points_per_match_weight
     adjustment += (form_a["goal_diff_per_match"] - form_b["goal_diff_per_match"]) * params.knockout_goal_diff_per_match_weight
     adjustment += (form_a["goals_for_per_match"] - form_b["goals_for_per_match"]) * params.knockout_goals_for_per_match_weight
@@ -318,10 +319,13 @@ def simulate_match(
     teams_by_id: dict[Any, Any],
     rng: Random,
     params: TournamentRankingParams,
+    pair_probability: Callable[[Any, Any], float] | None = None,
 ) -> Any:
     if team_a_id == team_b_id:
         return team_a_id
-    probability = knockout_advancement_probability(teams_by_id[team_a_id], teams_by_id[team_b_id], params)
+    team_a = teams_by_id[team_a_id]
+    team_b = teams_by_id[team_b_id]
+    probability = pair_probability(team_a, team_b) if pair_probability else knockout_advancement_probability(team_a, team_b, params)
     return team_a_id if rng.random() < probability else team_b_id
 
 
@@ -350,6 +354,7 @@ def simulate_tournament_paths(
     iterations: int = DEFAULT_MONTE_CARLO_ITERATIONS,
     seed: int = 20260624,
     params: TournamentRankingParams = DEFAULT_TOURNAMENT_RANKING_PARAMS,
+    pair_probability: Callable[[Any, Any], float] | None = None,
 ) -> dict[str, Any]:
     rng = Random(seed)
     champion_counts = {team_id: 0 for team_id in teams_by_id}
@@ -395,20 +400,20 @@ def simulate_tournament_paths(
 
         winners: dict[str, Any] = {}
         for match_code, (team_a_id, team_b_id) in round32_pairings.items():
-            winners[match_code] = simulate_match(team_a_id, team_b_id, teams_by_id, rng, params)
+            winners[match_code] = simulate_match(team_a_id, team_b_id, teams_by_id, rng, params, pair_probability)
         for match_code, previous_a, previous_b in ROUND_OF_16_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params)
+            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
         for match_code, previous_a, previous_b in QUARTER_FINAL_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params)
+            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
 
         semifinalists = [winners[match_code] for match_code, _a, _b in QUARTER_FINAL_MATCHES]
         for team_id in semifinalists:
             semifinal_counts[team_id] = semifinal_counts.get(team_id, 0) + 1
 
         for match_code, previous_a, previous_b in SEMI_FINAL_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params)
+            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
         final_code, previous_a, previous_b = FINAL_MATCH
-        winners[final_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params)
+        winners[final_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
         champion_counts[winners[final_code]] = champion_counts.get(winners[final_code], 0) + 1
         completed_iterations += 1
 

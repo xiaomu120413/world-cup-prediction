@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID as ParsedUUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, and_, bindparam, case, desc, func, or_, select, text
+from sqlalchemy import Select, and_, bindparam, case, desc, func, literal, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.collectors.catalog import collection_catalog_summary
@@ -672,22 +672,26 @@ class PublicDataRepository:
 
     @staticmethod
     def groups_query() -> Select:
+        standings_progress = (
+            select(
+                group_standings.c.stage_id.label("stage_id"),
+                (func.coalesce(func.sum(group_standings.c.played), 0) / 2).label("matches_finished"),
+            )
+            .group_by(group_standings.c.stage_id)
+            .subquery()
+        )
         return (
             select(
                 competition_stages.c.code,
                 competition_stages.c.name,
-                func.count(matches.c.id).label("matches_total"),
-                func.coalesce(
-                    func.sum(case((matches.c.status == "finished", 1), else_=0)),
-                    0,
-                ).label("matches_finished"),
+                literal(6).label("matches_total"),
+                func.coalesce(standings_progress.c.matches_finished, 0).label("matches_finished"),
             )
-            .outerjoin(matches, matches.c.stage_id == competition_stages.c.id)
+            .outerjoin(standings_progress, standings_progress.c.stage_id == competition_stages.c.id)
             .where(
                 competition_stages.c.stage_type == "group",
                 competition_stages.c.code.in_(WORLD_CUP_GROUP_CODES),
             )
-            .group_by(competition_stages.c.id, competition_stages.c.code, competition_stages.c.name)
             .order_by(competition_stages.c.sort_order.asc(), competition_stages.c.code.asc())
         )
 

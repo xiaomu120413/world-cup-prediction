@@ -142,6 +142,9 @@ and (
         where (m.home_team_id = t.id or m.away_team_id = t.id)
           and m.public_id like 'dongqiudi-%'
     )
+    or t.code like 'GROUP-%'
+    or t.code like 'WINNER-MATCH-%'
+    or t.code like 'LOSER-MATCH-%'
 )
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,
@@ -225,6 +228,84 @@ join lateral (
     order by fetched_at desc
     limit 1
 ) latest on true
+on conflict (entity_type, entity_key, source, source_type) do update set
+    source_url = excluded.source_url,
+    raw_snapshot_id = excluded.raw_snapshot_id,
+    source_record_id = excluded.source_record_id,
+    confidence = excluded.confidence,
+    fetched_at = now(),
+    metadata = excluded.metadata;
+
+insert into data_source_links (
+    entity_type,
+    entity_key,
+    source,
+    source_type,
+    source_url,
+    raw_snapshot_id,
+    source_record_id,
+    confidence,
+    metadata
+)
+select
+    'venue',
+    v.code,
+    'manual_verified',
+    'venue_enrichment',
+    null,
+    null,
+    v.code,
+    0.9,
+    jsonb_build_object('name', v.name, 'backfilled', true)
+from venues v
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'venue' and l.entity_key = v.code
+)
+on conflict (entity_type, entity_key, source, source_type) do update set
+    source_url = excluded.source_url,
+    raw_snapshot_id = excluded.raw_snapshot_id,
+    source_record_id = excluded.source_record_id,
+    confidence = excluded.confidence,
+    fetched_at = now(),
+    metadata = excluded.metadata;
+
+insert into data_source_links (
+    entity_type,
+    entity_key,
+    source,
+    source_type,
+    source_url,
+    raw_snapshot_id,
+    source_record_id,
+    confidence,
+    metadata
+)
+select
+    'weather_snapshot',
+    v.code || ':' || to_char(ws.observed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') || '+00:00',
+    'open_meteo',
+    'venue_current_weather',
+    coalesce(latest.source_url, 'https://api.open-meteo.com/v1/forecast'),
+    latest.id,
+    v.code || ':' || ws.observed_at::text,
+    0.85,
+    jsonb_build_object('venue_code', v.code, 'observed_at', ws.observed_at, 'backfilled', true)
+from weather_snapshots ws
+join venues v on v.id = ws.venue_id
+left join lateral (
+    select id, source_url
+    from raw_snapshots r
+    where r.source = 'open_meteo'
+      and r.source_type = 'venue_current_weather'
+    order by fetched_at desc
+    limit 1
+) latest on true
+where not exists (
+    select 1 from data_source_links l
+    where l.entity_type = 'weather_snapshot'
+      and l.entity_key = v.code || ':' || to_char(ws.observed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') || '+00:00'
+)
 on conflict (entity_type, entity_key, source, source_type) do update set
     source_url = excluded.source_url,
     raw_snapshot_id = excluded.raw_snapshot_id,

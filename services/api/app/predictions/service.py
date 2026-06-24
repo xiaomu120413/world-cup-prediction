@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, desc, func, insert, or_, select, text, update
@@ -80,6 +80,9 @@ from app.predictions.tournament_ranker import (
     DEFAULT_MONTE_CARLO_ITERATIONS,
     DEFAULT_TOURNAMENT_RANKING_PARAMS,
     assign_darkhorse_probabilities,
+    knockout_context_logit_adjustment,
+    logistic,
+    logit,
     simulate_tournament_paths,
     tournament_team_score as trained_tournament_team_score,
 )
@@ -298,7 +301,7 @@ class BaselinePredictionService:
             self.write_match_prediction(row.match_id, snapshot_id, runtime.model_version_id, prediction)
             written_matches += 1
 
-        ranking_count = self.write_rankings(snapshot_id)
+        ranking_count = self.write_rankings(snapshot_id, runtime=runtime)
         simulation_count = self.write_group_simulations(snapshot_id)
         self.db.commit()
         return {
@@ -1144,19 +1147,130 @@ class BaselinePredictionService:
             ],
         )
 
-    def write_rankings(self, snapshot_id) -> int:
+    def knockout_pair_probability_factory(
+        self,
+        runtime: SmallOutcomeRuntime | None,
+        snapshot_id,
+    ) -> Callable[[Any, Any], float] | None:
+        if runtime is None:
+            return None
+        snapshot_at = self.prediction_snapshot_generated_at(snapshot_id)
+        cache: dict[tuple[Any, Any], float] = {}
+
+        def probability(team_a: Any, team_b: Any) -> float:
+            key = (team_a.team_id, team_b.team_id)
+            reverse_key = (team_b.team_id, team_a.team_id)
+            if key not in cache:
+                if reverse_key in cache:
+                    cache[key] = 1.0 - cache[reverse_key]
+                else:
+                    cache[key] = self.knockout_small_outcome_advancement_probability(team_a, team_b, runtime, snapshot_at)
+                    cache[reverse_key] = 1.0 - cache[key]
+            return cache[key]
+
+        return probability
+
+    def knockout_small_outcome_advancement_probability(
+        self,
+        team_a: Any,
+        team_b: Any,
+        runtime: SmallOutcomeRuntime,
+        snapshot_at: datetime,
+    ) -> float:
+        forward_probability = self.oriented_knockout_small_outcome_advancement_probability(
+            team_a,
+            team_b,
+            runtime,
+            snapshot_at,
+        )
+        reverse_probability = self.oriented_knockout_small_outcome_advancement_probability(
+            team_b,
+            team_a,
+            runtime,
+            snapshot_at,
+        )
+        advancement_probability = (forward_probability + (1.0 - reverse_probability)) / 2.0
+        live_form_adjustment = knockout_context_logit_adjustment(
+            team_a,
+            team_b,
+            DEFAULT_TOURNAMENT_RANKING_PARAMS,
+            include_market=False,
+        )
+        return clamp_value(logistic(logit(advancement_probability) + live_form_adjustment), 0.03, 0.97)
+
+    def oriented_knockout_small_outcome_advancement_probability(
+        self,
+        team_a: Any,
+        team_b: Any,
+        runtime: SmallOutcomeRuntime,
+        snapshot_at: datetime,
+    ) -> float:
+        baseline_prediction = build_match_prediction(
+            MatchInputs(
+                home=TeamInputs(team_a.code, team_a.fifa_rank, float(team_a.elo_rating or 1800)),
+                away=TeamInputs(team_b.code, team_b.fifa_rank, float(team_b.elo_rating or 1800)),
+                neutral_site=True,
+                source_confidence=1.0,
+            )
+        )
+        deterministic_baseline_probabilities = [
+            baseline_prediction["probabilities"][label]
+            for label in LABELS
+        ]
+        home_state = runtime.final_states.get(str(team_a.team_id))
+        away_state = runtime.final_states.get(str(team_b.team_id))
+        if home_state is None or away_state is None:
+            probabilities = deterministic_baseline_probabilities
+        else:
+            history_features = feature_dict(home_state, away_state, snapshot_at, True, "FIFA World Cup")
+            base_probabilities = runtime.history_core.predict_proba(history_features)
+            probabilities = base_probabilities
+            has_context_pair = (
+                runtime.context_store is not None
+                and runtime.context_store.has_team(str(team_a.team_id))
+                and runtime.context_store.has_team(str(team_b.team_id))
+                and runtime.model_family in {"history_core_plus_context_calibrator", "history_core_plus_context_blend"}
+            )
+            if has_context_pair:
+                features = {
+                    **base_probability_features(base_probabilities),
+                    **runtime.context_store.diff_features(str(team_a.team_id), str(team_b.team_id)),
+                }
+                context_probabilities = runtime.active_model.predict_proba(features)
+                if runtime.model_family == "history_core_plus_context_blend":
+                    probabilities = blend_probabilities(
+                        context_probabilities,
+                        deterministic_baseline_probabilities,
+                        runtime.context_blend_weight if runtime.context_blend_weight is not None else 1.0,
+                    )
+                else:
+                    probabilities = context_probabilities
+
+        clipped = [max(0.0, float(value)) for value in probabilities]
+        total = sum(clipped) or 1.0
+        normalized = [value / total for value in clipped]
+        return normalized[0] + normalized[1] / 2.0
+
+    def write_rankings(self, snapshot_id, runtime: SmallOutcomeRuntime | None = None) -> int:
         team_rows = self.load_tournament_team_rows()
         if not team_rows:
             return 0
 
         group_state_distributions = self.build_group_state_distributions(snapshot_id)
         seed = self.prediction_snapshot_seed(snapshot_id)
+        pair_probability = self.knockout_pair_probability_factory(runtime, snapshot_id)
+        ranking_reason = (
+            "knockout_path_lightgbm_neutral_monte_carlo"
+            if pair_probability is not None
+            else "knockout_path_baseline_monte_carlo"
+        )
         simulation = simulate_tournament_paths(
             group_state_distributions,
             {row.team_id: row for row in team_rows},
             iterations=DEFAULT_MONTE_CARLO_ITERATIONS,
             seed=seed,
             params=DEFAULT_TOURNAMENT_RANKING_PARAMS,
+            pair_probability=pair_probability,
         )
         if simulation["iterations"] <= 0:
             return 0
@@ -1189,7 +1303,7 @@ class BaselinePredictionService:
                     "probability": probability,
                     "delta": self.ranking_probability_delta(probability, previous_champion.get(item["team_id"])),
                     "rank": index,
-                    "reason": "knockout_path_monte_carlo",
+                    "reason": ranking_reason,
                 }
             )
         for index, item in enumerate(semifinal_ranked, start=1):
@@ -1202,7 +1316,7 @@ class BaselinePredictionService:
                     "probability": probability,
                     "delta": self.ranking_probability_delta(probability, previous_semifinal.get(item["team_id"])),
                     "rank": index,
-                    "reason": "knockout_path_monte_carlo",
+                    "reason": ranking_reason,
                 }
             )
 
@@ -1217,7 +1331,7 @@ class BaselinePredictionService:
                     "probability": probability,
                     "delta": self.ranking_probability_delta(probability, previous_darkhorse.get(item["team_id"])),
                     "rank": index,
-                    "reason": "knockout_path_monte_carlo_darkhorse",
+                    "reason": f"{ranking_reason}_darkhorse",
                 }
             )
 
@@ -1249,6 +1363,12 @@ class BaselinePredictionService:
             select(prediction_snapshots.c.seed).where(prediction_snapshots.c.id == snapshot_id)
         ).scalar_one_or_none()
         return int(seed or DEFAULT_TRAINING_SEED)
+
+    def prediction_snapshot_generated_at(self, snapshot_id) -> datetime:
+        generated_at = self.db.execute(
+            select(prediction_snapshots.c.generated_at).where(prediction_snapshots.c.id == snapshot_id)
+        ).scalar_one_or_none()
+        return generated_at or datetime.now(API_TZ)
 
     @staticmethod
     def ranking_probability_delta(probability: float, previous_probability: float | None) -> float:

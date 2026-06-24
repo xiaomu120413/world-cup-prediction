@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -129,6 +130,18 @@ def test_knockout_monte_carlo_outputs_path_probabilities():
     assert sum(result["round32_probabilities"].values()) == pytest.approx(32.0)
     assert max(result["champion_probabilities"].values()) > 0
 
+    callback_calls = []
+    callback_result = simulate_tournament_paths(
+        group_state_distributions,
+        teams_by_id,
+        iterations=20,
+        seed=17,
+        pair_probability=lambda team_a, team_b: callback_calls.append((team_a.team_id, team_b.team_id)) or 0.5,
+    )
+
+    assert callback_result["iterations"] == 20
+    assert callback_calls
+
 
 def test_knockout_probability_uses_market_value_and_current_tournament_form():
     strong_context = SimpleNamespace(
@@ -168,6 +181,40 @@ def test_knockout_probability_uses_market_value_and_current_tournament_form():
 
     assert context_probability > neutral_probability
     assert context_probability > 0.5
+
+
+def test_small_outcome_knockout_probability_is_neutral_site_symmetric():
+    service = BaselinePredictionService(db=None)
+    runtime = SimpleNamespace(final_states={})
+    team_a = SimpleNamespace(
+        team_id="team-a",
+        code="AAA",
+        fifa_rank=5,
+        elo_rating=2050,
+        market_value_eur=1_000_000_000,
+        group_played=2,
+        group_points=6,
+        group_goal_diff=4,
+        group_goals_for=5,
+    )
+    team_b = SimpleNamespace(
+        team_id="team-b",
+        code="BBB",
+        fifa_rank=8,
+        elo_rating=2000,
+        market_value_eur=900_000_000,
+        group_played=2,
+        group_points=6,
+        group_goal_diff=4,
+        group_goals_for=5,
+    )
+
+    snapshot_at = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    team_a_probability = service.knockout_small_outcome_advancement_probability(team_a, team_b, runtime, snapshot_at)
+    team_b_probability = service.knockout_small_outcome_advancement_probability(team_b, team_a, runtime, snapshot_at)
+
+    assert team_a_probability + team_b_probability == pytest.approx(1.0)
+    assert team_a_probability > 0.5
 
 
 def test_ranking_probability_delta_uses_previous_snapshot_value():
