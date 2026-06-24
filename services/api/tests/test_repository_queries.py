@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.db.schema import matches
 from app.predictions.service import prediction_match_filters
-from app.repositories.public_data import PublicDataRepository, source_player_id_from_code
+from app.repositories.public_data import PublicDataRepository, group_display_name, source_player_id_from_code, team_payload
 
 
 def compile_query(query):
@@ -75,6 +75,26 @@ def test_team_profile_queries_include_design_report_sources():
 def test_dongqiudi_player_source_id_is_extracted_from_canonical_code():
     assert source_player_id_from_code("DQD-P50000116") == "50000116"
     assert source_player_id_from_code("mbappe") is None
+
+
+def test_public_team_payload_falls_back_from_question_mark_names():
+    row = SimpleNamespace(
+        code="ARG",
+        name_zh="???",
+        name_en="Argentina",
+        confederation="CONMEBOL",
+        fifa_rank=1,
+        elo_rating=2195.43,
+        market_value_eur=828_000_000,
+        quality_status="source",
+    )
+
+    assert team_payload(row)["name"] == "Argentina"
+
+
+def test_group_display_name_uses_world_cup_group_code():
+    assert group_display_name("group-a", "A?") == "A组"
+    assert group_display_name("group-l", None) == "L组"
 
 
 def test_matches_query_filters_matchday_and_orders_upcoming_ascending():

@@ -171,13 +171,35 @@ def team_public_id(code: str, name_en: str | None = None) -> str:
     return code.lower()
 
 
+def has_cjk_text(value: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in value)
+
+
+def display_text(value: str | None, fallback: str | None = None) -> str | None:
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    if not text:
+        return fallback
+    if "?" in text and not has_cjk_text(text):
+        return fallback or text.replace("?", "").strip() or text
+    return text
+
+
+def group_display_name(code: str | None, fallback: str | None = None) -> str | None:
+    match = re.fullmatch(r"group-([a-l])", code or "")
+    if match:
+        return f"{match.group(1).upper()}组"
+    return display_text(fallback, code)
+
+
 def team_payload(row) -> dict:
     return {
         "id": team_public_id(row.code, row.name_en),
         "code": row.code,
         "abbr": row.code,
-        "name": row.name_zh,
-        "name_en": row.name_en,
+        "name": display_text(row.name_zh, row.name_en or row.code),
+        "name_en": display_text(row.name_en, row.code),
         "confederation": row.confederation,
         "fifa_rank": row.fifa_rank,
         "elo_rating": float(row.elo_rating) if row.elo_rating is not None else None,
@@ -199,16 +221,16 @@ def match_payload(row) -> dict:
         "home_team": {
             "id": team_public_id(row.home_code, row.home_name_en),
             "abbr": row.home_code,
-            "name": row.home_name,
-            "name_en": row.home_name_en,
+            "name": display_text(row.home_name, row.home_name_en or row.home_code),
+            "name_en": display_text(row.home_name_en, row.home_code),
             "fifa_rank": row.home_fifa_rank,
             "elo_rating": float(row.home_elo_rating) if row.home_elo_rating is not None else None,
         },
         "away_team": {
             "id": team_public_id(row.away_code, row.away_name_en),
             "abbr": row.away_code,
-            "name": row.away_name,
-            "name_en": row.away_name_en,
+            "name": display_text(row.away_name, row.away_name_en or row.away_code),
+            "name_en": display_text(row.away_name_en, row.away_code),
             "fifa_rank": row.away_fifa_rank,
             "elo_rating": float(row.away_elo_rating) if row.away_elo_rating is not None else None,
         },
@@ -1457,7 +1479,9 @@ class PublicDataRepository:
 
     @staticmethod
     def match_report_title(identity) -> str:
-        return f"{identity.home_name or identity.home_name_en} vs {identity.away_name or identity.away_name_en} AI 赛前报告"
+        home = display_text(identity.home_name, identity.home_name_en)
+        away = display_text(identity.away_name, identity.away_name_en)
+        return f"{home} vs {away} AI 赛前报告"
 
     @staticmethod
     def prediction_confidence_label(value: str | None) -> str:
@@ -1471,8 +1495,8 @@ class PublicDataRepository:
 
     @staticmethod
     def match_report_content(identity, prediction: dict | None, insights: list) -> str:
-        home = identity.home_name or identity.home_name_en
-        away = identity.away_name or identity.away_name_en
+        home = display_text(identity.home_name, identity.home_name_en)
+        away = display_text(identity.away_name, identity.away_name_en)
         if prediction:
             probabilities = prediction["probabilities"]
             expected_goals = prediction["expected_goals"]
@@ -1546,14 +1570,14 @@ class PublicDataRepository:
             "id": str(row.player_id),
             "code": row.player_code,
             "source_player_id": source_player_id,
-            "name": row.name_zh,
-            "name_en": row.name_en,
+            "name": display_text(row.name_zh, row.name_en),
+            "name_en": display_text(row.name_en),
             "team": {
                 "id": team_public_id(row.team_code, row.team_name_en),
                 "code": row.team_code,
                 "abbr": row.team_code,
-                "name": row.team_name_zh,
-                "name_en": row.team_name_en,
+                "name": display_text(row.team_name_zh, row.team_name_en or row.team_code),
+                "name_en": display_text(row.team_name_en, row.team_code),
                 "confederation": row.team_confederation,
                 "fifa_rank": row.team_fifa_rank,
                 "elo_rating": safe_float(row.team_elo_rating),
@@ -1741,7 +1765,7 @@ class PublicDataRepository:
         ).mappings().first()
         payload = {
             "id": row.group_id,
-            "name": row.group_name,
+            "name": group_display_name(row.group_id, row.group_name),
             "rank": row.rank,
             "record": f"{row.wins}-{row.draws}-{row.losses}",
             "points": row.points,
@@ -1874,8 +1898,8 @@ class PublicDataRepository:
         if row.wins is not None and row.draws is not None and row.losses is not None:
             record_parts.append(f"{row.wins}胜{row.draws}平{row.losses}负")
         return {
-            "name": row.name_zh,
-            "name_en": row.name_en,
+            "name": display_text(row.name_zh, row.name_en),
+            "name_en": display_text(row.name_en),
             "started_at": row.started_at.isoformat() if row.started_at else None,
             "record": " · ".join(record_parts) if record_parts else "战绩待同步",
             "win_rate": safe_float(row.win_rate),
@@ -1963,8 +1987,8 @@ class PublicDataRepository:
                 {
                     "id": str(row.player_id),
                     "source_player_id": source_player_id,
-                    "name": row.name_zh,
-                    "name_en": row.name_en,
+                    "name": display_text(row.name_zh, row.name_en),
+                    "name_en": display_text(row.name_en),
                     "role": row.position,
                     "form": self.player_display_form_score(row),
                     "position": row.position,
@@ -2082,13 +2106,14 @@ class PublicDataRepository:
 
     @staticmethod
     def team_profile_summary(team_row, form_stats: dict, result_summary: dict, group_profile: dict | None) -> str:
+        team_name = display_text(team_row.name_zh, team_row.name_en or team_row.code)
         quality = team_row.quality_status or "unknown"
         rank_text = f"FIFA排名第 {team_row.fifa_rank}" if team_row.fifa_rank else "FIFA排名待同步"
         group_text = f"，当前位于{group_profile['name']}第 {group_profile['rank']}" if group_profile else ""
         if form_stats["player_count"] == 0:
-            return f"{team_row.name_zh} {rank_text}{group_text}；基础数据质量为 {quality}，球员近期状态仍待采集。"
+            return f"{team_name} {rank_text}{group_text}；基础数据质量为 {quality}，球员近期状态仍待采集。"
         return (
-            f"{team_row.name_zh} {rank_text}{group_text}；{result_summary['headline']}。"
+            f"{team_name} {rank_text}{group_text}；{result_summary['headline']}。"
             f"当前覆盖 {form_stats['player_count']} 名球员，关键判断关注进攻效率、对强队表现和阵容稳定性。"
         )
 
@@ -2217,7 +2242,7 @@ class PublicDataRepository:
         return [
             {
                 "id": row.code,
-                "name": row.name,
+                "name": group_display_name(row.code, row.name),
                 "matches_finished": int(row.matches_finished),
                 "matches_total": int(row.matches_total),
                 "summary": "Data generated from competition stage and match tables.",
@@ -2232,7 +2257,7 @@ class PublicDataRepository:
         first = rows[0]
         return {
             "id": first.group_id,
-            "name": first.group_name,
+            "name": group_display_name(first.group_id, first.group_name),
             "standings": [
                 {
                     "rank": row.rank,
