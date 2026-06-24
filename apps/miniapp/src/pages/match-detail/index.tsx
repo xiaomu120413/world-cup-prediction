@@ -57,7 +57,7 @@ export default function MatchDetailPage() {
           </View>
         </View>
         <View className='empty-state'>
-          <Text>{loadState === 'loading' ? '正在加载真实比赛数据' : '真实比赛数据不可用，未显示虚拟数据。'}</Text>
+          <Text>{loadState === 'loading' ? '正在加载比赛数据' : '比赛数据暂不可用'}</Text>
         </View>
         <BottomNav active='predictions' />
       </View>
@@ -128,15 +128,15 @@ export default function MatchDetailPage() {
 
       <Section title='关键证据' action=''>
         <EvidenceList items={match.evidence} />
-        <Text className='section-footnote'>证据来自后端模型快照和公开数据源。</Text>
+        <Text className='section-footnote'>证据来自赛前预测快照和公开数据源。</Text>
       </Section>
 
       <Section title='比分分布'>
         <ScorelineDistribution items={match.scorelines} />
       </Section>
 
-      <Text className='data-note'>* 数据基于后端当前真实数据快照和模型输出，未使用本地占位数据。</Text>
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      <Text className='data-note'>* 概率会随赛果、阵容、伤停和天气更新。</Text>
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='predictions' />
     </View>
   )

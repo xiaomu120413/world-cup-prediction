@@ -54,6 +54,21 @@ function evidenceValueClass(tone?: string) {
   return 'team-evidence-row__value'
 }
 
+function deltaValue(delta?: string) {
+  if (!delta) return 0
+  return Number(delta.replace('%', ''))
+}
+
+function deltaClass(delta?: string) {
+  return deltaValue(delta) < 0 ? 'delta delta--down' : 'delta delta--up'
+}
+
+function deltaLabel(delta?: string) {
+  const value = deltaValue(delta)
+  if (!value) return ''
+  return `${value > 0 ? '▲' : '▼'}${Math.abs(value)}%`
+}
+
 function goTeam(teamId: string, source = 'direct') {
   goTo(`${routes.teamDetail}?teamId=${teamId}&source=${source}`)
 }
@@ -147,12 +162,17 @@ function TeamsIndexPage() {
     [teams]
   )
 
+  const rankedTeams = useMemo(
+    () => [...teams].sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1) || a.name.localeCompare(b.name)),
+    [teams]
+  )
+
   return (
     <View className='page page--team-index design-page'>
       <View className='team-index-header'>
         <View>
           <Text className='app-title'>球队</Text>
-          <Text className='page-head__subtitle'>真实球队数据 · 点击进入分析</Text>
+          <Text className='page-head__subtitle'>球队数据 · 点击进入分析</Text>
         </View>
         <View className='team-index-header__icon'>
           <Icon name='team' color='#2563eb' size={42} />
@@ -165,7 +185,7 @@ function TeamsIndexPage() {
         </View>
         <View className='team-index-ai-card__main'>
           <Text className='team-index-ai-card__title'>AI 球队索引</Text>
-          <Text className='team-index-ai-card__text'>基于后端最新数据快照展示球队、概率和关键资料，点击球队进入完整分析。</Text>
+          <Text className='team-index-ai-card__text'>基于最新数据快照展示球队概率和关键资料，点击球队进入完整分析。</Text>
         </View>
       </View>
 
@@ -181,20 +201,20 @@ function TeamsIndexPage() {
             <Text className='team-feature-row__prob'>{team.probability}%</Text>
             <Icon name='chevron' color='#94a3b8' size={26} />
           </View>
-        )) : <View className='empty-state'><Text>暂无真实冠军热门数据</Text></View>}
+        )) : <View className='empty-state'><Text>暂无冠军热门数据</Text></View>}
       </Section>
 
-      <Section title='全部球队' action='真实接口'>
+      <Section title='全部球队' action='已同步'>
         <View className='team-index-list'>
-          {teams.length ? teams.map((team, index) => <TeamListRow key={team.id} team={team} index={index} />) : (
+          {rankedTeams.length ? rankedTeams.map((team, index) => <TeamListRow key={team.id} team={team} index={index} />) : (
             <View className='empty-state'>
-              <Text>{loadState === 'loading' ? '正在加载真实球队数据' : '暂无真实球队数据'}</Text>
+              <Text>{loadState === 'loading' ? '正在加载球队数据' : '暂无球队数据'}</Text>
             </View>
           )}
         </View>
       </Section>
 
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='teams' />
     </View>
   )
@@ -243,11 +263,11 @@ export default function TeamDetailPage() {
           </View>
           <View className='team-report-title'>
             <Text className='team-report-title__name'>球队数据</Text>
-            <Text className='team-report-title__meta'>{loadState === 'loading' ? '正在加载真实球队数据' : '真实球队数据不可用'}</Text>
+            <Text className='team-report-title__meta'>{loadState === 'loading' ? '正在加载球队数据' : '球队数据暂不可用'}</Text>
           </View>
         </View>
         <View className='empty-state'>
-          <Text>{loadState === 'loading' ? '正在加载真实球队数据' : '真实球队数据不可用，未显示虚拟数据。'}</Text>
+          <Text>{loadState === 'loading' ? '正在加载球队数据' : '球队数据暂不可用'}</Text>
         </View>
         <BottomNav active='teams' />
       </View>
@@ -296,15 +316,15 @@ export default function TeamDetailPage() {
           <View className='probability-mini' key={item.label}>
             <Text className='probability-mini__label'>{item.label}</Text>
             <Text className='probability-mini__value'>{item.value}</Text>
-            {item.delta ? <Text className='delta delta--up'>▲{item.delta.replace('+', '')}</Text> : null}
+            {deltaLabel(item.delta) ? <Text className={deltaClass(item.delta)}>{deltaLabel(item.delta)}</Text> : null}
           </View>
-        )) : <View className='empty-state'><Text>暂无真实概率数据</Text></View>}
+        )) : <View className='empty-state'><Text>暂无概率数据</Text></View>}
       </View>
 
       <Section title='核心评分' action='满分 10 分'>
         {displayTeam.ratings.length ? displayTeam.ratings.map(item => (
           <RatingRow key={item.label} label={item.label} value={item.value} />
-        )) : <View className='empty-state'><Text>暂无真实评分数据</Text></View>}
+        )) : <View className='empty-state'><Text>暂无评分数据</Text></View>}
       </Section>
 
       <Section title='近期状态'>
@@ -324,7 +344,7 @@ export default function TeamDetailPage() {
                 <Text className='team-evidence-row__label'>{item.label}</Text>
                 <Text className={evidenceValueClass(item.tone)}>{item.value}</Text>
               </View>
-            )) : <View className='empty-state'><Text>暂无真实状态证据</Text></View>}
+            )) : <View className='empty-state'><Text>暂无状态证据</Text></View>}
           </View>
         </View>
       </Section>
@@ -351,7 +371,7 @@ export default function TeamDetailPage() {
               </View>
             </View>
           </View>
-        )) : <View className='empty-state'><Text>暂无真实关键球员数据</Text></View>}
+        )) : <View className='empty-state'><Text>暂无关键球员数据</Text></View>}
       </Section>
 
       {displayTeam.risks.length ? (
@@ -362,7 +382,7 @@ export default function TeamDetailPage() {
           <View className='risk-card__main'>
             <Text className='risk-card__title'>风险提醒</Text>
             <Text className='risk-card__text'>{displayTeam.risks[0].label}</Text>
-            <Text className='risk-card__meta'>来自后端真实风险信号。</Text>
+            <Text className='risk-card__meta'>来自最新风险信号。</Text>
           </View>
           <View className='risk-card__score'>
             <Text>{displayTeam.risks[0].value}</Text>
@@ -372,7 +392,7 @@ export default function TeamDetailPage() {
         </View>
       ) : null}
 
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='teams' />
     </View>
   )

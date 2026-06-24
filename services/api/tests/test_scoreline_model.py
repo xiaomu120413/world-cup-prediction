@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.predictions.service import calibrate_scorelines_to_outcome_probabilities
 from app.predictions.scoreline_model import (
     build_scoreline_examples,
     context_adjusted_expected_goals,
@@ -57,6 +58,21 @@ def test_scoreline_model_trains_and_outputs_probability_matrix():
     assert sum(probabilities.values()) == pytest.approx(1.0)
     assert scorelines == sorted(scorelines, key=lambda item: item["probability"], reverse=True)
     assert model.predict_goals(goal_examples[0].features) > 0
+
+
+def test_scoreline_matrix_calibrates_to_outcome_model_probabilities():
+    scorelines = scoreline_distribution(1.4, 0.9)
+    calibrated = calibrate_scorelines_to_outcome_probabilities(
+        scorelines,
+        {"home_win": 0.62, "draw": 0.24, "away_win": 0.14},
+    )
+    probabilities = outcome_probabilities_from_scorelines(calibrated)
+
+    assert probabilities["home_win"] == pytest.approx(0.62, abs=1e-5)
+    assert probabilities["draw"] == pytest.approx(0.24, abs=1e-5)
+    assert probabilities["away_win"] == pytest.approx(0.14, abs=1e-5)
+    assert sum(item["probability"] for item in calibrated) == pytest.approx(1.0)
+    assert calibrated == sorted(calibrated, key=lambda item: item["probability"], reverse=True)
 
 
 def test_context_adjustments_apply_real_feature_direction_with_bounds():

@@ -3,7 +3,7 @@ import type { Scoreline } from '@/services/types'
 
 export function ScorelineDistribution({ items }: { items: Scoreline[] }) {
   if (!items.length) {
-    return <View className='empty-state'>比分分布待模型生成</View>
+    return <View className='empty-state'>比分分布更新中</View>
   }
 
   const max = Math.max(...items.map(item => item.probability))

@@ -3,7 +3,7 @@ import type { Probability } from '@/services/types'
 
 export function ProbabilitySummary({ probabilities }: { probabilities: Probability[] }) {
   if (!probabilities.length) {
-    return <View className='empty-state'>预测概率待模型生成</View>
+    return <View className='empty-state'>预测概率更新中</View>
   }
 
   const maxValue = Math.max(...probabilities.map(item => item.value))

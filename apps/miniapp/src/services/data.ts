@@ -378,7 +378,7 @@ function formatTrustLevel(value?: string | null) {
   const trustMap: Record<string, string> = {
     public_news: '公开新闻',
     public_source: '公开数据',
-    public_api: '公开接口',
+    public_api: '公开数据',
     official: '官方来源',
     manual_verified: '人工核验',
     internal_derived: 'AI 抽取'
@@ -402,7 +402,7 @@ function formatNewsText(value?: string | null, maxLength = 120) {
 
 function formatConfidence(value?: string) {
   if (!value) {
-    return '模型待生成'
+    return '预测生成中'
   }
   const confidenceMap: Record<string, string> = {
     low: '低信心',
@@ -455,7 +455,7 @@ function formatPredictionVersion(hasPrediction: boolean, status: string) {
 }
 
 function formatTendency(value: string | undefined, home: string, away: string) {
-  if (!value) return '预测待重算'
+  if (!value) return '走势待更新'
   const key = value.toLowerCase()
   const tendencyMap: Record<string, string> = {
     home: `${home}占优`,
@@ -466,7 +466,7 @@ function formatTendency(value: string | undefined, home: string, away: string) {
     high: '高信心'
   }
   if (tendencyMap[key]) return tendencyMap[key]
-  if (value.includes('来源可信')) return '赛程可信'
+  if (value.includes('来源可信')) return '赛程已同步'
   return value
 }
 
@@ -475,7 +475,7 @@ function formatEvidenceLabel(value: string) {
     elo_diff: '整体强度',
     fifa_rank_diff: 'FIFA排名',
     venue: '场地因素',
-    model_mode: '模型校准',
+    model_mode: '赛前校准',
     home_advantage: '主场因素',
     player_form: '球员状态',
     team_form: '近期状态',
@@ -492,7 +492,8 @@ function formatEvidenceLabel(value: string) {
     context_away_availability: '客队可用性',
     context_home_unavailable: '主队缺阵',
     context_away_unavailable: '客队缺阵',
-    context_weather_total: '天气影响'
+    context_weather_total: '天气影响',
+    tournament_goal_environment: '进球环境'
   }
   return labelMap[value] || value
 }
@@ -503,7 +504,7 @@ function formatEvidenceNote(item: { label: string; note?: string }) {
     elo_diff: '基于双方 Elo 评分差异',
     fifa_rank_diff: '基于 FIFA 世界排名差异',
     venue: '结合比赛场地与中立场信息',
-    model_mode: '双层模型赛前校准结果',
+    model_mode: '赛前校准结果',
     home_advantage: '结合主客场与场地影响',
     player_form: '来自近期球员进球、助攻与出场状态',
     team_form: '来自国家队近期战绩快照',
@@ -512,8 +513,9 @@ function formatEvidenceNote(item: { label: string; note?: string }) {
     lineup_stability: '来自阵容稳定性与出勤记录',
     coach_record: '来自主教练带队战绩',
     historical_matchups: '来自双方历史交锋',
-    scoreline_model: '独立比分模型生成比分矩阵',
+    scoreline_model: '比分分布生成',
     model_xg_diff: '比分模型给出的双方预期进球差',
+    tournament_goal_environment: '结合本届已完赛比赛的进球节奏',
     context_market_value: '结合双方阵容与市场身价差异',
     context_roster_output: '结合球员近期进球和助攻贡献',
     context_home_availability: '结合主队伤停和新闻信号',
@@ -579,12 +581,12 @@ function formatMatchInsight(
   if (prediction?.probabilities && prediction.expected_goals) {
     const probabilities = prediction.probabilities
     const expectedGoals = prediction.expected_goals
-    return `${homeName} vs ${awayName} 的赛前模型已完成：${homeName}胜 ${percentFromApi(probabilities.home_win)}%，平局 ${percentFromApi(probabilities.draw)}%，${awayName}胜 ${percentFromApi(probabilities.away_win)}%；预期进球 ${expectedGoals.home.toFixed(2)}-${expectedGoals.away.toFixed(2)}。关键证据来自比分模型、阵容身价、球员输出、伤停信号和天气快照。`
+    return `${homeName} vs ${awayName} 的赛前预测已完成：${homeName}胜 ${percentFromApi(probabilities.home_win)}%，平局 ${percentFromApi(probabilities.draw)}%，${awayName}胜 ${percentFromApi(probabilities.away_win)}%；预期进球 ${expectedGoals.home.toFixed(2)}-${expectedGoals.away.toFixed(2)}。关键证据来自近期赛果、阵容身价、球员输出、伤停信号和天气快照。`
   }
   if (apiMatch.ai_summary && !isMostlyEnglish(apiMatch.ai_summary)) return apiMatch.ai_summary
   return hasPrediction
-    ? `${homeName} vs ${awayName} 已基于历史比分模型和真实上下文特征生成赛前预测。`
-    : `${homeName} vs ${awayName} 已从真实赛程源同步，预测、比分分布和 AI 证据等待后续任务生成。`
+    ? `${homeName} vs ${awayName} 已基于历史赛果和赛前特征生成预测。`
+    : `${homeName} vs ${awayName} 赛程已同步，预测和证据正在更新。`
 }
 
 function formatOptionalPercent(value?: number | null) {
@@ -632,7 +634,7 @@ function formatVenue(match: ApiMatch) {
 }
 
 function formatSourceConfidence(value?: number) {
-  return value === undefined ? '来源可信度待同步' : `来源可信 ${percentFromApi(value)}%`
+  return value === undefined ? '数据源同步中' : `数据源可信 ${percentFromApi(value)}%`
 }
 
 function formatMarketValue(value?: number | null) {
@@ -666,10 +668,10 @@ function formatTeamSubtitle(team: ApiTeam, groupName: string) {
 
 function mapReason(value?: string) {
   const reasonMap: Record<string, string> = {
-    baseline_strength: '模型强度',
-    tournament_path_strength: '赛程路径强度',
+    baseline_strength: '综合实力',
+    tournament_path_strength: '赛程路径',
     darkhorse_upside: '黑马上限',
-    model_update: '模型更新',
+    model_update: '预测更新',
     player_form: '球员状态',
     schedule_path: '赛程路径'
   }
@@ -678,8 +680,8 @@ function mapReason(value?: string) {
 
 function formatQuality(value?: string | null) {
   const qualityMap: Record<string, string> = {
-    source: '真实源',
-    derived: '派生',
+    source: '已同步',
+    derived: '同步计算',
     manual_verified: '人工核验'
   }
   return value ? qualityMap[value] || value : '质量待标注'
@@ -752,8 +754,8 @@ function playerDataPoints(player: ApiTeamProfile['key_players'][number]) {
 
 function formatProbabilityLabel(value: string) {
   const labelMap: Record<string, string> = {
-    冠军概率: '模型冠军概率',
-    四强概率: '模型四强概率',
+    '冠军概率': '冠军概率',
+    '四强概率': '四强概率',
     小组第一: '小组第一概率'
   }
   return labelMap[value] || value
@@ -803,12 +805,12 @@ function mapDataStatus(status: ApiDataStatus): DataSourceStatus {
   const teamsCount = status.table_counts.dongqiudi_roster_teams || status.table_counts.teams || 0
   const matchesCount = status.table_counts.dongqiudi_matches || status.table_counts.matches || 0
   return {
-    label: status.mode === 'database' ? (auditPassed ? 'DB · 已核验' : 'DB · 待核验') : '后端离线模式',
-    detail: primarySource === 'dongqiudi' ? 'dongqiudi/homepage' : latestRun ? `${latestRun.source}/${latestRun.job_type}` : status.backend,
+    label: status.mode === 'database' ? (auditPassed ? '数据已核验' : '数据待核验') : '服务维护中',
+    detail: primarySource === 'dongqiudi' ? '赛程、积分与球员数据同步中' : latestRun ? '数据同步中' : '数据服务',
     isDatabase: status.mode === 'database' && status.canonical_ready,
-    audit: status.mode === 'database' ? (auditPassed ? '真实数据审计通过' : '数据审计需关注') : '后端未接真实库',
+    audit: status.mode === 'database' ? (auditPassed ? '数据校验通过' : '数据校验需关注') : '数据服务维护中',
     counts: `${teamsCount}队 / ${matchesCount}场`,
-    freshness: latestRun ? `${latestRun.source}/${latestRun.job_type} · ${latestRun.status}` : status.backend
+    freshness: latestRun ? `最近同步 · ${latestRun.status}` : '等待同步'
   }
 }
 
@@ -854,7 +856,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     ? `预期进球 ${prediction.expected_goals.home.toFixed(2)}-${prediction.expected_goals.away.toFixed(2)}`
     : undefined
   const sourceConfidence = apiMatch.source_confidence
-  const modelStatus = hasPrediction ? '模型预测已生成' : '预测待重算'
+  const modelStatus = hasPrediction ? '赛前预测已生成' : '预测更新中'
   const evidenceSource = prediction?.key_factors || report?.evidence || []
   const evidence = evidenceSource.map(mapEvidenceItem).filter(isEvidenceItem)
 
@@ -870,7 +872,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
     status: formatStatus(apiMatch.status, apiMatch.home_score, apiMatch.away_score),
     versionLabel: formatPredictionVersion(hasPrediction, apiMatch.status),
     score,
-    confidence: hasPrediction ? report?.confidence_label || formatConfidence(prediction?.confidence || embeddedPrediction?.confidence) : '预测待重算',
+    confidence: hasPrediction ? report?.confidence_label || formatConfidence(prediction?.confidence || embeddedPrediction?.confidence) : '预测更新中',
     tendency: formatTendency(embeddedPrediction?.tendency || (hasPrediction ? 'high' : undefined), homeName, awayName),
     source: formatSourceConfidence(sourceConfidence),
     sourceConfidence: sourceConfidence === undefined ? undefined : percentFromApi(sourceConfidence),
@@ -881,7 +883,7 @@ function mapMatch(apiMatch: ApiMatch, prediction?: ApiPrediction, report?: ApiRe
       { label: '赛程状态', value: `${formatStatus(apiMatch.status, apiMatch.home_score, apiMatch.away_score)} · ${formatSourceConfidence(sourceConfidence)}` },
       { label: homeName, value: formatTeamMeta(apiMatch.home_team) },
       { label: awayName, value: formatTeamMeta(apiMatch.away_team) },
-      expectedGoals ? { label: '模型输出', value: expectedGoals } : { label: '模型输出', value: modelStatus }
+      expectedGoals ? { label: '赛前预测', value: expectedGoals } : { label: '赛前预测', value: modelStatus }
     ],
     probabilities: hasPrediction && homeWin !== undefined && draw !== undefined && awayWin !== undefined ? [
       { label: `${homeName}胜`, value: percentFromApi(homeWin) },
@@ -985,7 +987,7 @@ async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Pr
       meta: formatTeamMeta(item.team)
     })),
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
-    source: `基于模型快照 · ${response.meta?.count ?? response.data.length}队`
+    source: `最近一次预测 · ${response.meta?.count ?? response.data.length}队`
   }
 }
 
@@ -1158,7 +1160,7 @@ export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
     id: detailResponse.data.id,
     title: `${groupName}形势`,
     subtitle: `小组赛 · 已完成 ${finished}/6 场`,
-    summary: simulationResponse ? '积分榜与出线模拟已同步，第三名路径取决于末轮净胜球和交叉区排名。' : '真实积分榜已同步，出线模拟等待后续模型重算。',
+    summary: simulationResponse ? '积分榜与出线模拟已同步，第三名路径取决于末轮净胜球和跨组排名。' : '积分榜已同步，出线模拟正在更新。',
     teams: sortedStandings.map(item => {
       const teamName = displayTeam(item.team)
       return {

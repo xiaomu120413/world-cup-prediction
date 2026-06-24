@@ -98,7 +98,7 @@ export default function GroupsPage() {
         </View>
         <View className='top-bar__title'>
           <Text className='app-title app-title--sm'>{displayGroup?.title || '小组形势'}</Text>
-          <Text className='page-head__subtitle'>{displayGroup?.subtitle || '等待真实小组数据'}</Text>
+          <Text className='page-head__subtitle'>{displayGroup?.subtitle || '等待小组数据'}</Text>
           <Text className='page-head__subtitle'>{displayGroup?.updatedAt || '-'}</Text>
         </View>
         <View className='icon-button icon-button--plain' onClick={() => refreshGroupData(activeGroupId)}>
@@ -109,7 +109,7 @@ export default function GroupsPage() {
       <View className='group-hub'>
         <View className='group-hub__head'>
           <Text className='group-hub__title'>全部小组</Text>
-          <Text className='group-hub__meta'>来自后端真实小组列表</Text>
+          <Text className='group-hub__meta'>小组赛实时同步</Text>
         </View>
         <View className='group-switcher group-switcher--compact'>
           {groups.length ? groups.map(group => (
@@ -121,7 +121,7 @@ export default function GroupsPage() {
               <Text className='group-switcher__name'>{group.name}</Text>
               <Text className='group-switcher__progress'>{group.matchesFinished}/{group.matchesTotal}</Text>
             </View>
-          )) : <View className='empty-state'><Text>暂无真实小组列表</Text></View>}
+          )) : <View className='empty-state'><Text>暂无小组列表</Text></View>}
         </View>
       </View>
 
@@ -131,7 +131,7 @@ export default function GroupsPage() {
             <Icon name='spark' color='#2563eb' size={38} />
             <Text>AI 小组判断</Text>
           </View>
-          <Text className='group-ai-card__text'>{displayGroup?.summary || '暂无真实小组判断数据。'}</Text>
+          <Text className='group-ai-card__text'>{displayGroup?.summary || '暂无小组判断数据。'}</Text>
         </View>
         <View className='group-ai-card__badge'>
           <Icon name='ai' color='#2563eb' size={54} />
@@ -163,7 +163,7 @@ export default function GroupsPage() {
             <Text className='table-row__points'>{team.points}</Text>
             <Text className='table-row__meta'>{team.goals}</Text>
           </View>
-        )) : <View className='empty-state'><Text>暂无真实积分榜数据</Text></View>}
+        )) : <View className='empty-state'><Text>暂无积分榜数据</Text></View>}
       </Section>
 
       <Section title='出线概率' action='晋级规则'>
@@ -182,7 +182,7 @@ export default function GroupsPage() {
               </View>
               <Text className={`qualification-row__value qualification-row__value--${qualificationTone(team.qualification)}`}>{team.qualification}%</Text>
             </View>
-          )) : <View className='empty-state'><Text>暂无真实出线概率数据</Text></View>}
+          )) : <View className='empty-state'><Text>暂无出线概率数据</Text></View>}
         </View>
       </Section>
 
@@ -203,11 +203,11 @@ export default function GroupsPage() {
               <Text>{compactBeijingTime(match.time)}</Text>
             </View>
           </View>
-        )) : <View className='empty-state'><Text>暂无该小组真实关键赛程</Text></View>}
-        <Text className='section-footnote section-footnote--center'>赛程来自后端真实接口</Text>
+        )) : <View className='empty-state'><Text>暂无该小组关键赛程</Text></View>}
+        <Text className='section-footnote section-footnote--center'>赛程随官方数据源同步</Text>
       </Section>
 
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='groups' />
     </View>
   )

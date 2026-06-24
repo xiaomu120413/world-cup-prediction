@@ -56,7 +56,7 @@ export default function PredictionsPage() {
       <View className='ranking-header'>
         <View>
           <Text className='app-title'>预测榜</Text>
-          <Text className='page-head__subtitle'>{rankingMeta.source || (loadState === 'loading' ? '加载真实预测数据' : '等待真实预测数据')}</Text>
+          <Text className='page-head__subtitle'>{rankingMeta.source || (loadState === 'loading' ? '加载预测数据' : '等待预测更新')}</Text>
         </View>
         <View className='ranking-header__updated'>
           <Icon name='clock' color='#6b7280' size={28} />
@@ -83,7 +83,7 @@ export default function PredictionsPage() {
             <Text>AI 榜单解读</Text>
           </View>
           <Text className='ranking-ai-card__text'>
-            {topTeam ? `${topTeam.name} 当前位列${tabLabels[active]}榜首，概率为 ${topTeam.probability}%。` : '暂无真实预测榜数据。'}
+            {topTeam ? `${topTeam.name} 当前位列${tabLabels[active]}榜首，概率为 ${topTeam.probability}%。` : '暂无预测榜数据。'}
           </Text>
         </View>
         <View className='ranking-ai-card__art'>
@@ -105,7 +105,7 @@ export default function PredictionsPage() {
         <View className='ranking-table-head'>
           <Text>排名 / 球队</Text>
           <Text>{tabLabels[active]}概率</Text>
-          <Text>变化</Text>
+          <Text>较上次快照</Text>
         </View>
         {rankings.length ? rankings.map(team => (
           <View
@@ -136,7 +136,7 @@ export default function PredictionsPage() {
               </Text>
             </View>
           </View>
-        )) : <View className='empty-state'><Text>{loadState === 'loading' ? '正在加载真实榜单' : '暂无真实榜单数据'}</Text></View>}
+        )) : <View className='empty-state'><Text>{loadState === 'loading' ? '正在加载榜单' : '暂无榜单数据'}</Text></View>}
       </View>
 
       <View className='today-change-card today-change-card--design' onClick={() => goTo(routes.matches)}>
@@ -146,14 +146,14 @@ export default function PredictionsPage() {
         <View className='today-change-card__main'>
           <Text className='today-change-card__title'>数据状态</Text>
           <Text className='today-change-card__text'>
-            {topTeam ? `${topTeam.name} 当前 ${tabLabels[active]}概率 ${topTeam.probability}%` : '真实预测快照暂不可用'}
+            {topTeam ? `${topTeam.name} 当前 ${tabLabels[active]}概率 ${topTeam.probability}%` : '预测快照暂不可用'}
           </Text>
-          <Text className='today-change-card__meta'>{rankingMeta.updatedAt || '等待后端定时任务刷新'}</Text>
+          <Text className='today-change-card__meta'>{rankingMeta.updatedAt || '等待自动刷新'}</Text>
         </View>
         <Icon name='chevron' color='#94a3b8' size={30} />
       </View>
 
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='predictions' />
     </View>
   )

@@ -31,6 +31,8 @@ from app.predictions.baseline import (
     build_match_prediction,
     calibrated_scoreline_distribution,
     expected_goals_from_scorelines,
+    normalize_outcome_probabilities,
+    outcome_key,
     ranked_scorelines,
     team_strength_score,
 )
@@ -87,6 +89,39 @@ UNFILTERED_PREDICTION_SCOPES = {"all"}
 GROUP_SIMULATION_MIN_PROBABILITY = 1e-9
 WORLD_CUP_DIRECT_GROUP_QUALIFIERS = 2
 WORLD_CUP_THIRD_PLACE_QUALIFIERS = 8
+GOAL_ENVIRONMENT_BASELINE_TOTAL = 2.75
+GOAL_ENVIRONMENT_MIN_MATCHES = 12
+
+
+def clamp_value(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def calibrate_scorelines_to_outcome_probabilities(
+    scorelines: list[dict],
+    outcome_probabilities: dict[str, float],
+) -> list[dict]:
+    target = normalize_outcome_probabilities(outcome_probabilities)
+    outcome_totals = {"home_win": 0.0, "draw": 0.0, "away_win": 0.0}
+    for item in scorelines:
+        outcome_totals[outcome_key(item["home_goals"], item["away_goals"])] += item["probability"]
+
+    calibrated: list[dict] = []
+    for item in scorelines:
+        outcome = outcome_key(item["home_goals"], item["away_goals"])
+        outcome_total = outcome_totals[outcome]
+        if outcome_total <= 0:
+            continue
+        calibrated.append(
+            {
+                **item,
+                "probability": item["probability"] / outcome_total * target[outcome],
+            }
+        )
+    total = sum(item["probability"] for item in calibrated) or 1.0
+    normalized = [{**item, "probability": item["probability"] / total} for item in calibrated]
+    normalized.sort(key=lambda item: item["probability"], reverse=True)
+    return normalized
 
 
 def prediction_match_statuses(scope: str) -> tuple[str, ...] | None:
@@ -711,24 +746,11 @@ class BaselinePredictionService:
             query = query.where(*prediction_match_filters(scope))
         return self.db.execute(query).mappings().all()
 
-    def build_scoreline_prediction(self, row, runtime: ScorelineRuntime) -> dict:
-        baseline_prediction = build_match_prediction(self.match_inputs(row))
+    def scoreline_model_projection(self, row, runtime: ScorelineRuntime) -> dict | None:
         home_state = runtime.final_states.get(str(row.home_team_id))
         away_state = runtime.final_states.get(str(row.away_team_id))
         if home_state is None or away_state is None:
-            baseline_prediction.update(
-                {
-                    "inference_mode": "baseline",
-                    "calibration_applied": False,
-                    "fallback_reason": "missing_scoreline_state",
-                    "base_probabilities": None,
-                    "feature_snapshot": {},
-                    "feature_quality_status": row.match_feature_quality_status,
-                    "feature_missing_count": len(row.match_feature_missing_features or []),
-                    "feature_sources": self.feature_sources(row),
-                }
-            )
-            return baseline_prediction
+            return None
 
         home_features = goal_feature_dict(home_state, away_state, row.kickoff_at, bool(row.neutral_site), "FIFA World Cup", True)
         away_features = goal_feature_dict(away_state, home_state, row.kickoff_at, bool(row.neutral_site), "FIFA World Cup", False)
@@ -747,6 +769,86 @@ class BaselinePredictionService:
             low_score_correlation=runtime.model.low_score_correlation,
         )
         expected_home, expected_away = scoreline_expected_goals(full_scorelines)
+        feature_snapshot = {
+            "scoreline_model_version": runtime.model_version,
+            "base_home_expected_goals": round(base_home_xg, 6),
+            "base_away_expected_goals": round(base_away_xg, 6),
+            "context_home_expected_goals": round(home_xg, 6),
+            "context_away_expected_goals": round(away_xg, 6),
+            "context_adjustments": context_adjustments,
+            "context_numeric_features": {
+                key: numeric_features.get(key)
+                for key in (
+                    "market_value_log_diff",
+                    "player_goals_per_player_diff",
+                    "player_assists_per_player_diff",
+                    "home_availability_impact",
+                    "away_availability_impact",
+                    "home_player_unavailable_count",
+                    "away_player_unavailable_count",
+                    "weather_wind_speed_kph",
+                    "weather_precipitation_mm",
+                    "weather_temperature_c",
+                )
+                if numeric_features.get(key) is not None
+            },
+            **{f"home_goal_{name}": round(float(home_features.get(name, 0.0) or 0.0), 6) for name in runtime.model.feature_names},
+            **{f"away_goal_{name}": round(float(away_features.get(name, 0.0) or 0.0), 6) for name in runtime.model.feature_names},
+        }
+        return {
+            "model_family": runtime.model_family,
+            "full_scorelines": full_scorelines,
+            "expected_goals": {"home": expected_home, "away": expected_away},
+            "context_adjustments": context_adjustments,
+            "feature_snapshot": feature_snapshot,
+        }
+
+    def tournament_goal_environment(self, kickoff_at: datetime) -> tuple[float, dict[str, Any] | None]:
+        sample = self.db.execute(
+            select(
+                func.count().label("matches"),
+                func.avg(matches.c.home_score + matches.c.away_score).label("avg_total_goals"),
+            ).where(
+                matches.c.public_id.like(f"{DONGQIUDI_MATCH_PUBLIC_ID_PREFIX}%"),
+                matches.c.status == "finished",
+                matches.c.home_score.is_not(None),
+                matches.c.away_score.is_not(None),
+                matches.c.kickoff_at < kickoff_at,
+            )
+        ).mappings().one()
+        match_count = int(sample["matches"] or 0)
+        if match_count < GOAL_ENVIRONMENT_MIN_MATCHES or sample["avg_total_goals"] is None:
+            return 1.0, None
+
+        observed_avg = float(sample["avg_total_goals"])
+        multiplier = clamp_value(observed_avg / GOAL_ENVIRONMENT_BASELINE_TOTAL, 0.92, 1.18)
+        return multiplier, {
+            "matches": match_count,
+            "observed_avg_total_goals": round(observed_avg, 4),
+            "baseline_avg_total_goals": GOAL_ENVIRONMENT_BASELINE_TOTAL,
+            "multiplier": round(multiplier, 4),
+        }
+
+    def build_scoreline_prediction(self, row, runtime: ScorelineRuntime) -> dict:
+        baseline_prediction = build_match_prediction(self.match_inputs(row))
+        projection = self.scoreline_model_projection(row, runtime)
+        if projection is None:
+            baseline_prediction.update(
+                {
+                    "inference_mode": "baseline",
+                    "calibration_applied": False,
+                    "fallback_reason": "missing_scoreline_state",
+                    "base_probabilities": None,
+                    "feature_snapshot": {},
+                    "feature_quality_status": row.match_feature_quality_status,
+                    "feature_missing_count": len(row.match_feature_missing_features or []),
+                    "feature_sources": self.feature_sources(row),
+                }
+            )
+            return baseline_prediction
+
+        full_scorelines = projection["full_scorelines"]
+        expected_goals = projection["expected_goals"]
         probabilities = outcome_probabilities_from_scorelines(full_scorelines)
         confidence = baseline_prediction["confidence"]
         if row.match_feature_quality_status == "insufficient":
@@ -754,7 +856,7 @@ class BaselinePredictionService:
 
         return {
             "probabilities": probabilities,
-            "expected_goals": {"home": expected_home, "away": expected_away},
+            "expected_goals": expected_goals,
             "confidence": confidence,
             "key_factors": [
                 *baseline_prediction["key_factors"],
@@ -765,47 +867,28 @@ class BaselinePredictionService:
                 },
                 {
                     "label": "model_xg_diff",
-                    "value": round(expected_home - expected_away, 3),
+                    "value": round(expected_goals["home"] - expected_goals["away"], 3),
                     "note": "Scoreline model expected-goal edge",
                 },
-                *context_adjustments,
+                *projection["context_adjustments"],
             ],
             "scorelines": scoreline_ranked_scorelines(full_scorelines),
             "inference_mode": "scoreline_model",
             "calibration_applied": False,
             "fallback_reason": None,
             "base_probabilities": None,
-            "feature_snapshot": {
-                "base_home_expected_goals": round(base_home_xg, 6),
-                "base_away_expected_goals": round(base_away_xg, 6),
-                "context_home_expected_goals": round(home_xg, 6),
-                "context_away_expected_goals": round(away_xg, 6),
-                "context_adjustments": context_adjustments,
-                "context_numeric_features": {
-                    key: numeric_features.get(key)
-                    for key in (
-                        "market_value_log_diff",
-                        "player_goals_per_player_diff",
-                        "player_assists_per_player_diff",
-                        "home_availability_impact",
-                        "away_availability_impact",
-                        "home_player_unavailable_count",
-                        "away_player_unavailable_count",
-                        "weather_wind_speed_kph",
-                        "weather_precipitation_mm",
-                        "weather_temperature_c",
-                    )
-                    if numeric_features.get(key) is not None
-                },
-                **{f"home_goal_{name}": round(float(home_features.get(name, 0.0) or 0.0), 6) for name in runtime.model.feature_names},
-                **{f"away_goal_{name}": round(float(away_features.get(name, 0.0) or 0.0), 6) for name in runtime.model.feature_names},
-            },
+            "feature_snapshot": projection["feature_snapshot"],
             "feature_quality_status": row.match_feature_quality_status,
             "feature_missing_count": len(row.match_feature_missing_features or []),
             "feature_sources": self.feature_sources(row),
         }
 
-    def build_small_outcome_prediction(self, row, runtime: SmallOutcomeRuntime) -> dict:
+    def build_small_outcome_prediction(
+        self,
+        row,
+        runtime: SmallOutcomeRuntime,
+        scoreline_runtime: ScorelineRuntime | None = None,
+    ) -> dict:
         baseline_prediction = build_match_prediction(self.match_inputs(row))
         home_state = runtime.final_states.get(str(row.home_team_id))
         away_state = runtime.final_states.get(str(row.away_team_id))
@@ -861,12 +944,60 @@ class BaselinePredictionService:
 
         snapshot_model = runtime.active_model if calibration_applied else runtime.history_core
         model_probabilities = normalize_probabilities(probabilities)
-        calibrated_scorelines = calibrated_scoreline_distribution(
-            baseline_prediction["expected_goals"]["home"],
-            baseline_prediction["expected_goals"]["away"],
-            model_probabilities,
+        scoreline_projection = (
+            self.scoreline_model_projection(row, scoreline_runtime)
+            if scoreline_runtime is not None
+            else None
         )
-        home_xg, away_xg = expected_goals_from_scorelines(calibrated_scorelines)
+        scoreline_key_factors = []
+        scoreline_feature_snapshot: dict[str, Any] = {"scoreline_source": "baseline_poisson"}
+        if scoreline_projection is not None:
+            calibrated_scorelines = calibrate_scorelines_to_outcome_probabilities(
+                scoreline_projection["full_scorelines"],
+                model_probabilities,
+            )
+            home_xg, away_xg = scoreline_expected_goals(calibrated_scorelines)
+            scoreline_feature_snapshot = {
+                "scoreline_source": "scoreline_model_calibrated_to_outcome",
+                **scoreline_projection["feature_snapshot"],
+            }
+            scoreline_key_factors = [
+                {
+                    "label": "scoreline_model",
+                    "value": 1,
+                    "note": scoreline_projection["model_family"],
+                },
+                {
+                    "label": "model_xg_diff",
+                    "value": round(home_xg - away_xg, 3),
+                    "note": "Scoreline model expected-goal edge calibrated to outcome probabilities",
+                },
+                *scoreline_projection["context_adjustments"],
+            ]
+        else:
+            goal_multiplier, goal_environment = self.tournament_goal_environment(row.kickoff_at)
+            base_home_xg = baseline_prediction["expected_goals"]["home"]
+            base_away_xg = baseline_prediction["expected_goals"]["away"]
+            calibrated_scorelines = calibrated_scoreline_distribution(
+                base_home_xg * goal_multiplier,
+                base_away_xg * goal_multiplier,
+                model_probabilities,
+            )
+            home_xg, away_xg = expected_goals_from_scorelines(calibrated_scorelines)
+            if goal_environment is not None:
+                scoreline_feature_snapshot = {
+                    "scoreline_source": "baseline_poisson_tournament_adjusted",
+                    "base_home_expected_goals": round(base_home_xg, 6),
+                    "base_away_expected_goals": round(base_away_xg, 6),
+                    "goal_environment": goal_environment,
+                }
+                scoreline_key_factors = [
+                    {
+                        "label": "tournament_goal_environment",
+                        "value": goal_environment["multiplier"],
+                        "note": "Observed finished-match goal rate applied to scoreline distribution",
+                    }
+                ]
         baseline_prediction["probabilities"] = model_probabilities
         baseline_prediction["expected_goals"] = {"home": home_xg, "away": away_xg}
         baseline_prediction["scorelines"] = ranked_scorelines(calibrated_scorelines)
@@ -891,6 +1022,7 @@ class BaselinePredictionService:
                         if calibration_applied and runtime.model_family == "history_core_plus_context_blend"
                         else {}
                     ),
+                    **scoreline_feature_snapshot,
                 },
                 "feature_quality_status": row.match_feature_quality_status,
                 "feature_missing_count": len(row.match_feature_missing_features or []),
@@ -904,6 +1036,7 @@ class BaselinePredictionService:
                 "value": 1 if calibration_applied else 0,
                 "note": baseline_prediction["inference_mode"],
             },
+            *scoreline_key_factors,
         ]
         if row.match_feature_quality_status == "insufficient":
             baseline_prediction["confidence"] = "low"

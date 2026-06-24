@@ -70,11 +70,11 @@ export default function MatchesPage() {
       <View className='home-meta-row'>
         <View className='subline'>
           <View className='subline__bar' />
-          <Text>真实赛程</Text>
+          <Text>赛程同步</Text>
         </View>
         <View className='updated-line updated-line--right'>
           <Icon name='clock' color='#6b7280' size={26} />
-          <Text>{display?.updatedAt || (loadState === 'loading' ? '加载真实数据' : '等待真实数据')}</Text>
+          <Text>{display?.updatedAt || (loadState === 'loading' ? '加载数据' : '等待更新')}</Text>
         </View>
       </View>
 
@@ -132,7 +132,7 @@ export default function MatchesPage() {
         </View>
       ) : (
         <View className='empty-state'>
-          <Text>{loadState === 'loading' ? '正在加载真实首页数据' : '真实首页数据不可用'}</Text>
+          <Text>{loadState === 'loading' ? '正在加载首页数据' : '首页数据暂不可用'}</Text>
         </View>
       )}
 
@@ -174,7 +174,7 @@ export default function MatchesPage() {
               </View>
             </View>
           )
-        }) : <View className='empty-state'><Text>暂无真实赛程数据</Text></View>}
+        }) : <View className='empty-state'><Text>暂无赛程数据</Text></View>}
       </Section>
 
       <Section title='冠军概率' action='查看完整榜单' onAction={() => goTo(routes.predictions)}>
@@ -203,11 +203,11 @@ export default function MatchesPage() {
               {team.delta !== undefined ? `${team.delta >= 0 ? '▲' : '▼'} ${Math.abs(team.delta)}%` : ''}
             </Text>
           </View>
-        )) : <View className='empty-state'><Text>暂无真实冠军概率数据</Text></View>}
-        <Text className='section-footnote'>来自后端真实预测快照</Text>
+        )) : <View className='empty-state'><Text>暂无冠军概率数据</Text></View>}
+        <Text className='section-footnote'>来自最近一次预测快照</Text>
       </Section>
 
-      {loadState === 'error' ? <Text className='data-note'>真实接口连接失败，未显示虚拟数据。</Text> : null}
+      {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}
       <BottomNav active='matches' />
     </View>
   )
