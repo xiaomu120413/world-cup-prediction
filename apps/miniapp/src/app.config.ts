@@ -9,7 +9,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'light',
     navigationBarBackgroundColor: '#f7f8fa',
-    navigationBarTitleText: '小木绿茵',
+    navigationBarTitleText: '小木绿茵手记',
     navigationBarTextStyle: 'black'
   },
   lazyCodeLoading: 'requiredComponents'
