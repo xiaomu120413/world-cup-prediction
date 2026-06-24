@@ -46,6 +46,7 @@ services:
       retries: 12
 
   api:
+    image: ${API_IMAGE:-worldcup-api:latest}
     build:
       context: ../../services/api
     restart: unless-stopped

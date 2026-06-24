@@ -1,0 +1,16 @@
+[Unit]
+Description=World Cup Prediction Docker Stack
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/world-cup-prediction/deploy/production
+ExecStart=/usr/bin/docker compose --env-file /opt/world-cup-prediction/deploy/production/.env.prod -f /opt/world-cup-prediction/deploy/production/docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose --env-file /opt/world-cup-prediction/deploy/production/.env.prod -f /opt/world-cup-prediction/deploy/production/docker-compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

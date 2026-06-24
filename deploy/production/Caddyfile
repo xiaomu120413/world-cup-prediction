@@ -1,7 +1,3 @@
-{
-	email {$TLS_EMAIL}
-}
-
 {$API_SITE_ADDRESS} {
 	encode gzip
 
