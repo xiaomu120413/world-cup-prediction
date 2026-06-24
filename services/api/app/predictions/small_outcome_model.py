@@ -3,8 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from math import exp, log, log1p, sqrt
-from random import Random
+from math import exp, log, log1p
 from typing import Any
 
 LABELS = ("home_win", "draw", "away_win")
@@ -189,116 +188,121 @@ def build_examples(
 
 
 @dataclass
-class Standardizer:
-    means: dict[str, float]
-    stds: dict[str, float]
-    feature_names: tuple[str, ...] = FEATURE_NAMES
-
-    @classmethod
-    def fit(cls, examples: list[TrainingExample], feature_names: tuple[str, ...] = FEATURE_NAMES) -> "Standardizer":
-        means: dict[str, float] = {}
-        stds: dict[str, float] = {}
-        for name in feature_names:
-            values = [float(example.features.get(name, 0.0) or 0.0) for example in examples]
-            mean = sum(values) / len(values)
-            variance = sum((value - mean) ** 2 for value in values) / max(1, len(values) - 1)
-            means[name] = mean
-            stds[name] = sqrt(variance) or 1.0
-        return cls(means=means, stds=stds, feature_names=feature_names)
-
-    def transform(self, features: dict[str, float]) -> list[float]:
-        return [
-            (float(features.get(name, 0.0) or 0.0) - self.means[name]) / self.stds[name]
-            for name in self.feature_names
-        ]
-
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "Standardizer":
-        feature_names = tuple(payload.get("feature_names") or FEATURE_NAMES)
-        return cls(
-            means={name: float(value) for name, value in payload["means"].items()},
-            stds={name: float(value) for name, value in payload["stds"].items()},
-            feature_names=feature_names,
-        )
-
-
-@dataclass
 class SmallOutcomeModel:
-    standardizer: Standardizer
-    weights: list[list[float]]
+    booster_model: str
     labels: tuple[str, ...] = LABELS
     feature_names: tuple[str, ...] = FEATURE_NAMES
+    params: dict[str, Any] = field(default_factory=dict)
+    feature_importances: list[float] = field(default_factory=list)
+    _booster: Any | None = field(default=None, init=False, repr=False)
+
+    def feature_vector(self, features: dict[str, float]) -> list[float]:
+        return [float(features.get(name, 0.0) or 0.0) for name in self.feature_names]
+
+    def booster(self):
+        if self._booster is None:
+            import lightgbm as lgb
+
+            self._booster = lgb.Booster(model_str=self.booster_model)
+        return self._booster
 
     def predict_proba(self, features: dict[str, float]) -> list[float]:
-        x = [1.0, *self.standardizer.transform(features)]
-        scores = [sum(weight * value for weight, value in zip(row, x)) for row in self.weights]
-        return softmax(scores)
+        probabilities = self.booster().predict([self.feature_vector(features)])[0]
+        return normalize_probability_values([float(value) for value in probabilities])
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "model_type": "multinomial_logistic_regression_sgd",
+            "model_type": "lightgbm_multiclass_classifier",
             "labels": list(self.labels),
             "feature_names": list(self.feature_names),
-            "standardizer": {
-                "means": self.standardizer.means,
-                "stds": self.standardizer.stds,
-                "feature_names": list(self.standardizer.feature_names),
-            },
-            "weights": self.weights,
+            "params": self.params,
+            "feature_importances": self.feature_importances,
+            "booster_model": self.booster_model,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SmallOutcomeModel":
+        model_type = str(payload.get("model_type") or "")
+        if not model_type.startswith("lightgbm"):
+            raise ValueError(f"unsupported_small_outcome_model_type:{model_type or 'missing'}")
         feature_names = tuple(payload.get("feature_names") or FEATURE_NAMES)
         return cls(
-            standardizer=Standardizer.from_dict(payload["standardizer"]),
-            weights=[[float(value) for value in row] for row in payload["weights"]],
+            booster_model=str(payload["booster_model"]),
             labels=tuple(payload.get("labels") or LABELS),
             feature_names=feature_names,
+            params=dict(payload.get("params") or {}),
+            feature_importances=[float(value) for value in payload.get("feature_importances", [])],
         )
 
+    def feature_importances_by_label(self, limit: int = 8) -> dict[str, list[dict[str, Any]]]:
+        total = sum(max(0.0, value) for value in self.feature_importances) or 1.0
+        rows = sorted(
+            [
+                {
+                    "feature": name,
+                    "weight": round(max(0.0, self.feature_importances[index]) / total, 6),
+                }
+                for index, name in enumerate(self.feature_names)
+            ],
+            key=lambda item: item["weight"],
+            reverse=True,
+        )[:limit]
+        return {label: rows for label in self.labels}
 
-def softmax(scores: list[float]) -> list[float]:
-    max_score = max(scores)
-    exps = [exp(score - max_score) for score in scores]
-    total = sum(exps) or 1.0
-    return [value / total for value in exps]
 
-
-def train_multinomial_logistic(
+def train_lightgbm_outcome_model(
     train_examples: list[TrainingExample],
-    epochs: int = 35,
-    learning_rate: float = 0.025,
-    l2: float = 0.0008,
+    trees: int = 180,
+    learning_rate: float = 0.035,
+    max_depth: int = 3,
+    min_leaf: int = 35,
+    max_bins: int = 63,
     seed: int = 20260615,
     feature_names: tuple[str, ...] = FEATURE_NAMES,
 ) -> SmallOutcomeModel:
-    standardizer = Standardizer.fit(train_examples, feature_names=feature_names)
-    feature_count = len(feature_names) + 1
-    label_counts = [1, 1, 1]
-    for example in train_examples:
-        label_counts[example.label] += 1
-    total = sum(label_counts)
-    weights = [[0.0 for _ in range(feature_count)] for _ in LABELS]
-    for label_index, count in enumerate(label_counts):
-        weights[label_index][0] = log(count / total)
+    if not train_examples:
+        raise ValueError("train_examples must not be empty")
 
-    rng = Random(seed)
-    indices = list(range(len(train_examples)))
-    for epoch in range(epochs):
-        rng.shuffle(indices)
-        lr = learning_rate / (1.0 + epoch * 0.08)
-        for index in indices:
-            example = train_examples[index]
-            x = [1.0, *standardizer.transform(example.features)]
-            probabilities = softmax([sum(w * v for w, v in zip(row, x)) for row in weights])
-            for label_index in range(len(LABELS)):
-                target = 1.0 if example.label == label_index else 0.0
-                gradient_scale = probabilities[label_index] - target
-                for feature_index, value in enumerate(x):
-                    regularization = 0.0 if feature_index == 0 else l2 * weights[label_index][feature_index]
-                    weights[label_index][feature_index] -= lr * (gradient_scale * value + regularization)
-    return SmallOutcomeModel(standardizer=standardizer, weights=weights, feature_names=feature_names)
+    import lightgbm as lgb
+
+    params = {
+        "objective": "multiclass",
+        "num_class": len(LABELS),
+        "learning_rate": learning_rate,
+        "n_estimators": trees,
+        "max_depth": max_depth,
+        "num_leaves": min(2**max_depth, 31),
+        "min_child_samples": min_leaf,
+        "max_bin": max_bins,
+        "subsample": 0.9,
+        "subsample_freq": 1,
+        "colsample_bytree": 0.9,
+        "reg_lambda": 1.0,
+        "class_weight": "balanced",
+        "random_state": seed,
+        "verbosity": -1,
+        "n_jobs": 1,
+    }
+    classifier = lgb.LGBMClassifier(**params)
+    feature_rows = [
+        [float(example.features.get(name, 0.0) or 0.0) for name in feature_names]
+        for example in train_examples
+    ]
+    labels = [example.label for example in train_examples]
+    classifier.fit(feature_rows, labels, feature_name=list(feature_names))
+    booster = classifier.booster_
+    return SmallOutcomeModel(
+        booster_model=booster.model_to_string(),
+        feature_names=feature_names,
+        params=params,
+        feature_importances=[float(value) for value in booster.feature_importance(importance_type="gain")],
+    )
+
+
+def normalize_probability_values(probabilities: list[float]) -> list[float]:
+    clipped = [clamp(value, 1e-12, 1.0) for value in probabilities]
+    total = sum(clipped) or 1.0
+    return [value / total for value in clipped]
 
 
 def baseline_probabilities(example: TrainingExample) -> list[float]:

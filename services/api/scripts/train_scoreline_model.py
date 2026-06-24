@@ -13,6 +13,7 @@ from app.predictions.scoreline_model import (
     SCORELINE_FEATURE_NAMES,
     build_scoreline_examples,
     evaluate_scoreline_model,
+    optimize_low_score_correlation,
     split_examples_by_date,
     train_poisson_goal_model,
 )
@@ -28,6 +29,7 @@ def parse_date(value: str) -> datetime:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the scoreline Poisson goal model.")
+    parser.add_argument("--validation-start", default="2023-01-01")
     parser.add_argument("--train-end", default="2024-01-01")
     parser.add_argument("--test-start", default="2024-01-01")
     parser.add_argument("--min-prior-matches", type=int, default=5)
@@ -45,28 +47,47 @@ def main() -> None:
         historical_matches,
         min_prior_matches=args.min_prior_matches,
     )
-    train_goals, test_goals = split_examples_by_date(
+    search_train_goals, _heldout_goals = split_examples_by_date(
+        goal_examples,
+        train_end=parse_date(args.validation_start),
+        test_start=parse_date(args.validation_start),
+    )
+    final_train_goals, test_goals = split_examples_by_date(
         goal_examples,
         train_end=parse_date(args.train_end),
         test_start=parse_date(args.test_start),
     )
-    _train_scorelines, test_scorelines = split_examples_by_date(
-        scoreline_examples,
-        train_end=parse_date(args.train_end),
-        test_start=parse_date(args.test_start),
-    )
-    if not train_goals:
+    validation_start = parse_date(args.validation_start)
+    train_end = parse_date(args.train_end)
+    test_start = parse_date(args.test_start)
+    validation_scorelines = [
+        example
+        for example in scoreline_examples
+        if validation_start <= example.played_at < train_end
+    ]
+    test_scorelines = [example for example in scoreline_examples if example.played_at >= test_start]
+    if not search_train_goals or not final_train_goals:
         raise RuntimeError("No scoreline training examples after applying train split.")
     if not test_goals:
         raise RuntimeError("No scoreline test examples after applying test split.")
 
-    model = train_poisson_goal_model(
-        train_goals,
+    search_model = train_poisson_goal_model(
+        search_train_goals,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
         l2=args.l2,
         seed=args.seed,
         feature_names=SCORELINE_FEATURE_NAMES,
+    )
+    correlation_search = optimize_low_score_correlation(search_model, validation_scorelines)
+    model = train_poisson_goal_model(
+        final_train_goals,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        l2=args.l2,
+        seed=args.seed,
+        feature_names=SCORELINE_FEATURE_NAMES,
+        low_score_correlation=correlation_search["selected"],
     )
     report = {
         "model": model.to_dict(),
@@ -74,11 +95,17 @@ def main() -> None:
             "historical_matches": len(historical_matches),
             "goal_examples_total": len(goal_examples),
             "scoreline_examples_total": len(scoreline_examples),
-            "train_goal_examples": len(train_goals),
+            "search_train_goal_examples": len(search_train_goals),
+            "final_train_goal_examples": len(final_train_goals),
+            "validation_scoreline_examples": len(validation_scorelines),
             "test_goal_examples": len(test_goals),
             "test_scoreline_examples": len(test_scorelines),
         },
-        "metrics": evaluate_scoreline_model(model, test_scorelines),
+        "metrics": {
+            "low_score_correlation_search": correlation_search,
+            "validation_metrics": evaluate_scoreline_model(model, validation_scorelines),
+            "test_metrics": evaluate_scoreline_model(model, test_scorelines),
+        },
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

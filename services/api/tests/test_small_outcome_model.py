@@ -10,7 +10,7 @@ from app.predictions.small_outcome_model import (
     build_examples,
     evaluate_baseline,
     evaluate_model,
-    train_multinomial_logistic,
+    train_lightgbm_outcome_model,
 )
 from scripts.train_small_outcome_model import (
     CurrentContextFeatureStore,
@@ -57,7 +57,15 @@ def test_small_outcome_model_trains_and_scores_probabilities():
     assert len(examples) == 6
     assert states["a"].matches == 5
 
-    model = train_multinomial_logistic(examples, epochs=3, learning_rate=0.02, seed=7)
+    model = train_lightgbm_outcome_model(
+        examples,
+        trees=4,
+        learning_rate=0.1,
+        max_depth=2,
+        min_leaf=1,
+        max_bins=4,
+        seed=7,
+    )
     probabilities = model.predict_proba(examples[0].features)
 
     assert sum(probabilities) == pytest.approx(1.0)
@@ -99,25 +107,50 @@ def test_small_outcome_model_accepts_context_feature_names():
     ]
 
     feature_names = (*FEATURE_NAMES, "ctx_roster_market_value_log")
-    model = train_multinomial_logistic(enriched, epochs=2, feature_names=feature_names)
+    model = train_lightgbm_outcome_model(
+        enriched,
+        trees=4,
+        learning_rate=0.1,
+        max_depth=2,
+        min_leaf=1,
+        max_bins=4,
+        feature_names=feature_names,
+    )
 
     assert model.feature_names == feature_names
     assert "ctx_roster_market_value_log" in model.to_dict()["feature_names"]
 
 
-def test_small_outcome_model_round_trips_from_model_version_payload():
+def test_lightgbm_outcome_model_trains_and_round_trips():
     matches = [
         make_match(1, "a", "b", 2, 0),
-        make_match(2, "a", "b", 1, 1),
-        make_match(3, "a", "b", 0, 1),
-        make_match(4, "a", "b", 3, 1),
+        make_match(2, "c", "d", 1, 1),
+        make_match(3, "a", "c", 2, 1),
+        make_match(4, "b", "d", 0, 1),
+        make_match(5, "a", "d", 3, 1),
+        make_match(6, "b", "c", 1, 2),
+        make_match(7, "a", "b", 1, 0),
+        make_match(8, "c", "d", 2, 2),
+        make_match(9, "d", "a", 0, 2),
+        make_match(10, "c", "b", 2, 0),
     ]
-    examples, _states = build_examples(matches, min_prior_matches=1)
-    model = train_multinomial_logistic(examples, epochs=2, learning_rate=0.01)
+    examples, _states = build_examples(matches, min_prior_matches=2)
+
+    model = train_lightgbm_outcome_model(
+        examples,
+        trees=4,
+        learning_rate=0.1,
+        max_depth=2,
+        min_leaf=1,
+        max_bins=4,
+    )
+    probabilities = model.predict_proba(examples[0].features)
     restored = type(model).from_dict(model.to_dict())
 
-    assert restored.feature_names == model.feature_names
-    assert restored.predict_proba(examples[0].features) == pytest.approx(model.predict_proba(examples[0].features))
+    assert sum(probabilities) == pytest.approx(1.0)
+    assert all(0.0 < probability < 1.0 for probability in probabilities)
+    assert restored.predict_proba(examples[0].features) == pytest.approx(probabilities)
+    assert model.feature_importances_by_label()["home_win"]
 
 
 def test_prediction_uses_history_fallback_when_context_team_is_missing():
@@ -295,7 +328,7 @@ def test_context_blend_search_can_improve_over_raw_context_model():
 
 def test_small_outcome_pipeline_is_default_and_scoreline_remains_available():
     assert DEFAULT_PREDICTION_MODEL_VERSION == DEFAULT_SMALL_MODEL_VERSION
-    assert DEFAULT_SMALL_MODEL_VERSION.startswith("small_outcome")
+    assert DEFAULT_SMALL_MODEL_VERSION.startswith("small_outcome_2026_06_24_gbdt")
     assert DEFAULT_SCORELINE_MODEL_VERSION.startswith("scoreline")
 
 

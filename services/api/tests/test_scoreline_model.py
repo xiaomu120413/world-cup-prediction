@@ -7,6 +7,7 @@ from app.predictions.scoreline_model import (
     build_scoreline_examples,
     context_adjusted_expected_goals,
     evaluate_scoreline_model,
+    optimize_low_score_correlation,
     outcome_probabilities_from_scorelines,
     scoreline_distribution,
     train_poisson_goal_model,
@@ -58,6 +59,31 @@ def test_scoreline_model_trains_and_outputs_probability_matrix():
     assert sum(probabilities.values()) == pytest.approx(1.0)
     assert scorelines == sorted(scorelines, key=lambda item: item["probability"], reverse=True)
     assert model.predict_goals(goal_examples[0].features) > 0
+
+
+def test_scoreline_low_score_correlation_is_selected_from_validation_examples():
+    matches = [
+        make_match(1, "a", "b", 0, 0),
+        make_match(2, "a", "c", 1, 0),
+        make_match(3, "a", "d", 1, 1),
+        make_match(4, "b", "c", 0, 1),
+        make_match(5, "c", "d", 0, 0),
+        make_match(6, "b", "d", 1, 0),
+        make_match(7, "a", "b", 0, 0),
+        make_match(8, "a", "c", 1, 0),
+        make_match(9, "d", "a", 0, 1),
+        make_match(10, "c", "b", 1, 1),
+        make_match(11, "a", "d", 1, 0),
+        make_match(12, "b", "a", 0, 1),
+    ]
+
+    goal_examples, scoreline_examples, _states = build_scoreline_examples(matches, min_prior_matches=2)
+    model = train_poisson_goal_model(goal_examples, epochs=2, learning_rate=0.005, seed=17)
+    search = optimize_low_score_correlation(model, scoreline_examples, candidates=(-0.12, -0.08, 0.0))
+
+    assert search["reason"] == "validation_scoreline_log_loss"
+    assert search["selected"] in {-0.12, -0.08, 0.0}
+    assert len(search["candidates"]) == 3
 
 
 def test_scoreline_matrix_calibrates_to_outcome_model_probabilities():

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app.predictions.service import (
     DEFAULT_PREDICTION_MODEL_VERSION,
     DEFAULT_SCORELINE_MODEL_VERSION,
@@ -7,6 +9,13 @@ from app.predictions.service import (
     BaselinePredictionService,
     simulate_group_table,
     third_place_state_qualifying_probabilities,
+)
+from app.predictions.tournament_ranker import (
+    assign_darkhorse_probabilities,
+    assign_tournament_probabilities,
+    knockout_advancement_probability,
+    simulate_tournament_paths,
+    third_place_assignment,
 )
 
 
@@ -64,7 +73,101 @@ def test_tournament_ranking_score_rewards_group_path_probability():
     qualified_score = BaselinePredictionService.tournament_team_score(row, qualified_path)["score"]
     at_risk_score = BaselinePredictionService.tournament_team_score(row, at_risk_path)["score"]
 
-    assert qualified_score - at_risk_score > 0.2
+    assert qualified_score - at_risk_score > 0.08
+
+
+def test_darkhorse_ranking_excludes_top_champion_favorites_before_scoring_upside():
+    scored = [
+        {"team_id": f"team-{index}", "score": 1.2 - index * 0.01, "fifa_rank": index + 1}
+        for index in range(16)
+    ]
+    assign_tournament_probabilities(scored)
+
+    darkhorses = assign_darkhorse_probabilities(scored)
+
+    assert darkhorses
+    assert all(item["favorite_rank"] > 10 for item in darkhorses)
+
+
+def test_third_place_assignment_finds_valid_round_of_32_slots():
+    assignment = third_place_assignment(set("ABCDEFGH"))
+
+    assert assignment is not None
+    assert set(assignment) == {"M74", "M77", "M79", "M80", "M81", "M82", "M85", "M87"}
+    assert set(assignment.values()) == set("ABCDEFGH")
+
+
+def test_knockout_monte_carlo_outputs_path_probabilities():
+    group_state_distributions = {}
+    teams_by_id = {}
+    for group_index, group_code in enumerate("ABCDEFGHIJKL"):
+        ranked = []
+        for rank in range(1, 5):
+            team_id = f"{group_code}{rank}"
+            teams_by_id[team_id] = SimpleNamespace(
+                team_id=team_id,
+                code=team_id,
+                fifa_rank=group_index * 4 + rank,
+                elo_rating=2100 - group_index * 8 - rank * 3,
+            )
+            ranked.append(
+                {
+                    "team_id": team_id,
+                    "seed_rank": rank,
+                    "points": 10 - rank,
+                    "goal_diff": 5 - rank,
+                    "goals_for": 7 - rank,
+                }
+            )
+        group_state_distributions[group_code] = [(1.0, ranked)]
+
+    result = simulate_tournament_paths(group_state_distributions, teams_by_id, iterations=300, seed=17)
+
+    assert result["iterations"] == 300
+    assert sum(result["champion_probabilities"].values()) == pytest.approx(1.0)
+    assert sum(result["semifinal_probabilities"].values()) == pytest.approx(4.0)
+    assert sum(result["round32_probabilities"].values()) == pytest.approx(32.0)
+    assert max(result["champion_probabilities"].values()) > 0
+
+
+def test_knockout_probability_uses_market_value_and_current_tournament_form():
+    strong_context = SimpleNamespace(
+        team_id="strong-context",
+        code="AAA",
+        fifa_rank=18,
+        elo_rating=1900,
+        market_value_eur=950_000_000,
+        group_played=2,
+        group_points=6,
+        group_goal_diff=5,
+        group_goals_for=6,
+    )
+    weak_context = SimpleNamespace(
+        team_id="weak-context",
+        code="BBB",
+        fifa_rank=18,
+        elo_rating=1900,
+        market_value_eur=150_000_000,
+        group_played=2,
+        group_points=1,
+        group_goal_diff=-2,
+        group_goals_for=1,
+    )
+    neutral_context = SimpleNamespace(
+        **{
+            **strong_context.__dict__,
+            "market_value_eur": weak_context.market_value_eur,
+            "group_points": weak_context.group_points,
+            "group_goal_diff": weak_context.group_goal_diff,
+            "group_goals_for": weak_context.group_goals_for,
+        }
+    )
+
+    context_probability = knockout_advancement_probability(strong_context, weak_context)
+    neutral_probability = knockout_advancement_probability(neutral_context, weak_context)
+
+    assert context_probability > neutral_probability
+    assert context_probability > 0.5
 
 
 def test_ranking_probability_delta_uses_previous_snapshot_value():

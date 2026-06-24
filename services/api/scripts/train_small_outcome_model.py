@@ -28,7 +28,7 @@ from app.predictions.small_outcome_model import (
     evaluate_probabilities,
     evaluate_prior,
     feature_dict,
-    train_multinomial_logistic,
+    train_lightgbm_outcome_model,
 )
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "exports" / "small_outcome_model_latest.json"
@@ -548,13 +548,26 @@ def calibration_gate_result(metrics: dict[str, Any]) -> dict[str, Any]:
 
 
 def top_coefficients(model, limit: int = 8) -> dict[str, list[dict[str, Any]]]:
-    rows: dict[str, list[dict[str, Any]]] = {}
-    for label_index, label in enumerate(LABELS):
-        coefficients = []
-        for feature_name, weight in zip(model.feature_names, model.weights[label_index][1:]):
-            coefficients.append({"feature": feature_name, "weight": round(weight, 6)})
-        rows[label] = sorted(coefficients, key=lambda item: abs(item["weight"]), reverse=True)[:limit]
-    return rows
+    if hasattr(model, "feature_importances_by_label"):
+        return model.feature_importances_by_label(limit=limit)
+    return {label: [] for label in LABELS}
+
+
+def train_report_lightgbm_model(
+    examples,
+    args,
+    feature_names: tuple[str, ...],
+):
+    return train_lightgbm_outcome_model(
+        examples,
+        trees=args.gbdt_trees,
+        learning_rate=args.gbdt_learning_rate,
+        max_depth=args.gbdt_max_depth,
+        min_leaf=args.gbdt_min_leaf,
+        max_bins=args.gbdt_max_bins,
+        seed=args.seed,
+        feature_names=feature_names,
+    )
 
 
 def load_scheduled_matches(db, limit: int):
@@ -712,12 +725,9 @@ def build_report(args) -> dict[str, Any]:
         if not base_test_examples:
             raise RuntimeError("No test examples after applying test split.")
 
-        core_model = train_multinomial_logistic(
+        core_model = train_report_lightgbm_model(
             base_train_examples,
-            epochs=args.epochs,
-            learning_rate=args.learning_rate,
-            l2=args.l2,
-            seed=args.seed,
+            args,
             feature_names=FEATURE_NAMES,
         )
         mode = "history" if args.history_only else args.model_mode
@@ -771,12 +781,9 @@ def build_report(args) -> dict[str, Any]:
             if not active_train_examples or not active_test_examples:
                 raise RuntimeError("No context examples after applying train/test split.")
             feature_names = tuple(FEATURE_NAMES + context_store.feature_names)
-            model = train_multinomial_logistic(
+            model = train_report_lightgbm_model(
                 active_train_examples,
-                epochs=args.epochs,
-                learning_rate=args.learning_rate,
-                l2=args.l2,
-                seed=args.seed,
+                args,
                 feature_names=feature_names,
             )
             model_family = "history_plus_current_context_joint"
@@ -818,12 +825,9 @@ def build_report(args) -> dict[str, Any]:
             if not active_train_examples or not active_test_examples:
                 raise RuntimeError("No calibration examples after applying train/test split.")
             feature_names = tuple(BASE_PROBABILITY_FEATURE_NAMES + context_store.feature_names)
-            context_calibrator = train_multinomial_logistic(
+            context_calibrator = train_report_lightgbm_model(
                 active_train_examples,
-                epochs=args.epochs,
-                learning_rate=args.learning_rate,
-                l2=args.l2,
-                seed=args.seed,
+                args,
                 feature_names=feature_names,
             )
             calibrated_probability_rows = [
@@ -906,12 +910,15 @@ def build_report(args) -> dict[str, Any]:
         "config": {
             "model_family": model_family,
             "model_mode": mode,
+            "model_algorithm": "lightgbm_gbdt",
             "min_prior_matches": args.min_prior_matches,
             "train_end": args.train_end,
             "test_start": args.test_start,
-            "epochs": args.epochs,
-            "learning_rate": args.learning_rate,
-            "l2": args.l2,
+            "gbdt_trees": args.gbdt_trees,
+            "gbdt_learning_rate": args.gbdt_learning_rate,
+            "gbdt_max_depth": args.gbdt_max_depth,
+            "gbdt_min_leaf": args.gbdt_min_leaf,
+            "gbdt_max_bins": args.gbdt_max_bins,
             "seed": args.seed,
             "history_only": args.history_only,
             "allow_missing_context_training": args.allow_missing_context_training,
@@ -943,7 +950,7 @@ def build_report(args) -> dict[str, Any]:
             "top_coefficients": top_coefficients(model),
             "history_core_top_coefficients": top_coefficients(core_model),
             "labels": list(LABELS),
-            "positive_weight_note": "Positive weights increase the class logit after feature standardization; compare within the same label only.",
+            "positive_weight_note": "LightGBM rows show normalized split gain; compare feature importance within the same model only.",
             "current_context_note": (
                 "Two-layer mode: history_core learns from leakage-safe historical features. The context_calibrator is used only when it passes "
                 "the calibration gate against the same-subset Elo baseline; otherwise official predictions fall back to history_core. "
@@ -971,9 +978,11 @@ def main() -> None:
     parser.add_argument("--train-end", default="2024-01-01", help="Train on examples before this date, YYYY-MM-DD.")
     parser.add_argument("--test-start", default="2024-01-01", help="Evaluate on examples at or after this date, YYYY-MM-DD.")
     parser.add_argument("--min-prior-matches", type=int, default=5)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--learning-rate", type=float, default=0.025)
-    parser.add_argument("--l2", type=float, default=0.0008)
+    parser.add_argument("--gbdt-trees", type=int, default=180)
+    parser.add_argument("--gbdt-learning-rate", type=float, default=0.035)
+    parser.add_argument("--gbdt-max-depth", type=int, default=3)
+    parser.add_argument("--gbdt-min-leaf", type=int, default=35)
+    parser.add_argument("--gbdt-max-bins", type=int, default=63)
     parser.add_argument("--seed", type=int, default=DEFAULT_TRAINING_SEED)
     parser.add_argument("--current-limit", type=int, default=12)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)

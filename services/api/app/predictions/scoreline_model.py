@@ -120,6 +120,14 @@ class PoissonGoalModel:
         linear = sum(weight * value for weight, value in zip(self.weights, x))
         return max(0.05, min(5.5, exp(max(-4.0, min(1.8, linear)))))
 
+    def with_low_score_correlation(self, value: float) -> "PoissonGoalModel":
+        return PoissonGoalModel(
+            standardizer=self.standardizer,
+            weights=self.weights,
+            feature_names=self.feature_names,
+            low_score_correlation=float(value),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "model_type": "poisson_goal_regression_sgd",
@@ -480,4 +488,40 @@ def evaluate_scoreline_model(model: PoissonGoalModel, examples: list[ScorelineEx
         "away_goal_mae": round(away_abs_error / count, 6),
         "top1_accuracy": round(top1_hits / count, 6),
         "top4_accuracy": round(top4_hits / count, 6),
+    }
+
+
+def optimize_low_score_correlation(
+    model: PoissonGoalModel,
+    validation_examples: list[ScorelineExample],
+    candidates: tuple[float, ...] = (-0.16, -0.12, -0.08, -0.04, 0.0, 0.04, 0.08),
+) -> dict[str, Any]:
+    if not validation_examples:
+        return {
+            "selected": model.low_score_correlation,
+            "reason": "no_validation_examples",
+            "candidates": [],
+        }
+
+    rows = []
+    for candidate in candidates:
+        candidate_model = model.with_low_score_correlation(candidate)
+        metrics = evaluate_scoreline_model(candidate_model, validation_examples)
+        rows.append(
+            {
+                "low_score_correlation": candidate,
+                "metrics": metrics,
+            }
+        )
+    best = min(
+        rows,
+        key=lambda item: (
+            float(item["metrics"].get("scoreline_log_loss", 999.0)),
+            -float(item["metrics"].get("top4_accuracy", 0.0)),
+        ),
+    )
+    return {
+        "selected": float(best["low_score_correlation"]),
+        "reason": "validation_scoreline_log_loss",
+        "candidates": rows,
     }
