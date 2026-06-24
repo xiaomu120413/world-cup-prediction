@@ -673,7 +673,9 @@ function mapReason(value?: string) {
     darkhorse_upside: '黑马上限',
     model_update: '预测更新',
     player_form: '球员状态',
-    schedule_path: '赛程路径'
+    schedule_path: '赛程路径',
+    knockout_path_lightgbm_neutral_monte_carlo: '淘汰赛路径模拟',
+    knockout_path_baseline_monte_carlo: '淘汰赛路径模拟'
   }
   return value ? reasonMap[value] || value : '模型输出'
 }
@@ -972,8 +974,9 @@ export async function getMatchData(matchId = defaultMatchId): Promise<{ match: M
 async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Promise<RankingData> {
   requireApi()
 
-  const response = await requestData<ApiRanking[]>(`/api/v1/predictions/rankings?type=${type}&limit=100`)
-  const rankings = sortApiRankingsByProbability(response.data)
+  const rankingLimit = type === 'darkhorse' ? 6 : 16
+  const response = await requestData<ApiRanking[]>(`/api/v1/predictions/rankings?type=${type}&limit=${rankingLimit}`)
+  const rankings = sortApiRankingsByProbability(response.data).slice(0, rankingLimit)
   return {
     rankings: rankings.map((item, index) => ({
       teamId: item.team.id,
@@ -987,7 +990,7 @@ async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Pr
       meta: formatTeamMeta(item.team)
     })),
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
-    source: `最近一次预测 · ${response.meta?.count ?? response.data.length}队`
+    source: `最近一次预测 · 前${rankings.length}队`
   }
 }
 
