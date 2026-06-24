@@ -105,7 +105,7 @@ export default function PredictionsPage() {
         <View className='ranking-table-head'>
           <Text>排名 / 球队</Text>
           <Text>{tabLabels[active]}概率</Text>
-          <Text>较上次快照</Text>
+          <Text>概率变化</Text>
         </View>
         {rankings.length ? rankings.map(team => (
           <View
@@ -146,7 +146,7 @@ export default function PredictionsPage() {
         <View className='today-change-card__main'>
           <Text className='today-change-card__title'>数据状态</Text>
           <Text className='today-change-card__text'>
-            {topTeam ? `${topTeam.name} 当前 ${tabLabels[active]}概率 ${topTeam.probability}%` : '预测快照暂不可用'}
+            {topTeam ? `${topTeam.name} 当前 ${tabLabels[active]}概率 ${topTeam.probability}%` : '预测数据暂不可用'}
           </Text>
           <Text className='today-change-card__meta'>{rankingMeta.updatedAt || '等待自动刷新'}</Text>
         </View>

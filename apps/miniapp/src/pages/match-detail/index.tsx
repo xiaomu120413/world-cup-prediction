@@ -162,7 +162,7 @@ export default function MatchDetailPage() {
 
       <Section title='关键证据' action=''>
         <EvidenceList items={match.evidence} />
-        <Text className='section-footnote'>证据来自赛前预测快照和公开数据源。</Text>
+        <Text className='section-footnote'>证据来自赛前模型和公开数据源。</Text>
       </Section>
 
       <Section title='比分分布'>

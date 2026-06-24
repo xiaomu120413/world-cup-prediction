@@ -990,7 +990,7 @@ async function loadRankingData(type: 'champion' | 'semifinal' | 'darkhorse'): Pr
       meta: formatTeamMeta(item.team)
     })),
     updatedAt: formatUpdatedAt(response.meta?.updated_at),
-    source: `最近一次预测 · 前${rankings.length}队`
+    source: `AI模型预测 · 前${rankings.length}队`
   }
 }
 

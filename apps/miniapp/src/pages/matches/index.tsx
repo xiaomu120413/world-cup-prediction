@@ -204,7 +204,7 @@ export default function MatchesPage() {
             </Text>
           </View>
         )) : <View className='empty-state'><Text>暂无冠军概率数据</Text></View>}
-        <Text className='section-footnote'>来自最近一次预测快照</Text>
+        <Text className='section-footnote'>基于赛程、球队实力与模型模拟</Text>
       </Section>
 
       {loadState === 'error' ? <Text className='data-note'>数据连接异常，请稍后重试。</Text> : null}

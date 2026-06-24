@@ -73,6 +73,10 @@ if (writeDistConfig) {
   const distConfig = JSON.parse(fs.readFileSync(distConfigPath, 'utf8'))
   distConfig.miniprogramRoot = './'
   distConfig.appid = localAppid || 'touristappid'
+  distConfig.setting = {
+    ...(distConfig.setting || {}),
+    minified: Boolean(isRelease),
+  }
   fs.writeFileSync(distConfigPath, `${JSON.stringify(distConfig, null, 2)}\n`)
 }
 
