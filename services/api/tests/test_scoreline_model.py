@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.predictions.service import calibrate_scorelines_to_outcome_probabilities
+from app.predictions.service import calibrate_scorelines_to_outcome_probabilities, current_tournament_goal_environment
 from app.predictions.scoreline_model import (
     build_scoreline_examples,
     context_adjusted_expected_goals,
@@ -147,3 +147,14 @@ def test_tournament_goal_environment_adjusts_formal_scoreline_model_rates():
             "note": "Observed tournament goal rate applied to scoreline scoring rates",
         }
     ]
+
+
+def test_current_tournament_goal_environment_uses_actual_scores_with_sample_weight():
+    multiplier, environment = current_tournament_goal_environment(4, 3.5)
+    raw_multiplier = 3.5 / 2.75
+
+    assert multiplier > 1.0
+    assert multiplier < raw_multiplier
+    assert environment["matches"] == 4
+    assert environment["sample_weight"] == pytest.approx(0.2)
+    assert current_tournament_goal_environment(3, 4.0) == (1.0, None)

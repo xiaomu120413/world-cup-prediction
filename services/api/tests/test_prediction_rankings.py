@@ -11,6 +11,7 @@ from app.predictions.service import (
     simulate_group_table,
     third_place_state_qualifying_probabilities,
 )
+from app.predictions.small_outcome_model import HistoricalMatch, TeamState
 from app.predictions.tournament_ranker import (
     assign_darkhorse_probabilities,
     assign_tournament_probabilities,
@@ -215,6 +216,38 @@ def test_small_outcome_knockout_probability_is_neutral_site_symmetric():
 
     assert team_a_probability + team_b_probability == pytest.approx(1.0)
     assert team_a_probability > 0.5
+
+
+def test_current_world_cup_results_are_folded_into_prediction_team_state():
+    service = BaselinePredictionService(db=None)
+    finished_at = datetime(2026, 6, 18, tzinfo=timezone.utc)
+    cutoff_at = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    base_states = {
+        "france": TeamState(elo=1900.0),
+        "argentina": TeamState(elo=1900.0),
+    }
+    service.finished_tournament_matches = lambda: [
+        HistoricalMatch(
+            match_id="dongqiudi-fra-arg",
+            played_at=finished_at,
+            home_team_id="france",
+            away_team_id="argentina",
+            home_team_code="FRA",
+            away_team_code="ARG",
+            home_score=2,
+            away_score=0,
+            tournament="FIFA World Cup",
+            neutral=True,
+        )
+    ]
+
+    current_states = service.states_with_current_tournament_results(base_states, cutoff_at)
+
+    assert base_states["france"].matches == 0
+    assert current_states["france"].matches == 1
+    assert current_states["argentina"].matches == 1
+    assert current_states["france"].elo > base_states["france"].elo
+    assert current_states["france"].summary(10)["goals_for"] == pytest.approx(2.0)
 
 
 def test_ranking_probability_delta_uses_previous_snapshot_value():

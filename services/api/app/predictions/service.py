@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -53,7 +54,9 @@ from app.predictions.scoreline_model import (
 from app.predictions.small_outcome_model import (
     FEATURE_NAMES,
     LABELS,
+    HistoricalMatch,
     SmallOutcomeModel,
+    TeamState,
     baseline_probabilities,
     build_examples,
     evaluate_baseline,
@@ -61,6 +64,7 @@ from app.predictions.small_outcome_model import (
     evaluate_prior,
     feature_dict,
     train_lightgbm_outcome_model,
+    update_states,
 )
 from scripts.train_small_outcome_model import (
     BASE_PROBABILITY_FEATURE_NAMES,
@@ -102,11 +106,39 @@ GROUP_SIMULATION_MIN_PROBABILITY = 1e-9
 WORLD_CUP_DIRECT_GROUP_QUALIFIERS = 2
 WORLD_CUP_THIRD_PLACE_QUALIFIERS = 8
 GOAL_ENVIRONMENT_BASELINE_TOTAL = 2.75
-GOAL_ENVIRONMENT_MIN_MATCHES = 12
+GOAL_ENVIRONMENT_MIN_MATCHES = 4
+GOAL_ENVIRONMENT_FULL_WEIGHT_MATCHES = 24
 
 
 def clamp_value(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def current_tournament_goal_environment(
+    match_count: int,
+    observed_avg_total_goals: float | None,
+) -> tuple[float, dict[str, Any] | None]:
+    if match_count < GOAL_ENVIRONMENT_MIN_MATCHES or observed_avg_total_goals is None:
+        return 1.0, None
+
+    observed_avg = float(observed_avg_total_goals)
+    raw_multiplier = observed_avg / GOAL_ENVIRONMENT_BASELINE_TOTAL
+    bounded_multiplier = clamp_value(raw_multiplier, 0.88, 1.25)
+    sample_weight = clamp_value(
+        (match_count - GOAL_ENVIRONMENT_MIN_MATCHES + 1)
+        / (GOAL_ENVIRONMENT_FULL_WEIGHT_MATCHES - GOAL_ENVIRONMENT_MIN_MATCHES + 1),
+        0.2,
+        1.0,
+    )
+    multiplier = 1.0 + (bounded_multiplier - 1.0) * sample_weight
+    return multiplier, {
+        "matches": match_count,
+        "observed_avg_total_goals": round(observed_avg, 4),
+        "baseline_avg_total_goals": GOAL_ENVIRONMENT_BASELINE_TOTAL,
+        "raw_multiplier": round(raw_multiplier, 4),
+        "sample_weight": round(sample_weight, 4),
+        "multiplier": round(multiplier, 4),
+    }
 
 
 def calibrate_scorelines_to_outcome_probabilities(
@@ -182,6 +214,7 @@ class ScorelineRuntime:
 class BaselinePredictionService:
     def __init__(self, db: Session):
         self.db = db
+        self._finished_tournament_matches_cache: list[HistoricalMatch] | None = None
 
     def recompute(
         self,
@@ -799,9 +832,69 @@ class BaselinePredictionService:
             query = query.where(*prediction_match_filters(scope))
         return self.db.execute(query).mappings().all()
 
+    def finished_tournament_matches(self) -> list[HistoricalMatch]:
+        if self._finished_tournament_matches_cache is not None:
+            return self._finished_tournament_matches_cache
+
+        home = teams.alias("home_team")
+        away = teams.alias("away_team")
+        rows = self.db.execute(
+            select(
+                matches.c.public_id,
+                matches.c.kickoff_at,
+                matches.c.home_team_id,
+                matches.c.away_team_id,
+                matches.c.home_score,
+                matches.c.away_score,
+                matches.c.neutral_site,
+                home.c.code.label("home_code"),
+                away.c.code.label("away_code"),
+            )
+            .join(home, matches.c.home_team_id == home.c.id)
+            .join(away, matches.c.away_team_id == away.c.id)
+            .where(
+                matches.c.public_id.like(f"{DONGQIUDI_MATCH_PUBLIC_ID_PREFIX}%"),
+                matches.c.status == "finished",
+                matches.c.home_score.is_not(None),
+                matches.c.away_score.is_not(None),
+            )
+            .order_by(matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+        ).mappings().all()
+        self._finished_tournament_matches_cache = [
+            HistoricalMatch(
+                match_id=row.public_id,
+                played_at=row.kickoff_at,
+                home_team_id=str(row.home_team_id),
+                away_team_id=str(row.away_team_id),
+                home_team_code=row.home_code,
+                away_team_code=row.away_code,
+                home_score=int(row.home_score),
+                away_score=int(row.away_score),
+                tournament="FIFA World Cup",
+                neutral=bool(row.neutral_site),
+            )
+            for row in rows
+        ]
+        return self._finished_tournament_matches_cache
+
+    def states_with_current_tournament_results(
+        self,
+        base_states: dict[str, TeamState],
+        cutoff_at: datetime,
+    ) -> dict[str, TeamState]:
+        states = deepcopy(base_states)
+        for match in self.finished_tournament_matches():
+            if match.played_at >= cutoff_at:
+                continue
+            home = states.setdefault(match.home_team_id, TeamState())
+            away = states.setdefault(match.away_team_id, TeamState())
+            update_states(home, away, match)
+        return states
+
     def scoreline_model_projection(self, row, runtime: ScorelineRuntime) -> dict | None:
-        home_state = runtime.final_states.get(str(row.home_team_id))
-        away_state = runtime.final_states.get(str(row.away_team_id))
+        current_states = self.states_with_current_tournament_results(runtime.final_states, row.kickoff_at)
+        home_state = current_states.get(str(row.home_team_id))
+        away_state = current_states.get(str(row.away_team_id))
         if home_state is None or away_state is None:
             return None
 
@@ -879,17 +972,7 @@ class BaselinePredictionService:
             )
         ).mappings().one()
         match_count = int(sample["matches"] or 0)
-        if match_count < GOAL_ENVIRONMENT_MIN_MATCHES or sample["avg_total_goals"] is None:
-            return 1.0, None
-
-        observed_avg = float(sample["avg_total_goals"])
-        multiplier = clamp_value(observed_avg / GOAL_ENVIRONMENT_BASELINE_TOTAL, 0.92, 1.18)
-        return multiplier, {
-            "matches": match_count,
-            "observed_avg_total_goals": round(observed_avg, 4),
-            "baseline_avg_total_goals": GOAL_ENVIRONMENT_BASELINE_TOTAL,
-            "multiplier": round(multiplier, 4),
-        }
+        return current_tournament_goal_environment(match_count, sample["avg_total_goals"])
 
     def build_scoreline_prediction(self, row, runtime: ScorelineRuntime) -> dict:
         baseline_prediction = build_match_prediction(self.match_inputs(row))
@@ -952,8 +1035,9 @@ class BaselinePredictionService:
         scoreline_runtime: ScorelineRuntime | None = None,
     ) -> dict:
         baseline_prediction = build_match_prediction(self.match_inputs(row))
-        home_state = runtime.final_states.get(str(row.home_team_id))
-        away_state = runtime.final_states.get(str(row.away_team_id))
+        current_states = self.states_with_current_tournament_results(runtime.final_states, row.kickoff_at)
+        home_state = current_states.get(str(row.home_team_id))
+        away_state = current_states.get(str(row.away_team_id))
         if home_state is None or away_state is None:
             baseline_prediction.update(
                 {
@@ -1165,6 +1249,7 @@ class BaselinePredictionService:
         if runtime is None:
             return None
         snapshot_at = self.prediction_snapshot_generated_at(snapshot_id)
+        current_states = self.states_with_current_tournament_results(runtime.final_states, snapshot_at)
         cache: dict[tuple[Any, Any], float] = {}
 
         def probability(team_a: Any, team_b: Any) -> float:
@@ -1174,7 +1259,13 @@ class BaselinePredictionService:
                 if reverse_key in cache:
                     cache[key] = 1.0 - cache[reverse_key]
                 else:
-                    cache[key] = self.knockout_small_outcome_advancement_probability(team_a, team_b, runtime, snapshot_at)
+                    cache[key] = self.knockout_small_outcome_advancement_probability(
+                        team_a,
+                        team_b,
+                        runtime,
+                        snapshot_at,
+                        current_states=current_states,
+                    )
                     cache[reverse_key] = 1.0 - cache[key]
             return cache[key]
 
@@ -1186,18 +1277,21 @@ class BaselinePredictionService:
         team_b: Any,
         runtime: SmallOutcomeRuntime,
         snapshot_at: datetime,
+        current_states: dict[str, TeamState] | None = None,
     ) -> float:
         forward_probability = self.oriented_knockout_small_outcome_advancement_probability(
             team_a,
             team_b,
             runtime,
             snapshot_at,
+            current_states=current_states,
         )
         reverse_probability = self.oriented_knockout_small_outcome_advancement_probability(
             team_b,
             team_a,
             runtime,
             snapshot_at,
+            current_states=current_states,
         )
         advancement_probability = (forward_probability + (1.0 - reverse_probability)) / 2.0
         live_form_adjustment = knockout_context_logit_adjustment(
@@ -1214,6 +1308,7 @@ class BaselinePredictionService:
         team_b: Any,
         runtime: SmallOutcomeRuntime,
         snapshot_at: datetime,
+        current_states: dict[str, TeamState] | None = None,
     ) -> float:
         baseline_prediction = build_match_prediction(
             MatchInputs(
@@ -1227,8 +1322,9 @@ class BaselinePredictionService:
             baseline_prediction["probabilities"][label]
             for label in LABELS
         ]
-        home_state = runtime.final_states.get(str(team_a.team_id))
-        away_state = runtime.final_states.get(str(team_b.team_id))
+        states = current_states if current_states is not None else runtime.final_states
+        home_state = states.get(str(team_a.team_id))
+        away_state = states.get(str(team_b.team_id))
         if home_state is None or away_state is None:
             probabilities = deterministic_baseline_probabilities
         else:
