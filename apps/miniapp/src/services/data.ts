@@ -998,6 +998,17 @@ export async function getRankingData(type: 'champion' | 'semifinal' | 'darkhorse
   return cachedRequest(rankingDataCache, type, () => loadRankingData(type))
 }
 
+async function getChampionProbabilityMap(): Promise<Map<string, number>> {
+  const response = await requestData<ApiRanking[]>('/api/v1/predictions/rankings?type=champion&limit=64')
+  const probabilityById = new Map<string, number>()
+  sortApiRankingsByProbability(response.data).forEach(item => {
+    if (item.team.id) {
+      probabilityById.set(item.team.id, percentFromApi(item.probability))
+    }
+  })
+  return probabilityById
+}
+
 export async function getGroupList(): Promise<GroupSummary[]> {
   requireApi()
 
@@ -1018,14 +1029,8 @@ export async function getTeamList(): Promise<TeamListItem[]> {
 
   const [teamsResponse, rankings] = await Promise.all([
     requestData<ApiTeam[]>('/api/v1/teams'),
-    getRankingData('champion')
+    getChampionProbabilityMap()
   ])
-  const probabilityById = new Map<string, number>()
-  rankings.rankings.forEach(team => {
-    if (team.teamId) {
-      probabilityById.set(team.teamId, team.probability)
-    }
-  })
 
   return teamsResponse.data.map(team => ({
     id: team.id,
@@ -1033,7 +1038,7 @@ export async function getTeamList(): Promise<TeamListItem[]> {
     name: displayTeam(team),
     nameEn: team.name_en || undefined,
     meta: formatTeamMeta(team),
-    probability: probabilityById.get(team.id)
+    probability: rankings.get(team.id)
   }))
 }
 

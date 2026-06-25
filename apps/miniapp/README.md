@@ -61,15 +61,16 @@ Open:
 http://127.0.0.1:4173
 ```
 
-WeChat DevTools import path:
+WeChat DevTools import path for preview/upload:
 
 ```text
-apps/miniapp
+apps/miniapp/dist-weapp
 ```
 
-The root `project.config.json` points WeChat DevTools to `dist-weapp`. Importing
-`apps/miniapp/dist-weapp` also works after a build because Taro writes a generated
-project config into the build output.
+Importing `apps/miniapp` also works because the root `project.config.json` points
+WeChat DevTools to `dist-weapp`, but direct `dist-weapp` import avoids scanning
+local development folders such as `node_modules` and is safer when DevTools
+reports `EMFILE: too many open files`.
 
 ## WeChat API domain
 

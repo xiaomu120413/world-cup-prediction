@@ -51,6 +51,50 @@ function validateReleaseApiBaseUrl(value) {
   }
 }
 
+function mergePackIgnore(existing = [], entries = []) {
+  const merged = [...existing]
+  const seen = new Set(
+    merged.map((item) => `${item.type || ''}:${item.value || ''}`)
+  )
+
+  for (const entry of entries) {
+    const key = `${entry.type}:${entry.value}`
+    if (!seen.has(key)) {
+      merged.push(entry)
+      seen.add(key)
+    }
+  }
+
+  return merged
+}
+
+function applyRootPackOptions(targetConfig) {
+  targetConfig.packOptions = {
+    ...(targetConfig.packOptions || {}),
+    ignore: mergePackIgnore(targetConfig.packOptions?.ignore, [
+      { type: 'folder', value: 'node_modules' },
+      { type: 'folder', value: '.swc' },
+      { type: 'folder', value: '.preview' },
+      { type: 'folder', value: 'dist' },
+      { type: 'folder', value: 'screenshots' },
+      { type: 'folder', value: 'src' },
+      { type: 'folder', value: 'scripts' },
+      { type: 'folder', value: 'types' },
+    ]),
+  }
+}
+
+function applyDistPackOptions(targetConfig) {
+  targetConfig.packOptions = {
+    ...(targetConfig.packOptions || {}),
+    ignore: mergePackIgnore(targetConfig.packOptions?.ignore, [
+      { type: 'suffix', value: '.map' },
+      { type: 'folder', value: 'node_modules' },
+      { type: 'folder', value: '.swc' },
+    ]),
+  }
+}
+
 if (isRelease) {
   validateReleaseApiBaseUrl(apiBaseUrl)
   if (!localAppid || localAppid === 'touristappid') {
@@ -60,6 +104,7 @@ if (isRelease) {
 
 config.miniprogramRoot = './dist-weapp'
 config.appid = 'touristappid'
+applyRootPackOptions(config)
 
 const next = `${JSON.stringify(config, null, 2)}\n`
 if (fs.readFileSync(configPath, 'utf8') !== next) {
@@ -77,6 +122,7 @@ if (writeDistConfig) {
     ...(distConfig.setting || {}),
     minified: Boolean(isRelease),
   }
+  applyDistPackOptions(distConfig)
   fs.writeFileSync(distConfigPath, `${JSON.stringify(distConfig, null, 2)}\n`)
 }
 

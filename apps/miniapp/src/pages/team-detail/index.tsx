@@ -175,7 +175,7 @@ function TeamsIndexPage() {
           <Text className='page-head__subtitle'>球队数据 · 点击进入分析</Text>
         </View>
         <View className='team-index-header__icon'>
-          <Icon name='team' color='#2563eb' size={42} />
+          <Icon name='shield' color='#2563eb' size={42} />
         </View>
       </View>
 
@@ -290,8 +290,8 @@ export default function TeamDetailPage() {
             <Text>{displayTeam.updatedAt}</Text>
           </View>
         </View>
-        <View className='icon-button icon-button--plain'>
-          <Icon name='star' color='#0f172a' size={34} />
+        <View className='icon-button icon-button--plain team-report-topbar__flag'>
+          <Flag team={displayTeam.name} teamId={displayTeam.id} teamCode={displayTeam.code} teamEn={displayTeam.nameEn} size='sm' />
         </View>
       </View>
 

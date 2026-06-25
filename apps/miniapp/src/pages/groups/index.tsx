@@ -32,6 +32,15 @@ function compactBeijingTime(value: string) {
   return value.replace(/^北京时间\s*(\d{1,2})月(\d{1,2})日\s*/, (_match, month, day) => `北京 ${month}/${day} `)
 }
 
+function showQualificationRules() {
+  Taro.showModal({
+    title: '晋级规则',
+    content: '每组前两名直接晋级，12 个小组中成绩最好的 8 个第三名也晋级。小组排名依次比较积分、净胜球、总进球数、公平竞赛积分，仍并列则抽签。',
+    showCancel: false,
+    confirmText: '知道了'
+  })
+}
+
 export default function GroupsPage() {
   const [activeGroupId, setActiveGroupId] = useState(getRouteGroupId)
   const [groups, setGroups] = useState<GroupSummary[]>([])
@@ -101,8 +110,8 @@ export default function GroupsPage() {
           <Text className='page-head__subtitle'>{displayGroup?.subtitle || '等待小组数据'}</Text>
           <Text className='page-head__subtitle'>{displayGroup?.updatedAt || '-'}</Text>
         </View>
-        <View className='icon-button icon-button--plain' onClick={() => refreshGroupData(activeGroupId)}>
-          <Icon name='refresh' color='#0f172a' size={34} />
+        <View className='icon-button icon-button--plain' onClick={showQualificationRules}>
+          <Icon name='info' color='#0f172a' size={34} />
         </View>
       </View>
 
@@ -166,7 +175,7 @@ export default function GroupsPage() {
         )) : <View className='empty-state'><Text>暂无积分榜数据</Text></View>}
       </Section>
 
-      <Section title='出线概率' action='晋级规则'>
+      <Section title='出线概率' action='晋级规则' onAction={showQualificationRules}>
         <View className='qualification-list'>
           {displayGroup?.teams.length ? displayGroup.teams.map(team => (
             <View className='qualification-row' key={team.teamId || team.name}>
