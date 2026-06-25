@@ -28,6 +28,7 @@ from app.db.schema import (
     player_aliases,
     player_form_snapshots,
     players,
+    prediction_reviews,
     prediction_snapshots,
     ranking_predictions,
     raw_snapshots,
@@ -828,6 +829,8 @@ class PublicDataRepository:
             "collector_runs": self.count_rows(collector_runs),
             "news_items": self.count_rows(news_items),
             "match_predictions": self.count_rows(match_predictions),
+            "scoreline_predictions": self.count_rows(scoreline_predictions),
+            "prediction_reviews": self.count_rows(prediction_reviews),
             "ranking_predictions": self.count_rows(ranking_predictions),
         }
         latest_runs = self.db.execute(

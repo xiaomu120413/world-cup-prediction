@@ -6,21 +6,24 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import ai_insights, data_source_links, news_items, players, teams
+from app.db.schema import ai_insights, collector_runs, data_source_links, news_items, players, teams
 from app.db.session import SessionLocal
 
 EXTRACTOR_SOURCE = "ai_news_extractor"
 EXTRACTOR_SOURCE_TYPE = "news_insight_v1"
 EXTRACTOR_VERSION = "news_insight_rules_v1"
 MODEL_ELIGIBLE_THRESHOLD = 0.65
+API_TZ = ZoneInfo("Asia/Shanghai")
 STRONG_MODEL_KEYWORDS = {
     "injury": {"ruled out", "withdraw", "withdrawn", "doubtful", "injured", "伤缺", "缺席", "退出", "无缘"},
     "suspension": {"suspended", "suspension", "ban", "banned", "停赛", "禁赛"},
@@ -430,6 +433,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    started_at = datetime.now(API_TZ)
 
     with SessionLocal() as db:
         news_rows = load_news(db, args.limit)
@@ -444,6 +448,19 @@ def main() -> None:
             result = {"status": "dry_run", "news_items": len(news_rows), "ai_insights_to_write": len(insights)}
         else:
             result = {"status": "success", "news_items": len(news_rows), **write_insights(db, insights, news_rows)}
+            db.execute(
+                pg_insert(collector_runs).values(
+                    source=EXTRACTOR_SOURCE,
+                    job_type=EXTRACTOR_SOURCE_TYPE,
+                    status="success",
+                    started_at=started_at,
+                    finished_at=datetime.now(API_TZ),
+                    records_read=len(news_rows),
+                    records_written=result["ai_insights"],
+                    error_message=None,
+                    snapshot_ids=[],
+                )
+            )
             db.commit()
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 

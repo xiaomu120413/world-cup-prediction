@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.db.schema import data_source_links, matches, news_items, players, raw_snapshots, teams
+from app.db.schema import collector_runs, data_source_links, matches, news_items, players, raw_snapshots, teams
 from app.db.session import SessionLocal
 
 API_TZ = ZoneInfo("Asia/Shanghai")
@@ -314,6 +314,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect public football news RSS items.")
     parser.add_argument("--mode", choices=["auto", "daily", "matchday"], default="auto")
     args = parser.parse_args()
+    started_at = datetime.now(API_TZ)
 
     with SessionLocal() as db:
         context = matchday_context(db)
@@ -327,6 +328,7 @@ def main() -> None:
         total_items = 0
         errors = []
         source_links_by_key = {}
+        snapshot_ids = []
         for feed in NEWS_FEEDS:
             try:
                 response = httpx.get(
@@ -347,6 +349,7 @@ def main() -> None:
                 feed["url"],
                 {"feed_url": feed["url"], "items": snapshot_safe_items(items), "matchday_context": context},
             )
+            snapshot_ids.append(snapshot_id)
             rows_by_url = {}
             for item in items:
                 related_team_ids = [team["id"] for team in item["matched_teams"]] or None
@@ -423,6 +426,20 @@ def main() -> None:
                     },
                 )
             )
+        status = "failed" if errors and total_items == 0 else "partial" if errors else "success"
+        db.execute(
+            pg_insert(collector_runs).values(
+                source="public_news_rss",
+                job_type=f"collect_public_news:{context['mode']}",
+                status=status,
+                started_at=started_at,
+                finished_at=datetime.now(API_TZ),
+                records_read=len(NEWS_FEEDS),
+                records_written=total_items,
+                error_message=json.dumps(errors, ensure_ascii=False)[:4000] if errors else None,
+                snapshot_ids=snapshot_ids,
+            )
+        )
         db.commit()
     print(
         json.dumps(

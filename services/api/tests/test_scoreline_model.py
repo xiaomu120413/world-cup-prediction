@@ -10,6 +10,7 @@ from app.predictions.scoreline_model import (
     optimize_low_score_correlation,
     outcome_probabilities_from_scorelines,
     scoreline_distribution,
+    tournament_environment_adjusted_expected_goals,
     train_poisson_goal_model,
 )
 from app.predictions.small_outcome_model import HistoricalMatch
@@ -127,3 +128,22 @@ def test_context_adjustments_apply_real_feature_direction_with_bounds():
         "context_roster_output",
         "context_weather_total",
     }
+
+
+def test_tournament_goal_environment_adjusts_formal_scoreline_model_rates():
+    home_xg, away_xg, adjustments = tournament_environment_adjusted_expected_goals(
+        1.2,
+        0.9,
+        1.15,
+        {"matches": 18, "observed_avg_total_goals": 3.16, "multiplier": 1.15},
+    )
+
+    assert home_xg == pytest.approx(1.38)
+    assert away_xg == pytest.approx(1.035)
+    assert adjustments == [
+        {
+            "label": "tournament_goal_environment",
+            "value": 1.15,
+            "note": "Observed tournament goal rate applied to scoreline scoring rates",
+        }
+    ]

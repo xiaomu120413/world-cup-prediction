@@ -451,6 +451,26 @@ def context_adjusted_expected_goals(
     return adjusted_home, adjusted_away, adjustments
 
 
+def tournament_environment_adjusted_expected_goals(
+    home_xg: float,
+    away_xg: float,
+    multiplier: float,
+    goal_environment: dict[str, Any] | None,
+) -> tuple[float, float, list[dict[str, float | str]]]:
+    if not goal_environment or multiplier == 1.0:
+        return home_xg, away_xg, []
+
+    adjusted_home = clamp(home_xg * multiplier, 0.05, 5.5)
+    adjusted_away = clamp(away_xg * multiplier, 0.05, 5.5)
+    return adjusted_home, adjusted_away, [
+        {
+            "label": "tournament_goal_environment",
+            "value": round(multiplier, 4),
+            "note": "Observed tournament goal rate applied to scoreline scoring rates",
+        }
+    ]
+
+
 def evaluate_scoreline_model(model: PoissonGoalModel, examples: list[ScorelineExample]) -> dict[str, float | int]:
     if not examples:
         return {"examples": 0}

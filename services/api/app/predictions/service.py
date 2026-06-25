@@ -47,6 +47,7 @@ from app.predictions.scoreline_model import (
     ranked_scorelines as scoreline_ranked_scorelines,
     scoreline_distribution as model_scoreline_distribution,
     split_examples_by_date as split_scoreline_examples_by_date,
+    tournament_environment_adjusted_expected_goals,
     train_poisson_goal_model,
 )
 from app.predictions.small_outcome_model import (
@@ -815,6 +816,14 @@ class BaselinePredictionService:
             base_away_xg,
             numeric_features,
         )
+        goal_multiplier, goal_environment = self.tournament_goal_environment(row.kickoff_at)
+        home_xg, away_xg, environment_adjustments = tournament_environment_adjusted_expected_goals(
+            home_xg,
+            away_xg,
+            goal_multiplier,
+            goal_environment,
+        )
+        context_adjustments = [*context_adjustments, *environment_adjustments]
         full_scorelines = model_scoreline_distribution(
             home_xg,
             away_xg,
@@ -827,6 +836,7 @@ class BaselinePredictionService:
             "base_away_expected_goals": round(base_away_xg, 6),
             "context_home_expected_goals": round(home_xg, 6),
             "context_away_expected_goals": round(away_xg, 6),
+            "goal_environment": goal_environment,
             "context_adjustments": context_adjustments,
             "context_numeric_features": {
                 key: numeric_features.get(key)
