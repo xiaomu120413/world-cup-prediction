@@ -4,6 +4,7 @@ import devConfig from './dev'
 import prodConfig from './prod'
 
 const h5PerformanceBudgetBytes = 360 * 1024
+const productionWeappApiBaseUrl = 'https://api.worldcupai-mu.cn'
 
 export default defineConfig<'webpack5'>(async (merge) => {
   const baseConfig: UserConfigExport<'webpack5'> = {
@@ -20,7 +21,10 @@ export default defineConfig<'webpack5'>(async (merge) => {
     outputRoot: process.env.TARO_ENV === 'weapp' ? 'dist-weapp' : 'dist',
     plugins: ['@tarojs/plugin-generator'],
     defineConstants: {
-      __API_BASE_URL__: JSON.stringify(process.env.TARO_APP_API_BASE_URL || '')
+      __API_BASE_URL__: JSON.stringify(
+        process.env.TARO_APP_API_BASE_URL ||
+          (process.env.TARO_ENV === 'weapp' ? productionWeappApiBaseUrl : '')
+      )
     },
     copy: {
       patterns: [],

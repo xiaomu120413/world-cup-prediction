@@ -10,8 +10,9 @@ const appRoot = path.resolve(__dirname, '..')
 const configPath = path.join(appRoot, 'project.config.json')
 const privateConfigPath = path.join(appRoot, 'project.private.config.json')
 const distConfigPath = path.join(appRoot, 'dist-weapp', 'project.config.json')
+const productionApiBaseUrl = 'https://api.worldcupai-mu.cn'
 
-const apiBaseUrl = (process.env.TARO_APP_API_BASE_URL || '').trim()
+const apiBaseUrl = (process.env.TARO_APP_API_BASE_URL || (isRelease ? productionApiBaseUrl : '')).trim()
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
 const privateConfig = fs.existsSync(privateConfigPath)
   ? JSON.parse(fs.readFileSync(privateConfigPath, 'utf8'))
@@ -104,6 +105,10 @@ if (isRelease) {
 
 config.miniprogramRoot = './dist-weapp'
 config.appid = 'touristappid'
+config.setting = {
+  ...(config.setting || {}),
+  minified: true,
+}
 applyRootPackOptions(config)
 
 const next = `${JSON.stringify(config, null, 2)}\n`
@@ -120,7 +125,7 @@ if (writeDistConfig) {
   distConfig.appid = localAppid || 'touristappid'
   distConfig.setting = {
     ...(distConfig.setting || {}),
-    minified: Boolean(isRelease),
+    minified: true,
   }
   applyDistPackOptions(distConfig)
   fs.writeFileSync(distConfigPath, `${JSON.stringify(distConfig, null, 2)}\n`)
