@@ -146,6 +146,13 @@ def daily_snapshot_time(now: datetime | None = None) -> datetime:
     return value.astimezone(API_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def current_snapshot_time(now: datetime | None = None) -> datetime:
+    value = now or datetime.now(API_TZ)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=API_TZ)
+    return value.astimezone(API_TZ)
+
+
 class MatchFeatureBuilder:
     def __init__(self, db: Session):
         self.db = db
@@ -160,7 +167,7 @@ class MatchFeatureBuilder:
         statuses: tuple[str, ...] | None = PREDICTION_MATCH_STATUSES,
         min_kickoff_at: datetime | None = None,
     ) -> dict[str, Any]:
-        snapshot_time = snapshot_as_of_at or daily_snapshot_time()
+        snapshot_time = snapshot_as_of_at or current_snapshot_time()
         rows = self.load_matches(
             public_ids,
             roster_only=roster_only,
@@ -278,6 +285,7 @@ class MatchFeatureBuilder:
                 "martj42_international_results",
                 "open_meteo",
                 "manual_verified",
+                "verified_public_news",
                 "ai_news_extractor",
             ],
             "home": home["source_summary"],

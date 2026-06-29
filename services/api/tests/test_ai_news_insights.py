@@ -78,3 +78,43 @@ def test_generic_injury_context_without_player_is_not_model_eligible():
     assert injury["team_id"] == team_id
     assert injury["player_id"] is None
     assert injury["is_model_eligible"] is False
+
+
+def test_red_card_without_player_is_model_eligible_for_related_team():
+    team_id = uuid4()
+    news = {
+        "id": uuid4(),
+        "source": "espn",
+        "source_url": "https://example.test/red-card",
+        "title": "South Africa midfielder sent off after red card against Canada",
+        "summary": "The team will be without a suspended player for the next World Cup match.",
+        "related_team_ids": [team_id],
+    }
+
+    insights = extract_insights_from_news(news, [], source_confidence=0.82)
+
+    suspension = next(item for item in insights if item["event_type"] == "suspension")
+    assert suspension["team_id"] == team_id
+    assert suspension["player_id"] is None
+    assert suspension["impact_direction"] == "negative"
+    assert suspension["is_model_eligible"] is True
+
+
+def test_fractured_ankle_absence_without_player_is_model_eligible_for_related_team():
+    team_id = uuid4()
+    news = {
+        "id": uuid4(),
+        "source": "guardian",
+        "source_url": "https://example.test/fractured-ankle",
+        "title": "Canada midfielder fractured ankle and will miss rest of tournament",
+        "summary": "The World Cup squad confirmed a long absence.",
+        "related_team_ids": [team_id],
+    }
+
+    insights = extract_insights_from_news(news, [], source_confidence=0.82)
+
+    injury = next(item for item in insights if item["event_type"] == "injury")
+    assert injury["team_id"] == team_id
+    assert injury["player_id"] is None
+    assert injury["impact_direction"] == "negative"
+    assert injury["is_model_eligible"] is True

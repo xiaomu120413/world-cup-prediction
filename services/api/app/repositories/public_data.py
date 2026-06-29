@@ -39,6 +39,11 @@ from app.db.schema import (
     venues,
     weather_snapshots,
 )
+from app.predictions.service import (
+    aggregate_group_simulation,
+    enumerate_group_table_states,
+    third_place_state_qualifying_probabilities,
+)
 
 TEAM_PUBLIC_IDS = {
     "USA": "usa",
@@ -68,6 +73,11 @@ SOURCE_TRUST_POLICY = {
         "trust_level": "manual_verified",
         "default_confidence": 0.9,
         "label": "Manually verified public venue facts",
+    },
+    "verified_public_news": {
+        "trust_level": "manual_verified",
+        "default_confidence": 0.9,
+        "label": "Manually verified public news facts",
     },
     "guardian": {
         "trust_level": "public_news",
@@ -99,6 +109,16 @@ SOURCE_TRUST_POLICY = {
         "default_confidence": 0.82,
         "label": "FOX Sports World Cup RSS",
     },
+    "skysports": {
+        "trust_level": "public_news",
+        "default_confidence": 0.82,
+        "label": "Sky Sports football RSS",
+    },
+    "sportsmole": {
+        "trust_level": "public_news",
+        "default_confidence": 0.78,
+        "label": "Sports Mole football RSS",
+    },
     "martj42_international_results": {
         "trust_level": "public_dataset",
         "default_confidence": 0.9,
@@ -113,12 +133,15 @@ APPROVED_REAL_SOURCES = {
     "dongqiudi",
     "open_meteo",
     "manual_verified",
+    "verified_public_news",
     "guardian",
     "bbc",
     "espn",
     "ai_news_extractor",
     "internal_model",
     "foxsports",
+    "skysports",
+    "sportsmole",
     "martj42_international_results",
 }
 
@@ -274,6 +297,7 @@ def matchday_bounds_utc(match_date: str, timezone_name: str = "Asia/Shanghai") -
 class PublicDataRepository:
     def __init__(self, db: Session):
         self.db = db
+        self._live_group_simulations: dict[str, dict] | None = None
 
     @staticmethod
     def teams_query() -> Select:
@@ -778,6 +802,71 @@ class PublicDataRepository:
             .join(latest_snapshot, group_simulations.c.prediction_snapshot_id == latest_snapshot.c.snapshot_id)
             .where(competition_stages.c.code == group_id)
             .order_by(group_simulations.c.qualify_prob.desc())
+        )
+
+    @staticmethod
+    def all_group_standings_for_simulation_query() -> Select:
+        return (
+            select(
+                competition_stages.c.id.label("stage_id"),
+                competition_stages.c.code.label("group_id"),
+                competition_stages.c.name.label("group_name"),
+                group_standings.c.team_id,
+                group_standings.c.rank,
+                group_standings.c.played,
+                group_standings.c.points,
+                group_standings.c.goal_diff,
+                group_standings.c.goals_for,
+                teams.c.code,
+                teams.c.name_zh,
+                teams.c.name_en,
+                teams.c.confederation,
+                teams.c.fifa_rank,
+                teams.c.elo_rating,
+                teams.c.market_value_eur,
+                teams.c.quality_status,
+            )
+            .join(competition_stages, group_standings.c.stage_id == competition_stages.c.id)
+            .join(teams, group_standings.c.team_id == teams.c.id)
+            .where(competition_stages.c.code.in_(WORLD_CUP_GROUP_CODES))
+            .order_by(competition_stages.c.code.asc(), group_standings.c.rank.asc())
+        )
+
+    @staticmethod
+    def current_group_remaining_matches_query(stage_ids: list) -> Select:
+        latest_prediction_times = (
+            select(
+                match_predictions.c.match_id.label("match_id"),
+                func.max(match_predictions.c.generated_at).label("generated_at"),
+            )
+            .group_by(match_predictions.c.match_id)
+            .subquery()
+        )
+        return (
+            select(
+                matches.c.stage_id,
+                matches.c.home_team_id,
+                matches.c.away_team_id,
+                matches.c.status,
+                match_predictions.c.home_win_prob,
+                match_predictions.c.draw_prob,
+                match_predictions.c.away_win_prob,
+                match_predictions.c.home_expected_goals,
+                match_predictions.c.away_expected_goals,
+            )
+            .outerjoin(latest_prediction_times, latest_prediction_times.c.match_id == matches.c.id)
+            .outerjoin(
+                match_predictions,
+                and_(
+                    match_predictions.c.match_id == matches.c.id,
+                    match_predictions.c.generated_at == latest_prediction_times.c.generated_at,
+                ),
+            )
+            .where(
+                matches.c.stage_id.in_(stage_ids),
+                matches.c.status.in_(("scheduled", "live")),
+            )
+            .order_by(matches.c.stage_id.asc(), matches.c.kickoff_at.asc(), matches.c.public_id.asc())
         )
 
     def list_teams(self) -> list[dict]:
@@ -1761,9 +1850,12 @@ class PublicDataRepository:
         row = self.db.execute(self.team_group_profile_query(team_uuid)).mappings().first()
         if row is None:
             return None
-        simulation = self.db.execute(
-            self.latest_team_group_simulation_query(team_uuid, row.stage_uuid)
-        ).mappings().first()
+        live_group_simulation = self.live_group_simulations().get(row.group_id)
+        simulation = (live_group_simulation or {}).get("by_team_id", {}).get(team_uuid)
+        if simulation is None:
+            simulation = self.db.execute(
+                self.latest_team_group_simulation_query(team_uuid, row.stage_uuid)
+            ).mappings().first()
         payload = {
             "id": row.group_id,
             "name": group_display_name(row.group_id, row.group_name),
@@ -1777,12 +1869,22 @@ class PublicDataRepository:
             "losses": row.losses,
         }
         if simulation:
+            if isinstance(simulation, dict):
+                rank_1_prob = simulation.get("rank_1_prob")
+                rank_2_prob = simulation.get("rank_2_prob")
+                qualify_prob = simulation.get("qualify_prob")
+                expected_points = simulation.get("expected_points")
+            else:
+                rank_1_prob = simulation.rank_1_prob
+                rank_2_prob = simulation.rank_2_prob
+                qualify_prob = simulation.qualify_prob
+                expected_points = simulation.expected_points
             payload.update(
                 {
-                    "rank_1_prob": safe_float(simulation.rank_1_prob),
-                    "rank_2_prob": safe_float(simulation.rank_2_prob),
-                    "qualify_prob": safe_float(simulation.qualify_prob),
-                    "expected_points": safe_float(simulation.expected_points),
+                    "rank_1_prob": safe_float(rank_1_prob),
+                    "rank_2_prob": safe_float(rank_2_prob),
+                    "qualify_prob": safe_float(qualify_prob),
+                    "expected_points": safe_float(expected_points),
                 }
             )
         return payload
@@ -2251,6 +2353,79 @@ class PublicDataRepository:
             for row in rows
         ]
 
+    def live_group_simulations(self) -> dict[str, dict]:
+        if self._live_group_simulations is not None:
+            return self._live_group_simulations
+
+        standing_rows = self.db.execute(self.all_group_standings_for_simulation_query()).mappings().all()
+        if not standing_rows:
+            self._live_group_simulations = {}
+            return self._live_group_simulations
+
+        rows_by_stage: dict[object, list] = {}
+        group_id_by_stage: dict[object, str] = {}
+        for row in standing_rows:
+            rows_by_stage.setdefault(row.stage_id, []).append(row)
+            group_id_by_stage[row.stage_id] = row.group_id
+
+        remaining_by_stage: dict[object, list[dict]] = {}
+        stage_ids = list(rows_by_stage)
+        if stage_ids:
+            remaining_rows = self.db.execute(self.current_group_remaining_matches_query(stage_ids)).mappings().all()
+            for row in remaining_rows:
+                remaining_by_stage.setdefault(row.stage_id, []).append(dict(row))
+
+        group_states_by_stage = {}
+        for stage_id, stage_rows in rows_by_stage.items():
+            played_slots = sum(int(row.played or 0) for row in stage_rows)
+            remaining_matches = [] if played_slots >= 12 else remaining_by_stage.get(stage_id, [])
+            group_states_by_stage[stage_id] = enumerate_group_table_states(stage_rows, remaining_matches)
+        third_place_qualifiers = third_place_state_qualifying_probabilities(group_states_by_stage)
+
+        simulations: dict[str, dict] = {}
+        for stage_id, stage_rows in rows_by_stage.items():
+            values = aggregate_group_simulation(
+                stage_rows,
+                group_states_by_stage[stage_id],
+                {
+                    state_index: probability
+                    for (qualifier_stage_id, state_index), probability in third_place_qualifiers.items()
+                    if qualifier_stage_id == stage_id
+                },
+            )
+            teams_value = []
+            by_team_id = {}
+            for row in stage_rows:
+                simulation = values.get(row.team_id)
+                if simulation is None:
+                    continue
+                item = {
+                    "team": team_payload(row),
+                    "qualify_prob": float(simulation["qualify_prob"]),
+                    "rank_1_prob": float(simulation["rank_1_prob"]),
+                    "rank_2_prob": float(simulation["rank_2_prob"]),
+                    "expected_points": float(simulation["expected_points"]),
+                }
+                teams_value.append(item)
+                by_team_id[row.team_id] = item
+            teams_value.sort(
+                key=lambda item: (
+                    -item["qualify_prob"],
+                    -item["rank_1_prob"],
+                    -item["rank_2_prob"],
+                    -item["expected_points"],
+                    item["team"]["id"],
+                )
+            )
+            simulations[group_id_by_stage[stage_id]] = {
+                "simulation_count": len(group_states_by_stage[stage_id]),
+                "teams": teams_value,
+                "by_team_id": by_team_id,
+            }
+
+        self._live_group_simulations = simulations
+        return simulations
+
     def get_group_detail(self, group_id: str) -> dict | None:
         rows = self.db.execute(self.group_standings_query(group_id)).mappings().all()
         if not rows:
@@ -2272,6 +2447,14 @@ class PublicDataRepository:
         }
 
     def get_group_simulation(self, group_id: str) -> dict | None:
+        live_simulation = self.live_group_simulations().get(group_id)
+        if live_simulation:
+            return {
+                "group_id": group_id,
+                "simulation_count": live_simulation["simulation_count"],
+                "teams": live_simulation["teams"],
+            }
+
         rows = self.db.execute(self.group_simulation_query(group_id)).mappings().all()
         if not rows:
             return None

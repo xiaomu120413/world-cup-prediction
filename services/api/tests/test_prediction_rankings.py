@@ -9,6 +9,7 @@ from app.predictions.service import (
     DEFAULT_SMALL_MODEL_VERSION,
     BaselinePredictionService,
     simulate_group_table,
+    third_place_qualifying_probabilities,
     third_place_state_qualifying_probabilities,
 )
 from app.predictions.small_outcome_model import HistoricalMatch, TeamState
@@ -338,4 +339,62 @@ def test_best_third_place_rule_qualifies_eight_best_third_place_teams():
     for index in range(8):
         assert state_probabilities[(f"group-{index}", 0)] == 1.0
     for index in range(8, 12):
+        assert state_probabilities[(f"group-{index}", 0)] == 0.0
+
+
+def test_best_third_place_rule_splits_equal_tiebreakers_across_remaining_slots():
+    group_states_by_stage = {}
+    for index in range(12):
+        stage_id = f"group-{index}"
+        group_states_by_stage[stage_id] = [
+            (
+                1.0,
+                [
+                    {"team_id": f"{stage_id}-1", "points": 9, "goal_diff": 6, "goals_for": 8, "seed_rank": 1},
+                    {"team_id": f"{stage_id}-2", "points": 6, "goal_diff": 3, "goals_for": 5, "seed_rank": 2},
+                    {"team_id": f"{stage_id}-3", "points": 4, "goal_diff": 0, "goals_for": 3, "seed_rank": 3},
+                    {"team_id": f"{stage_id}-4", "points": 0, "goal_diff": -6, "goals_for": 1, "seed_rank": 4},
+                ],
+            )
+        ]
+
+    state_probabilities = third_place_state_qualifying_probabilities(group_states_by_stage)
+    team_probabilities = third_place_qualifying_probabilities(group_states_by_stage)
+
+    for index in range(12):
+        assert state_probabilities[(f"group-{index}", 0)] == pytest.approx(8 / 12)
+        assert team_probabilities[f"group-{index}-3"] == pytest.approx(8 / 12)
+
+
+def test_best_third_place_rule_splits_last_slot_between_equal_third_place_teams():
+    group_states_by_stage = {}
+    for index in range(12):
+        stage_id = f"group-{index}"
+        third_points = 12 if index < 7 else 6 if index < 9 else 3
+        third_goal_diff = 6 if index < 7 else 0 if index < 9 else -3
+        group_states_by_stage[stage_id] = [
+            (
+                1.0,
+                [
+                    {"team_id": f"{stage_id}-1", "points": 9, "goal_diff": 7, "goals_for": 9, "seed_rank": 1},
+                    {"team_id": f"{stage_id}-2", "points": 6, "goal_diff": 3, "goals_for": 5, "seed_rank": 2},
+                    {
+                        "team_id": f"{stage_id}-3",
+                        "points": third_points,
+                        "goal_diff": third_goal_diff,
+                        "goals_for": 4,
+                        "seed_rank": 3,
+                    },
+                    {"team_id": f"{stage_id}-4", "points": 0, "goal_diff": -6, "goals_for": 1, "seed_rank": 4},
+                ],
+            )
+        ]
+
+    state_probabilities = third_place_state_qualifying_probabilities(group_states_by_stage)
+
+    for index in range(7):
+        assert state_probabilities[(f"group-{index}", 0)] == 1.0
+    for index in range(7, 9):
+        assert state_probabilities[(f"group-{index}", 0)] == pytest.approx(0.5)
+    for index in range(9, 12):
         assert state_probabilities[(f"group-{index}", 0)] == 0.0

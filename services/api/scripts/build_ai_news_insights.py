@@ -24,6 +24,10 @@ EXTRACTOR_SOURCE_TYPE = "news_insight_v1"
 EXTRACTOR_VERSION = "news_insight_rules_v1"
 MODEL_ELIGIBLE_THRESHOLD = 0.65
 API_TZ = ZoneInfo("Asia/Shanghai")
+EXTRA_STRONG_MODEL_KEYWORDS = {
+    "injury": {"will miss", "fracture", "fractured", "broken leg", "surgery", "muscle fatigue", "rest of the tournament"},
+    "suspension": {"red card", "sent off", "sending off", "dismissed", "ejected", "three-match ban"},
+}
 STRONG_MODEL_KEYWORDS = {
     "injury": {"ruled out", "withdraw", "withdrawn", "doubtful", "injured", "伤缺", "缺席", "退出", "无缘"},
     "suspension": {"suspended", "suspension", "ban", "banned", "停赛", "禁赛"},
@@ -50,10 +54,17 @@ EVENT_RULES = (
             "injury",
             "injured",
             "ruled out",
+            "will miss",
+            "rest of the tournament",
             "withdraw",
             "withdrawn",
             "doubtful",
             "fitness concern",
+            "fracture",
+            "fractured",
+            "broken leg",
+            "surgery",
+            "muscle fatigue",
             "calf",
             "hamstring",
             "knee",
@@ -76,6 +87,16 @@ EVENT_RULES = (
         "suspension",
         "availability",
         ("suspended", "suspension", "ban", "banned", "red card", "停赛", "禁赛", "红牌"),
+        "key",
+        "negative",
+        -0.7,
+        0.72,
+        True,
+    ),
+    EventRule(
+        "suspension",
+        "availability",
+        ("sent off", "sending off", "dismissed", "ejected", "three-match ban"),
         "key",
         "negative",
         -0.7,
@@ -219,7 +240,8 @@ def confidence_for(rule: EventRule, matched_keywords: list[str], team_id: Any | 
 
 
 def has_strong_model_keyword(event_type: str, matched_keywords: list[str]) -> bool:
-    strong_values = STRONG_MODEL_KEYWORDS.get(event_type, set())
+    strong_values = set(STRONG_MODEL_KEYWORDS.get(event_type, set()))
+    strong_values.update(EXTRA_STRONG_MODEL_KEYWORDS.get(event_type, set()))
     return any(keyword in strong_values for keyword in matched_keywords)
 
 

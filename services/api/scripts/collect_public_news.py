@@ -47,7 +47,27 @@ NEWS_FEEDS = [
         "url": "https://api.foxsports.com/v2/content/optimized-rss?partnerKey=MB0Wehpmuj2lUhuRhQaafhBjAJqaPU244mlTDK1i&size=30&tags=soccer/wc/league/12",
         "confidence": 0.82,
     },
+    {
+        "source": "skysports",
+        "source_type": "football_rss",
+        "url": "https://www.skysports.com/rss/12040",
+        "confidence": 0.82,
+    },
+    {
+        "source": "skysports",
+        "source_type": "world_cup_rss",
+        "url": "https://www.skysports.com/rss/13973",
+        "confidence": 0.82,
+    },
+    {
+        "source": "sportsmole",
+        "source_type": "football_rss",
+        "url": "https://www.sportsmole.co.uk/football/rss.xml",
+        "confidence": 0.78,
+    },
 ]
+
+MIN_SUCCESSFUL_NEWS_FEEDS = 2
 
 BASE_KEYWORDS = (
     "2026 world cup",
@@ -58,10 +78,21 @@ BASE_KEYWORDS = (
     "injury",
     "injured",
     "ruled out",
+    "will miss",
     "withdraws",
     "withdrawn",
+    "fracture",
+    "fractured",
+    "broken leg",
+    "ankle",
+    "muscle fatigue",
+    "hamstring",
     "suspension",
     "suspended",
+    "red card",
+    "sent off",
+    "sending off",
+    "three-match ban",
     "fitness",
     "doubtful",
     "squad",
@@ -80,6 +111,7 @@ TEAM_ALIASES = {
     "BOSNIA-AND-HERZEGOVINA": ["Bosnia", "Bosnia and Herzegovina"],
     "BRA": ["Brazil"],
     "CABO-VERDE": ["Cape Verde", "Cabo Verde"],
+    "CANADA": ["Canada", "CanMNT"],
     "CONGO-DR": ["DR Congo", "Democratic Republic of Congo"],
     "COTE-D-IVOIRE": ["Ivory Coast", "Cote d'Ivoire"],
     "CZECHIA": ["Czechia", "Czech Republic"],
@@ -426,7 +458,13 @@ def main() -> None:
                     },
                 )
             )
-        status = "failed" if errors and total_items == 0 else "partial" if errors else "success"
+        successful_feeds = len(NEWS_FEEDS) - len(errors)
+        if total_items == 0:
+            status = "failed"
+        elif successful_feeds >= MIN_SUCCESSFUL_NEWS_FEEDS:
+            status = "success"
+        else:
+            status = "partial"
         db.execute(
             pg_insert(collector_runs).values(
                 source="public_news_rss",
@@ -445,6 +483,7 @@ def main() -> None:
         json.dumps(
             {
                 "feeds": len(NEWS_FEEDS),
+                "successful_feeds": successful_feeds,
                 "news_items_read": total_items,
                 "source_links": len(source_links),
                 "matchday_context": context,

@@ -1642,23 +1642,6 @@ def group_sort_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
     )
 
 
-def probability_at_most_successes(probabilities: list[float], max_successes: int) -> float:
-    if max_successes < 0:
-        return 0.0
-    if max_successes >= len(probabilities):
-        return 1.0
-
-    distribution = [1.0]
-    for probability in probabilities:
-        bounded_probability = min(max(float(probability), 0.0), 1.0)
-        next_distribution = [0.0] * (len(distribution) + 1)
-        for index, value in enumerate(distribution):
-            next_distribution[index] += value * (1.0 - bounded_probability)
-            next_distribution[index + 1] += value * bounded_probability
-        distribution = next_distribution
-    return sum(distribution[: max_successes + 1])
-
-
 def group_match_outcomes(match_row: dict[str, Any]) -> list[dict[str, Any]]:
     home_xg = float(match_row.get("home_expected_goals") or 1.2)
     away_xg = float(match_row.get("away_expected_goals") or 1.2)
@@ -1768,26 +1751,13 @@ def third_place_qualifying_probabilities(
             )
         third_entries_by_stage[stage_id] = entries
 
-    max_better_third_teams = WORLD_CUP_THIRD_PLACE_QUALIFIERS - 1
     probabilities_by_team: dict[Any, float] = {}
     for stage_id, entries in third_entries_by_stage.items():
-        other_stage_entries = [
-            other_entries
-            for other_stage_id, other_entries in third_entries_by_stage.items()
-            if other_stage_id != stage_id
-        ]
         for candidate in entries:
-            better_probabilities = [
-                sum(
-                    other_entry["probability"]
-                    for other_entry in other_entries
-                    if other_entry["sort_key"] < candidate["sort_key"]
-                )
-                for other_entries in other_stage_entries
-            ]
-            qualify_given_candidate = probability_at_most_successes(
-                better_probabilities,
-                max_better_third_teams,
+            qualify_given_candidate = third_place_state_qualify_probability(
+                group_states_by_stage,
+                stage_id,
+                candidate["sort_key"],
             )
             probabilities_by_team[candidate["team_id"]] = probabilities_by_team.get(candidate["team_id"], 0.0) + (
                 candidate["probability"] * qualify_given_candidate
@@ -1800,19 +1770,47 @@ def third_place_state_qualify_probability(
     stage_id: Any,
     candidate_key: tuple[float, float, float, float],
 ) -> float:
-    better_probabilities = []
+    better_equal_distribution = {(0, 0): 1.0}
     for other_stage_id, other_states in group_states_by_stage.items():
         if other_stage_id == stage_id:
             continue
         better_probability = 0.0
+        equal_probability = 0.0
         for probability, ranked in other_states:
             if len(ranked) <= WORLD_CUP_DIRECT_GROUP_QUALIFIERS:
                 continue
             other_third = ranked[WORLD_CUP_DIRECT_GROUP_QUALIFIERS]
-            if group_sort_key(other_third) < candidate_key:
+            other_key = group_sort_key(other_third)
+            if other_key < candidate_key:
                 better_probability += probability
-        better_probabilities.append(better_probability)
-    return probability_at_most_successes(better_probabilities, WORLD_CUP_THIRD_PLACE_QUALIFIERS - 1)
+            elif other_key == candidate_key:
+                equal_probability += probability
+
+        next_distribution: dict[tuple[int, int], float] = {}
+        worse_probability = max(0.0, 1.0 - better_probability - equal_probability)
+        for (better_count, equal_count), state_probability in better_equal_distribution.items():
+            for better_increment, equal_increment, outcome_probability in (
+                (1, 0, better_probability),
+                (0, 1, equal_probability),
+                (0, 0, worse_probability),
+            ):
+                if outcome_probability <= GROUP_SIMULATION_MIN_PROBABILITY:
+                    continue
+                key = (better_count + better_increment, equal_count + equal_increment)
+                next_distribution[key] = next_distribution.get(key, 0.0) + state_probability * outcome_probability
+        better_equal_distribution = next_distribution or better_equal_distribution
+
+    qualify_probability = 0.0
+    for (better_count, equal_count), probability in better_equal_distribution.items():
+        remaining_slots = WORLD_CUP_THIRD_PLACE_QUALIFIERS - better_count
+        if remaining_slots <= 0:
+            candidate_share = 0.0
+        elif remaining_slots >= equal_count + 1:
+            candidate_share = 1.0
+        else:
+            candidate_share = remaining_slots / (equal_count + 1)
+        qualify_probability += probability * candidate_share
+    return qualify_probability
 
 
 def third_place_state_qualifying_probabilities(

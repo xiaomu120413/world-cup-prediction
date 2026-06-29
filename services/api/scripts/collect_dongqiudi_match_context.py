@@ -87,6 +87,17 @@ VENUE_COUNTRY_LABELS = {
 }
 
 
+SCHEDULE_STAGE_ALIASES = (
+    ("小组赛", "group-stage", "小组赛", "group", 10),
+    ("1/16", "round-of-32", "1/16决赛", "knockout", 20),
+    ("1/8", "round-of-16", "1/8决赛", "knockout", 30),
+    ("1/4", "quarterfinals", "1/4决赛", "knockout", 40),
+    ("半决赛", "semifinals", "半决赛", "knockout", 50),
+    ("季军赛", "third-place", "季军赛", "knockout", 60),
+    ("决赛", "final", "决赛", "knockout", 70),
+)
+
+
 def checksum(payload: dict) -> str:
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -214,9 +225,10 @@ def venue_capacity(value: dict) -> int | None:
 def schedule_rows(payload: dict) -> list[dict]:
     rows = []
     for group in payload.get("content", {}).get("matches", []):
+        round_name = group.get("name") or ""
         for item in group.get("data", []):
             if isinstance(item, dict) and item.get("match_id"):
-                rows.append(item)
+                rows.append({**item, "_round_name": round_name})
     return rows
 
 
@@ -249,33 +261,56 @@ def ensure_competition(db):
     if competition_id is None:
         competition_id = db.execute(select(competitions.c.id).where(competitions.c.code == "world_cup_2026")).scalar_one()
 
+    return competition_id
+
+
+def schedule_stage_metadata(item: dict) -> dict:
+    round_name = str(item.get("_round_name") or item.get("round_name") or "").strip()
+    for token, code, name, stage_type, sort_order in SCHEDULE_STAGE_ALIASES:
+        if token in round_name:
+            return {
+                "code": code,
+                "name": name,
+                "stage_type": stage_type,
+                "sort_order": sort_order,
+                "source_round_name": round_name,
+            }
+    return {
+        "code": "dongqiudi-schedule",
+        "name": round_name or "Dongqiudi Schedule Context",
+        "stage_type": "group",
+        "sort_order": 98,
+        "source_round_name": round_name,
+    }
+
+
+def ensure_schedule_stage(db, competition_id, item: dict, stage_cache: dict[str, object]):
+    metadata = schedule_stage_metadata(item)
+    code = metadata["code"]
+    if code in stage_cache:
+        return stage_cache[code], metadata
+
     stage_id = db.execute(
-        select(competition_stages.c.id).where(
-            competition_stages.c.competition_id == competition_id,
-            competition_stages.c.code == "dongqiudi-schedule",
+        pg_insert(competition_stages)
+        .values(
+            competition_id=competition_id,
+            code=code,
+            name=metadata["name"],
+            stage_type=metadata["stage_type"],
+            sort_order=metadata["sort_order"],
         )
-    ).scalar_one_or_none()
-    if stage_id is None:
-        stage_id = db.execute(
-            pg_insert(competition_stages)
-            .values(
-                competition_id=competition_id,
-                code="dongqiudi-schedule",
-                name="Dongqiudi Schedule Context",
-                stage_type="group",
-                sort_order=98,
-            )
-            .on_conflict_do_nothing(index_elements=["competition_id", "code"])
-            .returning(competition_stages.c.id)
-        ).scalar_one_or_none()
-    if stage_id is None:
-        stage_id = db.execute(
-            select(competition_stages.c.id).where(
-                competition_stages.c.competition_id == competition_id,
-                competition_stages.c.code == "dongqiudi-schedule",
-            )
-        ).scalar_one()
-    return competition_id, stage_id
+        .on_conflict_do_update(
+            index_elements=["competition_id", "code"],
+            set_={
+                "name": pg_insert(competition_stages).excluded.name,
+                "stage_type": pg_insert(competition_stages).excluded.stage_type,
+                "sort_order": pg_insert(competition_stages).excluded.sort_order,
+            },
+        )
+        .returning(competition_stages.c.id)
+    ).scalar_one()
+    stage_cache[code] = stage_id
+    return stage_id, metadata
 
 
 def team_code_from_name(name: str) -> str:
@@ -511,7 +546,8 @@ def historical_match_context_rows(db, home: dict, away: dict, item: dict, home_s
 
 
 def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
-    _, stage_id = ensure_competition(db)
+    competition_id = ensure_competition(db)
+    stage_cache: dict[str, object] = {}
     source_links = []
     rows_written = 0
     result_rows = []
@@ -525,11 +561,12 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
         status = match_status_from_dongqiudi(item.get("status"))
         home_score = int(item["score_A"]) if str(item.get("score_A", "")).isdigit() else None
         away_score = int(item["score_B"]) if str(item.get("score_B", "")).isdigit() else None
+        stage_id, stage_metadata = ensure_schedule_stage(db, competition_id, item, stage_cache)
         match_id = db.execute(
             pg_insert(matches)
             .values(
                 public_id=public_id,
-                competition_id=db.execute(select(competition_stages.c.competition_id).where(competition_stages.c.id == stage_id)).scalar_one(),
+                competition_id=competition_id,
                 stage_id=stage_id,
                 home_team_id=home["id"],
                 away_team_id=away["id"],
@@ -543,6 +580,7 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
             .on_conflict_do_update(
                 index_elements=["public_id"],
                 set_={
+                    "stage_id": pg_insert(matches).excluded.stage_id,
                     "home_team_id": pg_insert(matches).excluded.home_team_id,
                     "away_team_id": pg_insert(matches).excluded.away_team_id,
                     "kickoff_at": pg_insert(matches).excluded.kickoff_at,
@@ -570,6 +608,8 @@ def upsert_match_context(db, schedule: list[dict], snapshot_id) -> dict:
                     "source_home_team_id": item.get("team_A_id"),
                     "source_away_team_id": item.get("team_B_id"),
                     "status": item.get("status"),
+                    "stage_code": stage_metadata["code"],
+                    "source_round_name": stage_metadata["source_round_name"],
                 },
             }
         )

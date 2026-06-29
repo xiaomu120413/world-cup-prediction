@@ -1,4 +1,6 @@
 export default defineAppConfig({
+  darkmode: true,
+  themeLocation: 'theme.json',
   pages: [
     'pages/matches/index',
     'pages/match-detail/index',
@@ -7,10 +9,11 @@ export default defineAppConfig({
     'pages/team-detail/index'
   ],
   window: {
-    backgroundTextStyle: 'light',
-    navigationBarBackgroundColor: '#f7f8fa',
+    backgroundTextStyle: '@backgroundTextStyle',
+    backgroundColor: '@backgroundColor',
+    navigationBarBackgroundColor: '@navigationBarBackgroundColor',
     navigationBarTitleText: '小木绿茵手记',
-    navigationBarTextStyle: 'black'
+    navigationBarTextStyle: '@navigationBarTextStyle'
   },
   lazyCodeLoading: 'requiredComponents'
 })

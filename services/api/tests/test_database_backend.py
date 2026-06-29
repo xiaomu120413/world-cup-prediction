@@ -490,3 +490,78 @@ def test_database_collector_resolves_generated_team_to_roster_team():
         assert player_alias_count == 1
     finally:
         cleanup()
+
+
+def test_database_collector_preserves_existing_player_market_value_on_partial_update():
+    team_code = "TEST-MARKET-TEAM"
+    player_code = "DQD-PTEST-MARKET-1"
+
+    def cleanup():
+        with SessionLocal() as db:
+            db.execute(players.delete().where(players.c.code == player_code))
+            db.execute(teams.delete().where(teams.c.code == team_code))
+            db.commit()
+
+    cleanup()
+    try:
+        with SessionLocal() as db:
+            runner = CollectorRunner(db)
+            team_ids = runner.upsert_teams(
+                [
+                    {
+                        "code": team_code,
+                        "name_zh": "Market Test",
+                        "name_en": "Market Test",
+                        "quality_status": "source",
+                    }
+                ]
+            )
+            runner.upsert_players(
+                [
+                    {
+                        "team_code": team_code,
+                        "code": player_code,
+                        "name_zh": "Market Player",
+                        "name_en": "Market Player",
+                        "position": "FW",
+                        "shirt_number": 9,
+                        "club_name": "Market Club",
+                        "market_value_eur": 12_000_000,
+                        "is_key_player": True,
+                        "quality_status": "source",
+                    }
+                ],
+                team_ids,
+            )
+            runner.upsert_players(
+                [
+                    {
+                        "team_code": team_code,
+                        "code": player_code,
+                        "name_zh": "Market Player",
+                        "name_en": None,
+                        "position": None,
+                        "shirt_number": None,
+                        "club_name": None,
+                        "market_value_eur": None,
+                        "is_key_player": False,
+                        "quality_status": "source",
+                    }
+                ],
+                team_ids,
+            )
+            row = db.execute(
+                select(
+                    players.c.market_value_eur,
+                    players.c.position,
+                    players.c.shirt_number,
+                    players.c.club_name,
+                ).where(players.c.code == player_code)
+            ).mappings().one()
+
+        assert row.market_value_eur == 12_000_000
+        assert row.position == "FW"
+        assert row.shirt_number == 9
+        assert row.club_name == "Market Club"
+    finally:
+        cleanup()

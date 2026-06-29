@@ -12,6 +12,7 @@ from app.collectors.adapters import (
 from app.collectors.catalog import COLLECTOR_CATALOG, collection_catalog_summary
 from app.collectors.normalizers import canonical_records_from_snapshot, news_items_from_snapshot
 from app.collectors.runner import CollectorRunner, snapshot_checksum
+from app.repositories.public_data import APPROVED_REAL_SOURCES, SOURCE_TRUST_POLICY
 from scripts.collect_dongqiudi_team_details import (
     POSITION_MAP,
     parse_birth_date,
@@ -22,7 +23,12 @@ from scripts.collect_dongqiudi_team_details import (
     statistic_market_value,
     statistic_value,
 )
-from scripts.collect_dongqiudi_match_context import match_status_from_dongqiudi, parse_kickoff
+from scripts.collect_dongqiudi_match_context import (
+    match_status_from_dongqiudi,
+    parse_kickoff,
+    schedule_rows,
+    schedule_stage_metadata,
+)
 
 
 def schedule_snapshot() -> RawSnapshot:
@@ -105,6 +111,36 @@ def test_dongqiudi_match_status_maps_live_matches():
     assert match_status_from_dongqiudi("Playing") == "live"
     assert match_status_from_dongqiudi("Fixture") == "scheduled"
     assert match_status_from_dongqiudi(None) == "scheduled"
+
+
+def test_dongqiudi_schedule_round_of_32_rows_keep_knockout_stage_metadata():
+    rows = schedule_rows(
+        {
+            "content": {
+                "matches": [
+                    {
+                        "name": "1/16决赛",
+                        "data": [
+                            {
+                                "match_id": "54327932",
+                                "team_A_name": "南非",
+                                "team_B_name": "加拿大",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    )
+
+    assert rows[0]["_round_name"] == "1/16决赛"
+    assert schedule_stage_metadata(rows[0]) == {
+        "code": "round-of-32",
+        "name": "1/16决赛",
+        "stage_type": "knockout",
+        "sort_order": 20,
+        "source_round_name": "1/16决赛",
+    }
 
 
 def test_dongqiudi_member_player_fields_are_parsed():
@@ -231,6 +267,12 @@ def test_collection_catalog_tracks_required_data_domains():
     assert next(domain for domain in summary["domains"] if domain["domain"] == "standings")["status"] == "partial_real"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "player_form")["status"] == "partial_real"
     assert next(domain for domain in summary["domains"] if domain["domain"] == "market_value")["status"] == "partial_real"
+
+
+def test_public_news_sources_are_registered_as_real_sources():
+    for source in ("guardian", "bbc", "espn", "foxsports", "skysports", "sportsmole"):
+        assert SOURCE_TRUST_POLICY[source]["trust_level"] == "public_news"
+        assert source in APPROVED_REAL_SOURCES
 
 
 def test_dongqiudi_world_cup_standings_parser():

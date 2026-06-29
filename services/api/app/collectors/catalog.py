@@ -140,13 +140,13 @@ COLLECTOR_CATALOG = [
     },
     {
         "job_id": "public_news_rss",
-        "source": "guardian_bbc_espn_foxsports",
+        "source": "guardian_bbc_espn_foxsports_skysports_sportsmole",
         "source_type": "football_rss",
         "domains": ["news"],
         "target_tables": ["raw_snapshots", "data_source_links", "news_items"],
-        "status": "implemented_partial_real",
+        "status": "implemented_real_multi_source",
         "frequency": "daily_00_12_and_post_match",
-        "notes": "Public English football RSS feeds plus dynamic Dongqiudi roster team keywords. Matchday means at least one kickoff on the Asia/Shanghai local date; it raises news priority but does not trigger all-day high-frequency collection.",
+        "notes": "Public English football RSS feeds plus dynamic Dongqiudi roster team keywords. The collector tolerates individual feed outages as long as enough independent feeds return sourced items.",
     },
 ]
 
@@ -189,8 +189,8 @@ def collection_catalog_summary(table_counts: dict[str, int] | None = None) -> di
             },
             {
                 "domain": "news",
-                "status": "partial_real" if news > 0 else "missing_real_source",
-                "current_source": "dongqiudi/homepage_links + guardian/bbc/espn/foxsports rss" if news > 0 else None,
+                "status": "complete_real" if news >= 100 and ai_news_insights > 0 else ("partial_real" if news > 0 else "missing_real_source"),
+                "current_source": "dongqiudi/homepage_links + guardian/bbc/espn/foxsports/skysports/sportsmole rss" if news > 0 else None,
                 "target_tables": ["news_items", "ai_insights"],
             },
             {

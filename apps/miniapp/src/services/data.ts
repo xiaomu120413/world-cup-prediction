@@ -1180,7 +1180,7 @@ export async function getGroupData(groupId = 'group-a'): Promise<GroupData> {
         record: item.record,
         points: item.points,
         goals: item.goals,
-        qualification: qualificationByTeam.get(item.team.id) || qualificationByName.get(teamName) || 0
+        qualification: qualificationByTeam.get(item.team.id) ?? qualificationByName.get(teamName) ?? 0
       }
     }),
     updatedAt: formatUpdatedAt(detailResponse.meta?.updated_at),

@@ -131,6 +131,20 @@ def test_groups_query_exposes_only_world_cup_letter_groups():
     assert "'group-l'" in sql
 
 
+def test_live_group_simulation_queries_current_standings_and_latest_match_predictions():
+    stage_uuid = uuid4()
+    standings_sql = compile_query(PublicDataRepository.all_group_standings_for_simulation_query())
+    matches_sql = compile_query(PublicDataRepository.current_group_remaining_matches_query([stage_uuid]))
+
+    assert "group_standings" in standings_sql
+    assert "group_standings.played" in standings_sql
+    assert "competition_stages.code IN" in standings_sql
+    assert "'group-a'" in standings_sql
+    assert "LEFT OUTER JOIN" in matches_sql
+    assert "max(match_predictions.generated_at)" in matches_sql
+    assert "matches.status IN ('scheduled', 'live')" in matches_sql
+
+
 def test_prediction_summary_marks_draw_when_draw_is_highest():
     summary = PublicDataRepository.prediction_summary(
         {

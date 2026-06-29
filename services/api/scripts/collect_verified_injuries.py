@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import unicodedata
 from pathlib import Path
 
 from sqlalchemy import delete, select, text
@@ -55,6 +56,39 @@ VERIFIED_INJURY_ITEMS = [
         "evidence_text": "FIFA reported that Brazil planned to call up Ederson after Wesley withdrew from the squad.",
         "confidence": 0.9,
     },
+    {
+        "team": "Canada",
+        "player_name": "Ismaël Koné",
+        "report_type": "injury",
+        "status": "confirmed",
+        "impact_score": -0.8,
+        "source": "guardian",
+        "source_url": "https://www.theguardian.com/football/2026/jun/18/ismael-kone-injury-reaction-canada",
+        "evidence_text": "The Guardian reported that Canada midfielder Ismaël Koné suffered a broken leg during the World Cup match against Qatar.",
+        "confidence": 0.9,
+    },
+    {
+        "team": "Canada",
+        "player_name": "Stephen Eustáquio",
+        "report_type": "injury",
+        "status": "doubtful",
+        "impact_score": -0.35,
+        "source": "guardian",
+        "source_url": "https://www.theguardian.com/football/2026/jun/28/alphonso-davies-returns-canada-world-cup-moment-of-destiny",
+        "evidence_text": "The Guardian reported that Stephen Eustáquio missed Canada's match because of muscle fatigue.",
+        "confidence": 0.86,
+    },
+    {
+        "team": "South Africa",
+        "player_name": "Themba Zwane",
+        "report_type": "suspension",
+        "status": "suspended",
+        "impact_score": -0.7,
+        "source": "espn",
+        "source_url": "https://www.espn.com/espn/story/_/id/49097656/south-africa-themba-zwane-handed-three-match-ban-red-card-mexico-fifa-world-cup-opener",
+        "evidence_text": "ESPN reported that South Africa's Themba Zwane received a three-match ban after being sent off in the opener against Mexico.",
+        "confidence": 0.9,
+    },
 ]
 
 
@@ -67,12 +101,12 @@ def write_raw_snapshot(db, payload: dict):
     statement = (
         pg_insert(raw_snapshots)
         .values(
-            source="fifa",
+            source="verified_public_news",
             source_type="verified_injury_news",
-            source_url="https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026",
+            source_url="multiple-public-sources",
             checksum=checksum(payload),
             payload=payload,
-            parser_version="verified_injury_news_v1",
+            parser_version="verified_injury_news_v2",
         )
         .on_conflict_do_nothing(index_elements=["source", "source_type", "checksum"])
         .returning(raw_snapshots.c.id)
@@ -82,7 +116,7 @@ def write_raw_snapshot(db, payload: dict):
         return inserted
     return db.execute(
         select(raw_snapshots.c.id).where(
-            raw_snapshots.c.source == "fifa",
+            raw_snapshots.c.source == "verified_public_news",
             raw_snapshots.c.source_type == "verified_injury_news",
             raw_snapshots.c.checksum == checksum(payload),
         )
@@ -109,7 +143,8 @@ def find_team_id(db, team_name: str):
 
 
 def normalize_name(value: str | None) -> str:
-    return "".join(ch.lower() for ch in (value or "").strip() if ch.isalnum())
+    ascii_value = unicodedata.normalize("NFKD", (value or "").strip()).encode("ascii", "ignore").decode("ascii")
+    return "".join(ch.lower() for ch in ascii_value if ch.isalnum())
 
 
 def find_player_id(db, team_id, player_name: str):
@@ -175,7 +210,7 @@ def main() -> None:
                     source_url=item["source_url"],
                     confidence=item["confidence"],
                     evidence_text=item["evidence_text"],
-                    is_model_eligible=player_id is not None and item["confidence"] >= 0.85,
+                    is_model_eligible=item["confidence"] >= 0.85,
                 )
                 .returning(injury_reports.c.id)
             ).scalar_one()
@@ -184,7 +219,7 @@ def main() -> None:
                 {
                     "entity_type": "injury_report",
                     "entity_key": str(report_id),
-                    "source": "fifa",
+                    "source": item.get("source", "fifa"),
                     "source_type": "verified_injury_news",
                     "source_url": item["source_url"],
                     "raw_snapshot_id": snapshot_id,

@@ -5,7 +5,7 @@ import json
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, delete, insert, select, text
+from sqlalchemy import and_, delete, func, insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -790,11 +790,11 @@ class CollectorRunner:
                 set_={
                     "team_id": pg_insert(players).excluded.team_id,
                     "name_zh": pg_insert(players).excluded.name_zh,
-                    "name_en": pg_insert(players).excluded.name_en,
-                    "position": pg_insert(players).excluded.position,
-                    "shirt_number": pg_insert(players).excluded.shirt_number,
-                    "club_name": pg_insert(players).excluded.club_name,
-                    "market_value_eur": pg_insert(players).excluded.market_value_eur,
+                    "name_en": func.coalesce(pg_insert(players).excluded.name_en, players.c.name_en),
+                    "position": func.coalesce(pg_insert(players).excluded.position, players.c.position),
+                    "shirt_number": func.coalesce(pg_insert(players).excluded.shirt_number, players.c.shirt_number),
+                    "club_name": func.coalesce(pg_insert(players).excluded.club_name, players.c.club_name),
+                    "market_value_eur": func.coalesce(pg_insert(players).excluded.market_value_eur, players.c.market_value_eur),
                     "is_key_player": pg_insert(players).excluded.is_key_player,
                     "quality_status": pg_insert(players).excluded.quality_status,
                     "updated_at": text("now()"),
