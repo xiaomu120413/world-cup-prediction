@@ -34,6 +34,7 @@ Data operations quick reference:
 | [TECHNICAL_EXECUTION_PLAN.md](./TECHNICAL_EXECUTION_PLAN.md) | 可正式执行的技术方案，包含服务器、域名、部署、模块拆解、接口、任务、模型、AI 和上线里程碑 |
 | [EXECUTION_CHECKLIST.md](./EXECUTION_CHECKLIST.md) | 执行清单，包含阶段任务、交付物、验收标准、测试点、上线检查和 Done 定义 |
 | [TEST_REPORT.md](./TEST_REPORT.md) | 测试报告，记录自动化测试、HTTP smoke、浏览器 smoke、已知问题和下一轮重点 |
+| [archive/](./archive/) | 历史方案归档，保留早期评审版和已被后续文档替代的资料 |
 
 ## MVP 范围
 
@@ -54,32 +55,32 @@ MVP 包含：
 - 小组积分榜
 - 小组出线概率
 
-## 数据策略
+## 当前数据策略
 
-原型阶段：
+当前实现遵循“先采集入库，再由 API 和模型读取”的原则。小程序端不直接访问外部数据源，也不在页面查询时触发采集。
 
-- 懂球帝作为中文数据补充源
-- FIFA 官方信息用于人工校验
-- 历史公开数据用于模型训练
+已接入的数据包括：
 
-正式上线：
+- 懂球帝世界杯赛程、积分榜、球队页、球员名单、球员排名、球队统计、比赛场馆和赛前上下文。
+- FIFA 男足排名，用于国家队排名字段校验和补齐。
+- Open-Meteo 场馆天气数据。
+- Sky Sports、Sports Mole 等公开新闻源，经规则抽取生成 AI 情报信号。
+- 历史男子国家队比赛结果，用于 Elo、近期状态、胜平负模型和比分模型训练。
 
-- Sportmonks / API-Football 作为授权主数据源
-- 懂球帝仅作为补充和交叉校验
-- 新闻和官方公告通过 AI 转成结构化情报
+标准化数据必须带 `data_source_links` 溯源记录。缺失数据应展示为空态、低置信度或待更新状态，不写入模拟数据。
 
-## 模型策略
+## 当前模型策略
 
-不训练大语言模型。预测使用结构化小模型：
+不训练大语言模型。预测使用结构化小模型和可回测规则：
 
-- P0 胜平负概率：`history_core` + `context_calibrator` 两层 Logistic，小模型可回测、可解释、可兜底
-- P1 胜平负概率：补齐历史赛前快照后评估 LightGBM / CatBoost
-- 进球期望：Poisson / Dixon-Coles / LightGBM Regressor
-- 赛事模拟：Monte Carlo Simulation
+- 胜平负概率：`small_outcome` LightGBM GBDT 多分类模型，结合历史国家队比赛、Elo、近期状态、赛前上下文和球队/球员结构化特征。
+- 比分分布：`scoreline` Poisson 进球模型，输出期望进球、比分概率和 Top 比分。
+- 冠军/四强/黑马榜：基于淘汰赛路径、单场晋级概率、球队身价/状态特征和 Monte Carlo 模拟生成。
+- 小组出线概率：按 2026 世界杯 48 队、12 组、小组前二和 8 个最佳第三名规则计算。
 
-推理结果必须标记 `inference_mode`。两队上下文完整时使用 `context_calibrated`；上下文缺失时回退 `history_core_fallback`，不能把缺失数据当成真实特征。
+推理结果必须标记 `model_version`、`inference_mode`、`feature_snapshot` 和关键证据。缺失关键特征时不能把缺失值当真实特征处理。
 
-LLM 负责：
+LLM 或 AI 文本层负责：
 
 - 新闻抽取
 - 伤停识别
