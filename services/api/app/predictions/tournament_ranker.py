@@ -355,12 +355,20 @@ def simulate_tournament_paths(
     seed: int = 20260624,
     params: TournamentRankingParams = DEFAULT_TOURNAMENT_RANKING_PARAMS,
     pair_probability: Callable[[Any, Any], float] | None = None,
+    fixed_match_winners: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rng = Random(seed)
+    fixed_match_winners = fixed_match_winners or {}
     champion_counts = {team_id: 0 for team_id in teams_by_id}
     semifinal_counts = {team_id: 0 for team_id in teams_by_id}
     round32_counts = {team_id: 0 for team_id in teams_by_id}
     completed_iterations = 0
+
+    def match_winner(match_code: str, team_a_id: Any, team_b_id: Any) -> Any:
+        fixed_winner = fixed_match_winners.get(match_code)
+        if fixed_winner in {team_a_id, team_b_id}:
+            return fixed_winner
+        return simulate_match(team_a_id, team_b_id, teams_by_id, rng, params, pair_probability)
 
     for _index in range(iterations):
         positions: dict[str, Any] = {}
@@ -400,20 +408,20 @@ def simulate_tournament_paths(
 
         winners: dict[str, Any] = {}
         for match_code, (team_a_id, team_b_id) in round32_pairings.items():
-            winners[match_code] = simulate_match(team_a_id, team_b_id, teams_by_id, rng, params, pair_probability)
+            winners[match_code] = match_winner(match_code, team_a_id, team_b_id)
         for match_code, previous_a, previous_b in ROUND_OF_16_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
+            winners[match_code] = match_winner(match_code, winners[previous_a], winners[previous_b])
         for match_code, previous_a, previous_b in QUARTER_FINAL_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
+            winners[match_code] = match_winner(match_code, winners[previous_a], winners[previous_b])
 
         semifinalists = [winners[match_code] for match_code, _a, _b in QUARTER_FINAL_MATCHES]
         for team_id in semifinalists:
             semifinal_counts[team_id] = semifinal_counts.get(team_id, 0) + 1
 
         for match_code, previous_a, previous_b in SEMI_FINAL_MATCHES:
-            winners[match_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
+            winners[match_code] = match_winner(match_code, winners[previous_a], winners[previous_b])
         final_code, previous_a, previous_b = FINAL_MATCH
-        winners[final_code] = simulate_match(winners[previous_a], winners[previous_b], teams_by_id, rng, params, pair_probability)
+        winners[final_code] = match_winner(final_code, winners[previous_a], winners[previous_b])
         champion_counts[winners[final_code]] = champion_counts.get(winners[final_code], 0) + 1
         completed_iterations += 1
 

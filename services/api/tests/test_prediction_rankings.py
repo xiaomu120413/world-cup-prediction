@@ -145,6 +145,43 @@ def test_knockout_monte_carlo_outputs_path_probabilities():
     assert callback_calls
 
 
+def test_knockout_monte_carlo_honors_finished_match_winner():
+    group_state_distributions = {}
+    teams_by_id = {}
+    for group_index, group_code in enumerate("ABCDEFGHIJKL"):
+        ranked = []
+        for rank in range(1, 5):
+            team_id = f"{group_code}{rank}"
+            teams_by_id[team_id] = SimpleNamespace(
+                team_id=team_id,
+                code=team_id,
+                fifa_rank=group_index * 4 + rank,
+                elo_rating=2100 - group_index * 8 - rank * 3,
+            )
+            ranked.append(
+                {
+                    "team_id": team_id,
+                    "seed_rank": rank,
+                    "points": 10 - rank,
+                    "goal_diff": 5 - rank,
+                    "goals_for": 7 - rank,
+                }
+            )
+        group_state_distributions[group_code] = [(1.0, ranked)]
+
+    result = simulate_tournament_paths(
+        group_state_distributions,
+        teams_by_id,
+        iterations=300,
+        seed=17,
+        fixed_match_winners={"M73": "A2"},
+    )
+
+    assert result["iterations"] == 300
+    assert result["champion_probabilities"]["B2"] == 0.0
+    assert result["champion_probabilities"]["A2"] > 0.0
+
+
 def test_knockout_probability_uses_market_value_and_current_tournament_form():
     strong_context = SimpleNamespace(
         team_id="strong-context",
@@ -254,6 +291,22 @@ def test_current_world_cup_results_are_folded_into_prediction_team_state():
 def test_ranking_probability_delta_uses_previous_snapshot_value():
     assert BaselinePredictionService.ranking_probability_delta(0.12345, 0.1) == 0.02345
     assert BaselinePredictionService.ranking_probability_delta(0.08, None) == 0.0
+
+
+def test_eliminated_team_constraints_zero_champion_probability_and_renormalize():
+    scored = [
+        {"team_id": "winner-a", "champion_prob": 0.4, "semifinal_prob": 0.8, "round32_prob": 1.0},
+        {"team_id": "eliminated", "champion_prob": 0.3, "semifinal_prob": 0.6, "round32_prob": 1.0},
+        {"team_id": "winner-b", "champion_prob": 0.3, "semifinal_prob": 0.5, "round32_prob": 1.0},
+    ]
+
+    constrained = BaselinePredictionService.apply_eliminated_team_constraints(scored, {"eliminated"})
+
+    eliminated = next(item for item in constrained if item["team_id"] == "eliminated")
+    assert eliminated["champion_prob"] == 0.0
+    assert eliminated["semifinal_prob"] == 0.0
+    assert sum(item["champion_prob"] for item in constrained) == pytest.approx(1.0)
+    assert constrained[0]["champion_prob"] == pytest.approx(4 / 7)
 
 
 def test_group_simulation_uses_remaining_match_probabilities():

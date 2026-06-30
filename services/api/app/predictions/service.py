@@ -108,6 +108,14 @@ WORLD_CUP_THIRD_PLACE_QUALIFIERS = 8
 GOAL_ENVIRONMENT_BASELINE_TOTAL = 2.75
 GOAL_ENVIRONMENT_MIN_MATCHES = 4
 GOAL_ENVIRONMENT_FULL_WEIGHT_MATCHES = 24
+KNOCKOUT_STAGE_MATCH_CODES = {
+    "round-of-32": tuple(f"M{index}" for index in range(73, 89)),
+    "round-of-16": tuple(f"M{index}" for index in range(89, 97)),
+    "quarterfinals": tuple(f"M{index}" for index in range(97, 101)),
+    "semifinals": ("M101", "M102"),
+    "final": ("M103",),
+}
+KNOCKOUT_RESULT_STAGE_CODES = tuple(KNOCKOUT_STAGE_MATCH_CODES)
 
 
 def clamp_value(value: float, lower: float, upper: float) -> float:
@@ -1357,6 +1365,62 @@ class BaselinePredictionService:
         normalized = [value / total for value in clipped]
         return normalized[0] + normalized[1] / 2.0
 
+    def finished_knockout_result_constraints(self) -> tuple[dict[str, Any], set[Any]]:
+        rows = self.db.execute(
+            select(
+                competition_stages.c.code.label("stage_code"),
+                matches.c.kickoff_at,
+                matches.c.public_id,
+                matches.c.home_team_id,
+                matches.c.away_team_id,
+                matches.c.home_score,
+                matches.c.away_score,
+            )
+            .join(competition_stages, matches.c.stage_id == competition_stages.c.id)
+            .where(
+                competition_stages.c.code.in_(KNOCKOUT_RESULT_STAGE_CODES),
+                matches.c.status == "finished",
+                matches.c.home_score.is_not(None),
+                matches.c.away_score.is_not(None),
+            )
+            .order_by(competition_stages.c.sort_order.asc(), matches.c.kickoff_at.asc(), matches.c.public_id.asc())
+        ).mappings().all()
+        rows_by_stage: dict[str, list[Any]] = {}
+        for row in rows:
+            rows_by_stage.setdefault(str(row.stage_code), []).append(row)
+
+        fixed_winners: dict[str, Any] = {}
+        eliminated_team_ids: set[Any] = set()
+        for stage_code, match_codes in KNOCKOUT_STAGE_MATCH_CODES.items():
+            for index, row in enumerate(rows_by_stage.get(stage_code, [])):
+                if index >= len(match_codes):
+                    break
+                home_score = int(row.home_score)
+                away_score = int(row.away_score)
+                if home_score == away_score:
+                    continue
+                winner_id = row.home_team_id if home_score > away_score else row.away_team_id
+                loser_id = row.away_team_id if home_score > away_score else row.home_team_id
+                fixed_winners[match_codes[index]] = winner_id
+                eliminated_team_ids.add(loser_id)
+        return fixed_winners, eliminated_team_ids
+
+    @staticmethod
+    def apply_eliminated_team_constraints(scored: list[dict[str, Any]], eliminated_team_ids: set[Any]) -> list[dict[str, Any]]:
+        if not eliminated_team_ids:
+            return scored
+        for item in scored:
+            if item["team_id"] in eliminated_team_ids:
+                item["champion_prob"] = 0.0
+                item["semifinal_prob"] = 0.0
+                item["round32_prob"] = 1.0
+
+        champion_total = sum(float(item.get("champion_prob") or 0.0) for item in scored)
+        if champion_total > 0:
+            for item in scored:
+                item["champion_prob"] = float(item.get("champion_prob") or 0.0) / champion_total
+        return scored
+
     def write_rankings(self, snapshot_id, runtime: SmallOutcomeRuntime | None = None) -> int:
         team_rows = self.load_tournament_team_rows()
         if not team_rows:
@@ -1365,11 +1429,14 @@ class BaselinePredictionService:
         group_state_distributions = self.build_group_state_distributions(snapshot_id)
         seed = self.prediction_snapshot_seed(snapshot_id)
         pair_probability = self.knockout_pair_probability_factory(runtime, snapshot_id)
+        fixed_match_winners, eliminated_team_ids = self.finished_knockout_result_constraints()
         ranking_reason = (
             "knockout_path_lightgbm_neutral_monte_carlo"
             if pair_probability is not None
             else "knockout_path_baseline_monte_carlo"
         )
+        if fixed_match_winners or eliminated_team_ids:
+            ranking_reason = f"{ranking_reason}_finished_results"
         simulation = simulate_tournament_paths(
             group_state_distributions,
             {row.team_id: row for row in team_rows},
@@ -1377,6 +1444,7 @@ class BaselinePredictionService:
             seed=seed,
             params=DEFAULT_TOURNAMENT_RANKING_PARAMS,
             pair_probability=pair_probability,
+            fixed_match_winners=fixed_match_winners,
         )
         if simulation["iterations"] <= 0:
             return 0
@@ -1393,6 +1461,7 @@ class BaselinePredictionService:
             }
             for row in team_rows
         ]
+        self.apply_eliminated_team_constraints(scored, eliminated_team_ids)
         ranked = sorted(scored, key=lambda item: item["champion_prob"], reverse=True)
         semifinal_ranked = sorted(scored, key=lambda item: item["semifinal_prob"], reverse=True)
         previous_champion = self.previous_ranking_probabilities("champion")
@@ -1426,7 +1495,8 @@ class BaselinePredictionService:
                 }
             )
 
-        darkhorse_ranked = assign_darkhorse_probabilities(scored, DEFAULT_TOURNAMENT_RANKING_PARAMS)
+        darkhorse_candidates = [item for item in scored if item["team_id"] not in eliminated_team_ids] or scored
+        darkhorse_ranked = assign_darkhorse_probabilities(darkhorse_candidates, DEFAULT_TOURNAMENT_RANKING_PARAMS)
         for index, item in enumerate(darkhorse_ranked[:10], start=1):
             probability = round(item["darkhorse_prob"], 5)
             rows.append(
